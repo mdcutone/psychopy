@@ -1110,22 +1110,42 @@ def setSceneAmbientLight(color):
 # -------------------------
 # 3D Model Helper Functions
 # -------------------------
+#
+# These functions are used in the creation, manipulation and rendering of 3D
+# model data.
+#
 
-WavefrontOBJ = namedtuple(
-    'WavefrontOBJ',
+# Header
+WavefrontObjHeader = namedtuple(
+    'WavefrontObjHeader',
+    ['mtlFile',
+     'materialGroups',
+     'userData']
+)
+
+WavefrontObjGroup = namedtuple(
+    'WavefrontObjGroup',
     ['indices',
      'vertices',
      'texCoords',
      'normals',
-     'materialGroups']
+     'material',
+     'userData']
 )
 
 
-def loadObjFile(file):
+def loadObjFile(objFile):
+    """Load a Wavefront OBJ file (*.obj)."""
+
     pass
 
 
-def loadMtlLib(file):
+def loadMtl(mtlFile):
+    """Load a material library (*.mtl)."""
+    pass
+
+
+def deleteObjModel(objModelDesc):
     pass
 
 
