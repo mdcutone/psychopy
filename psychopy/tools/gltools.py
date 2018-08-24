@@ -1107,6 +1107,28 @@ def setSceneAmbientLight(color):
     GL.glLightModelfv(GL.GL_LIGHT_MODEL_AMBIENT, (GL.GLfloat * 4)(*color))
 
 
+# -------------------------
+# 3D Model Helper Functions
+# -------------------------
+
+WavefrontOBJ = namedtuple(
+    'WavefrontOBJ',
+    ['indices',
+     'vertices',
+     'texCoords',
+     'normals',
+     'materialGroups']
+)
+
+
+def loadObjFile(file):
+    pass
+
+
+def loadMtlLib(file):
+    pass
+
+
 # -----------------------------
 # Misc. OpenGL Helper Functions
 # -----------------------------
