@@ -971,13 +971,6 @@ defaultMaterial = createMaterial(
      (GL.GL_EMISSION, (0.0, 0.0, 0.0, 1.0)),
      (GL.GL_SHININESS, 0)])
 
-# black_rubber,0.02,0.02,0.02,0.01,0.01,0.01,0.4,0.4,0.4,0.078125
-# cyan_rubber,0,0.05,0.05,0.4,0.5,0.5,0.04,0.7,0.7,0.078125
-# green_rubber,0,0.05,0,0.4,0.5,0.4,0.04,0.7,0.04,0.078125
-# red_rubber,0.05,0,0,0.5,0.4,0.4,0.7,0.04,0.04,0.078125
-# white_rubber,0.05,0.05,0.05,0.5,0.5,0.5,0.7,0.7,0.7,0.078125
-# yellow_rubber,0.05,0.05,0,0.5,0.5,0.4,0.7,0.7,0.04,0.078125
-
 
 def useMaterial(material):
     """Use a material for proceeding vertex draws.
@@ -1040,8 +1033,7 @@ def createLight(params=()):
         GL.GL_SPOT_EXPONENT,
         GL.GL_CONSTANT_ATTENUATION,
         GL.GL_LINEAR_ATTENUATION,
-        GL.GL_QUADRATIC_ATTENUATION)},
-                      dict())
+        GL.GL_QUADRATIC_ATTENUATION)}, dict())
 
     # configure lights
     if params:
@@ -1466,9 +1458,11 @@ def getOpenGLInfo():
 # OpenGL/VRML Materials
 # ---------------------
 #
-# A collection of basic materials for use when rendering stimuli. Keep in mind
-# that these materials only approximate real-world equivalents. Values were
-# obtained from http://devernay.free.fr/cours/opengl/materials.html (08/24/18).
+# A collection of pre-defined materials for stimuli. Keep in mind that these
+# materials only approximate real-world equivalents. Values were obtained from
+# http://devernay.free.fr/cours/opengl/materials.html (08/24/18). There are four
+# material libraries to use, where individual material descriptors are accessed
+# via property names.
 #
 # Usage:
 #
@@ -1579,6 +1573,41 @@ plasticMaterials = namedtuple(
          (GL.GL_DIFFUSE, (0.5, 0.5, 0, 1.0)),
          (GL.GL_SPECULAR, (0.6, 0.6, 0.5, 1.0)),
          (GL.GL_SHININESS, 0.25 * 128.0)])
+)
+
+rubberMaterials = namedtuple(
+    'rubberMaterials',
+    ['black', 'cyan', 'green', 'red', 'white', 'yellow'])(
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.02, 0.02, 0.02, 1.0)),
+         (GL.GL_DIFFUSE, (0.01, 0.01, 0.01, 1.0)),
+         (GL.GL_SPECULAR, (0.4, 0.4, 0.4, 1.0)),
+         (GL.GL_SHININESS, 0.078125 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0, 0.05, 0.05, 1.0)),
+         (GL.GL_DIFFUSE, (0.4, 0.5, 0.5, 1.0)),
+         (GL.GL_SPECULAR, (0.04, 0.7, 0.7, 1.0)),
+         (GL.GL_SHININESS, 0.078125 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0, 0.05, 0, 1.0)),
+         (GL.GL_DIFFUSE, (0.4, 0.5, 0.4, 1.0)),
+         (GL.GL_SPECULAR, (0.04, 0.7, 0.04, 1.0)),
+         (GL.GL_SHININESS, 0.078125 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.05, 0, 0, 1.0)),
+         (GL.GL_DIFFUSE, (0.5, 0.4, 0.4, 1.0)),
+         (GL.GL_SPECULAR, (0.7, 0.04, 0.04, 1.0)),
+         (GL.GL_SHININESS, 0.078125 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.05, 0.05, 0.05, 1.0)),
+         (GL.GL_DIFFUSE, (0.5, 0.5, 0.5, 1.0)),
+         (GL.GL_SPECULAR, (0.7, 0.7, 0.7, 1.0)),
+         (GL.GL_SHININESS, 0.078125 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.05, 0.05, 0, 1.0)),
+         (GL.GL_DIFFUSE, (0.5, 0.5, 0.4, 1.0)),
+         (GL.GL_SPECULAR, (0.7, 0.7, 0.04, 1.0)),
+         (GL.GL_SHININESS, 0.078125 * 128.0)])
 )
 
 if __name__ == "__main__":
