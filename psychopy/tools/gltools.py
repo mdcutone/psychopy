@@ -9,7 +9,10 @@
 # Distributed under the terms of the GNU General Public License (GPL).
 
 import ctypes
+import array
+from io import StringIO
 from collections import namedtuple
+import psychopy.visual
 import pyglet.gl as GL  # using Pyglet for now
 from contextlib import contextmanager
 
@@ -703,8 +706,15 @@ def createVBO(vertexData, vertexSize=3, bufferType=GL.GL_VERTEX_ARRAY):
 
     """
     # convert values to ctypes float array
-    count = len(vertexData)
-    c_array = (GL.GLfloat * count)(*vertexData)
+    if isinstance(vertexData, ctypes.Array):
+        count = len(vertexData)
+        c_array = vertexData
+    elif isinstance(vertexData, array.array):
+        addr, count = vertexData.buffer_info()
+        c_array = ctypes.cast(addr, ctypes.POINTER((GL.GLfloat * count)))[0]
+    else:
+        count = len(vertexData)
+        c_array = (GL.GLfloat * count)(*vertexData)
 
     # create a vertex buffer ID
     vboId = GL.GLuint()
@@ -914,7 +924,7 @@ def createMaterial(params=(), face=GL.GL_FRONT_AND_BACK):
     gold = createMaterial([
         (GL.GL_AMBIENT, (0.24725, 0.19950, 0.07450, 1.0)),
         (GL.GL_DIFFUSE, (0.75164, 0.60648, 0.22648, 1.0)),
-        (GL.GL_SPECULAR, (0.628281, 0.555802, 0.366065, 1.0))
+        (GL.GL_SPECULAR, (0.628281, 0.555802, 0.366065, 1.0)),
         (GL.GL_SHININESS, 0.4 * 128.0)])
 
     # use the material when drawing
@@ -943,8 +953,7 @@ def createMaterial(params=(), face=GL.GL_FRONT_AND_BACK):
         GL.GL_DIFFUSE,
         GL.GL_SPECULAR,
         GL.GL_EMISSION,
-        GL.GL_SHININESS,
-        GL.GL_AMBIENT_AND_DIFFUSE)}, dict())
+        GL.GL_SHININESS)}, dict())
     if params:
         for mode, param in params:
             matDesc.params[mode] = \
@@ -954,14 +963,149 @@ def createMaterial(params=(), face=GL.GL_FRONT_AND_BACK):
     return matDesc
 
 
+# default material according to the OpenGL spec.
+defaultMaterial = createMaterial(
+    [(GL.GL_AMBIENT, (0.2, 0.2, 0.2, 1.0)),
+     (GL.GL_DIFFUSE, (0.8, 0.8, 0.8, 1.0)),
+     (GL.GL_SPECULAR, (0.0, 0.0, 0.0, 1.0)),
+     (GL.GL_EMISSION, (0.0, 0.0, 0.0, 1.0)),
+     (GL.GL_SHININESS, 0)])
+
+# ---------------------
+# OpenGL/VRML Materials
+# ---------------------
+# A collection of basic materials for use when rendering stimuli. Keep in mind
+# that these materials only approximate real-world equivalents. Values were
+# obtained from http://devernay.free.fr/cours/opengl/materials.html (08/24/18).
+#
+# Usage:
+#
+#   useMaterial(metalMaterials.gold)
+#   drawVAO(myObject)
+#   ...
+#
+mineralMaterials = namedtuple(
+    'mineralMaterials',
+    ['emerald', 'jade', 'obsidian', 'pearl', 'ruby', 'turquoise'])(
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.0215, 0.1745, 0.0215, 1.0)),
+         (GL.GL_DIFFUSE, (0.07568, 0.61424, 0.07568, 1.0)),
+         (GL.GL_SPECULAR, (0.633, 0.727811, 0.633, 1.0)),
+         (GL.GL_SHININESS, 0.6 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.135, 0.2225, 0.1575, 1.0)),
+         (GL.GL_DIFFUSE, (0.54, 0.89, 0.63, 1.0)),
+         (GL.GL_SPECULAR, (0.316228, 0.316228, 0.316228, 1.0)),
+         (GL.GL_SHININESS, 0.1 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.05375, 0.05, 0.06625, 1.0)),
+         (GL.GL_DIFFUSE, (0.18275, 0.17, 0.22525, 1.0)),
+         (GL.GL_SPECULAR, (0.332741, 0.328634, 0.346435, 1.0)),
+         (GL.GL_SHININESS, 0.3 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.25, 0.20725, 0.20725, 1.0)),
+         (GL.GL_DIFFUSE, (1, 0.829, 0.829, 1.0)),
+         (GL.GL_SPECULAR, (0.296648, 0.296648, 0.296648, 1.0)),
+         (GL.GL_SHININESS, 0.088 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.1745, 0.01175, 0.01175, 1.0)),
+         (GL.GL_DIFFUSE, (0.61424, 0.04136, 0.04136, 1.0)),
+         (GL.GL_SPECULAR, (0.727811, 0.626959, 0.626959, 1.0)),
+         (GL.GL_SHININESS, 0.6 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.1, 0.18725, 0.1745, 1.0)),
+         (GL.GL_DIFFUSE, (0.396, 0.74151, 0.69102, 1.0)),
+         (GL.GL_SPECULAR, (0.297254, 0.30829, 0.306678, 1.0)),
+         (GL.GL_SHININESS, 0.1 * 128.0)])
+)
+
+metalMaterials = namedtuple(
+    'metalMaterials',
+    ['brass', 'bronze', 'chrome', 'copper', 'gold', 'silver'])(
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.329412, 0.223529, 0.027451, 1.0)),
+         (GL.GL_DIFFUSE, (0.780392, 0.568627, 0.113725, 1.0)),
+         (GL.GL_SPECULAR, (0.992157, 0.941176, 0.807843, 1.0)),
+         (GL.GL_SHININESS, 0.21794872 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.2125, 0.1275, 0.054, 1.0)),
+         (GL.GL_DIFFUSE, (0.714, 0.4284, 0.18144, 1.0)),
+         (GL.GL_SPECULAR, (0.393548, 0.271906, 0.166721, 1.0)),
+         (GL.GL_SHININESS, 0.2 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.25, 0.25, 0.25, 1.0)),
+         (GL.GL_DIFFUSE, (0.4, 0.4, 0.4, 1.0)),
+         (GL.GL_SPECULAR, (0.774597, 0.774597, 0.774597, 1.0)),
+         (GL.GL_SHININESS, 0.6 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.19125, 0.0735, 0.0225, 1.0)),
+         (GL.GL_DIFFUSE, (0.7038, 0.27048, 0.0828, 1.0)),
+         (GL.GL_SPECULAR, (0.256777, 0.137622, 0.086014, 1.0)),
+         (GL.GL_SHININESS, 0.1 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.24725, 0.1995, 0.0745, 1.0)),
+         (GL.GL_DIFFUSE, (0.75164, 0.60648, 0.22648, 1.0)),
+         (GL.GL_SPECULAR, (0.628281, 0.555802, 0.366065, 1.0)),
+         (GL.GL_SHININESS, 0.4 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0.19225, 0.19225, 0.19225, 1.0)),
+         (GL.GL_DIFFUSE, (0.50754, 0.50754, 0.50754, 1.0)),
+         (GL.GL_SPECULAR, (0.508273, 0.508273, 0.508273, 1.0)),
+         (GL.GL_SHININESS, 0.4 * 128.0)])
+)
+
+plasticMaterials = namedtuple(
+    'plasticMaterials',
+    ['black', 'cyan', 'green', 'red', 'white', 'yellow'])(
+    createMaterial(
+        [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
+         (GL.GL_DIFFUSE, (0.01, 0.01, 0.01, 1.0)),
+         (GL.GL_SPECULAR, (0.5, 0.5, 0.5, 1.0)),
+         (GL.GL_SHININESS, 0.25 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0, 0.1, 0.06, 1.0)),
+         (GL.GL_DIFFUSE, (0.06, 0, 0.50980392, 1.0)),
+         (GL.GL_SPECULAR, (0.50196078, 0.50196078, 0.50196078, 1.0)),
+         (GL.GL_SHININESS, 0.25 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
+         (GL.GL_DIFFUSE, (0.1, 0.35, 0.1, 1.0)),
+         (GL.GL_SPECULAR, (0.45, 0.55, 0.45, 1.0)),
+         (GL.GL_SHININESS, 0.25 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
+         (GL.GL_DIFFUSE, (0.5, 0, 0, 1.0)),
+         (GL.GL_SPECULAR, (0.7, 0.6, 0.6, 1.0)),
+         (GL.GL_SHININESS, 0.25 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
+         (GL.GL_DIFFUSE, (0.55, 0.55, 0.55, 1.0)),
+         (GL.GL_SPECULAR, (0.7, 0.7, 0.7, 1.0)),
+         (GL.GL_SHININESS, 0.25 * 128.0)]),
+    createMaterial(
+        [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
+         (GL.GL_DIFFUSE, (0.5, 0.5, 0, 1.0)),
+         (GL.GL_SPECULAR, (0.6, 0.6, 0.5, 1.0)),
+         (GL.GL_SHININESS, 0.25 * 128.0)])
+)
+
+
+# black_rubber,0.02,0.02,0.02,0.01,0.01,0.01,0.4,0.4,0.4,0.078125
+# cyan_rubber,0,0.05,0.05,0.4,0.5,0.5,0.04,0.7,0.7,0.078125
+# green_rubber,0,0.05,0,0.4,0.5,0.4,0.04,0.7,0.04,0.078125
+# red_rubber,0.05,0,0,0.5,0.4,0.4,0.7,0.04,0.04,0.078125
+# white_rubber,0.05,0.05,0.05,0.5,0.5,0.5,0.7,0.7,0.7,0.078125
+# yellow_rubber,0.05,0.05,0,0.5,0.5,0.4,0.7,0.7,0.04,0.078125
+
+
 def useMaterial(material):
     """Use a material for proceeding vertex draws.
 
     Parameters
     ----------
     material : :obj:`Material` or None
-        Material descriptor to use. Materials will be disabled if None is
-        specified.
+        Material descriptor to use. Default material properties are set if None
+        is specified.
 
     Returns
     -------
@@ -984,19 +1128,13 @@ def useMaterial(material):
     useMaterial(None)  # turn off material when done
 
     """
-    nullColor = (GL.GLfloat * 4)(0.0, 0.0, 0.0, 0.0)
-
-    if material:
-        GL.glEnable(GL.GL_COLOR_MATERIAL)
+    if material is not None:
         for mode, param in material.params.items():
             if param is not None:
                 GL.glMaterialfv(material.face, mode, param)
-            else:
-                GL.glMaterialfv(
-                    material.face, mode,
-                    nullColor if mode != GL.GL_SHININESS else GL.GLfloat(0))
     else:
-        GL.glDisable(GL.GL_COLOR_MATERIAL)
+        for mode, param in defaultMaterial.params.items():
+            GL.glMaterialfv(GL.GL_FRONT_AND_BACK, mode, param)
 
 
 # -------------------------
@@ -1116,27 +1254,214 @@ def setSceneAmbientLight(color):
 #
 
 # Header
-WavefrontObjHeader = namedtuple(
+WavefrontObj = namedtuple(
     'WavefrontObjHeader',
-    ['mtlFile',
-     'materialGroups',
+    ['mtllib',
+     'drawGroups',
      'userData']
 )
 
 WavefrontObjGroup = namedtuple(
     'WavefrontObjGroup',
     ['indices',
-     'vertices',
-     'texCoords',
-     'normals',
+     'vao',
      'material',
      'userData']
 )
 
 
-def loadObjFile(objFile):
-    """Load a Wavefront OBJ file (*.obj)."""
+def loadObjFile(objFilePath):
+    """Load a Wavefront OBJ file (*.obj).
 
+    Parameters
+    ----------
+    objFilePath : :obj:`str`
+        Path to the *.OBJ file to load.
+
+    Returns
+    -------
+    WavefrontObjModel
+
+    Notes
+    -----
+    1. This importer should work fine for most sanely generated files.
+       Export your model with Blender for best results, even if you used some
+       other package to create it.
+    2. The model must be triangulated, quad faces are not supported.
+    3. Scale your model appropriately so the units are in meters for the asset
+       to appear correctly in the scene. The origin of the model specified in
+       the editor will be the origin of the loaded asset.
+    4. Stored data is completely static, any transformations must be done within
+       your shader or by applying transformations to the matrix stack.
+
+    """
+    # open the file, read it into memory
+    with open(objFilePath, 'r') as objFile:
+        objBuffer = StringIO(objFile.read())
+
+    nVertices = nTextureCoords = nNormals = nFaces = nObjects = nMaterials = 0
+    matLibPath = None
+
+    # first pass, examine the file
+    for line in objBuffer.readlines():
+        if line.startswith('v '):
+            nVertices += 1
+        elif line.startswith('vt '):
+            nTextureCoords += 1
+        elif line.startswith('vn '):
+            nNormals += 1
+        elif line.startswith('f '):
+            nFaces += 1
+        elif line.startswith('o '):
+            nObjects += 1
+        elif line.startswith('usemtl '):
+            nMaterials += 1
+        elif line.startswith('mtllib '):
+            matLibPath = line.strip()[7:]
+
+    objBuffer.seek(0)
+
+    # error check
+    if nVertices == 0:
+        raise RuntimeError(
+            "Failed to load OBJ file, file contains no vertices.")
+
+    # allocate contiguous storage buffers for per-vertex data
+    vertexDefs = array.array('f', [0.0 for i in range(nVertices)])
+    texCoordDefs = array.array('f', [0.0 for i in range(nTextureCoords)])
+    normalDefs = array.array('f', [0.0 for i in range(nNormals)])
+    faceDefs = array.array('i', [0 for i in range(nFaces * 9)])
+    matIdx = array.array('i', [0 for i in range(nFaces)])
+    objIdx = array.array('i', [0 for i in range(nFaces)])
+
+    # keep track of the OBJ file's structure (i.e. objects and
+    # materials)
+    objectRefs = {}
+    materialRefs = {}
+    idx_materials = current_material = 0  # current material index
+    current_object = -1  # current object index
+
+    # parse the buffer for values
+    vOffset = vtOffset = vnOffset = fOffset = matOffset = objOffset = 0
+    for line in objBuffer.readlines():
+        line = line.strip()
+        if line.startswith('v '):
+            vertexDefs[vOffset:vOffset + 2] = array.array(
+                'f', map(float, line[2:].split(' ')))
+            vOffset += 3
+        elif line.startswith('vt '):
+            texCoordDefs[vtOffset:vtOffset + 1] = array.array(
+                'f', map(float, line[3:].split(' ')))
+            vtOffset += 2
+        elif line.startswith('vn '):
+            normalDefs[vnOffset:vnOffset + 2] = array.array(
+                'f', map(float, line[3:].split(' ')))
+            vnOffset += 3
+        elif line.startswith('f '):
+            f0, f1, f2 = line[2:].split(' ')
+            faceDefs[fOffset:fOffset + 2] = array.array(
+                'i', map(int, f0.split('/')))
+            faceDefs[fOffset + 3:fOffset + 5] = array.array(
+                'i', map(int, f1.split('/')))
+            faceDefs[fOffset + 6:fOffset + 8] = array.array(
+                'i', map(int, f2.split('/')))
+            fOffset += 9
+            # material ID for this face
+            matIdx[matOffset] = current_material
+            matOffset += 1
+            # object index
+            objIdx[objOffset] = current_object
+            objOffset += 1
+        elif line.startswith('o '):
+            # new object
+            current_object += 1
+            objectRefs[line[2:]] = current_object
+        elif line.startswith('usemtl '):
+            # material
+            newMaterialName = line[7:]
+            # check if exists
+            if newMaterialName not in materialRefs.keys():
+                materialRefs[newMaterialName] = idx_materials
+                current_material = idx_materials
+                idx_materials += 1
+            else:
+                current_material = materialRefs[newMaterialName]
+
+    # TODO - Group faces by material, since each VAO associated with this model
+    # will have a pointer offset assigned for each material. This is a feature
+    # we'll need to worry about someday.
+
+    # build vertex buffer arrays using face indices
+    vertexArray = array.array('f', [0.0 for _ in range(nFaces * 9)])
+    texCoordArray = array.array('f', [0.0 for _ in range(nFaces * 6)])
+    normalArray = array.array('f', [0.0 for _ in range(nFaces * 9)])
+
+    vOffset = vtOffset = vnOffset = 0
+    for face in range(nFaces):
+        base = face * 9
+        faceIndices = faceDefs[base:base + 9]
+
+        # copy vertex data
+        for i in (0, 3, 6):
+            for j in range(3):
+                vertexArray[vOffset] = \
+                    vertexDefs[(faceIndices[i] - 1) * 3 + j]
+                vOffset += 1
+
+        # texture coords
+        for i in (1, 4, 7):
+            for j in range(2):
+                texCoordArray[vtOffset] = \
+                    texCoordDefs[(faceIndices[i] - 1) * 2 + j]
+                vtOffset += 1
+
+        # normals
+        for i in (2, 5, 8):
+            for j in range(3):
+                normalArray[vnOffset] = \
+                    normalDefs[(faceIndices[i] - 1) * 3 + j]
+                vnOffset += 1
+
+    # load vertex data to the video device
+    vertexVBO = createVBO(vertexArray, 3)
+    texVBO = createVBO(texCoordArray, 2)
+    normalVBO = createVBO(normalArray, 3)
+
+    # Create a separate VAO for each material, here we are not calling createVAO
+    # since that function does not allow for attribute pointers to be assigned.
+    vao = []
+    for i in range(nMaterials):
+        # create a vertex buffer ID
+        vaoId = GL.GLuint()
+        GL.glGenVertexArrays(1, ctypes.byref(vaoId))
+        GL.glBindVertexArray(vaoId)
+
+        baseAddr = matIdx.index(i)
+
+        # bind and set the vertex pointer, this is must be bound
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vertexVBO.id)
+        GL.glVertexPointer(
+            3, GL.GL_FLOAT, 0, baseAddr * ctypes.sizeof(GL.GLfloat) * 9)
+        GL.glEnableClientState(GL.GL_VERTEX_ARRAY)
+
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, texVBO.id)
+        GL.glTexCoordPointer(
+            2, GL.GL_FLOAT, 0, baseAddr * ctypes.sizeof(GL.GLfloat) * 6)
+        GL.glEnableClientState(GL.GL_TEXTURE_COORD_ARRAY)
+
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, normalVBO.id)
+        GL.glNormalPointer(
+            GL.GL_FLOAT, 0, baseAddr * ctypes.sizeof(GL.GLfloat) * 9)
+        GL.glEnableClientState(GL.GL_NORMAL_ARRAY)
+
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
+        GL.glBindVertexArray(0)
+        vao.append(VertexArrayObject(vaoId, int(matIdx.count(i) * 3), dict()))
+
+    return vao
+
+
+def drawObjModel(objDesc, matlib=None):
     pass
 
 
@@ -1254,3 +1579,7 @@ def getOpenGLInfo():
                       getIntegerv(GL.GL_MAX_SAMPLES),
                       [i for i in getString(GL.GL_EXTENSIONS).split(' ')],
                       dict())
+
+
+if __name__ == "__main__":
+    loadObjFile(r"C:\Users\Matthew Cutone\Desktop\DEX\MAP02.obj")
