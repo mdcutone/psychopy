@@ -11,7 +11,7 @@
 import ctypes
 import array
 from io import StringIO
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 import psychopy.visual
 import pyglet.gl as GL  # using Pyglet for now
 from contextlib import contextmanager
@@ -644,7 +644,7 @@ def deleteTexture(texture):
 
 
 VertexBufferObject = namedtuple(
-    'Vertexbuffer',
+    'VertexBufferObject',
     ['id',
      'vertexSize',
      'count',
@@ -656,7 +656,7 @@ VertexBufferObject = namedtuple(
 )
 
 VertexArrayObject = namedtuple(
-    'VertexArray',
+    'VertexArrayObject',
     ['id',
      'indices',
      'userData']
@@ -1161,11 +1161,6 @@ def loadObjFile(objFilePath):
        Export your model with Blender for best results, even if you used some
        other package to create it.
     2. The model must be triangulated, quad faces are not supported.
-    3. Scale your model appropriately so the units are in meters for the asset
-       to appear correctly in the scene. The origin of the model specified in
-       the editor will be the origin of the loaded asset.
-    4. Stored data is completely static, any transformations must be done within
-       your shader or by applying transformations to the matrix stack.
 
     """
     # open the file, read it into memory
@@ -1199,139 +1194,117 @@ def loadObjFile(objFilePath):
         raise RuntimeError(
             "Failed to load OBJ file, file contains no vertices.")
 
-    # allocate contiguous storage buffers for per-vertex data
-    vertexDefs = array.array('f', [0.0 for i in range(nVertices)])
-    texCoordDefs = array.array('f', [0.0 for i in range(nTextureCoords)])
-    normalDefs = array.array('f', [0.0 for i in range(nNormals)])
-    faceDefs = array.array('i', [0 for i in range(nFaces * 9)])
-    matIdx = array.array('i', [0 for i in range(nFaces)])
-    objIdx = array.array('i', [0 for i in range(nFaces)])
+    # attribute data lists
+    positionDefs = []
+    texCoordDefs = []
+    normalDefs = []
 
-    # keep track of the OBJ file's structure (i.e. objects and
-    # materials)
-    objectRefs = {}
-    materialRefs = {}
-    idx_materials = current_material = 0  # current material index
-    current_object = -1  # current object index
+    # store vertex attributes in dictionaries for re-mapping if needed
+    vertexAttrs = OrderedDict()
+    vertexIndices = OrderedDict()
 
-    # parse the buffer for values
-    vOffset = vtOffset = vnOffset = fOffset = matOffset = objOffset = 0
+    # group faces by material, each one will get its own VAO.
+    materialGroups = OrderedDict()
+    materialOffsets = OrderedDict()
+
+    # Parse the buffer for vertex attributes. We would like to create an index
+    # buffer were there are no duplicate vertices. So we load attributes and
+    # check if it's a duplicate against previously loaded attributes. If so, we
+    # re-map it instead of creating a new attribute. Attributes are considered
+    # equal if they share the same position, texture coordinate and normal.
+    #
+    vertexIdx = faceIdx = 0
+    materialGroup = None
     for line in objBuffer.readlines():
         line = line.strip()
-        if line.startswith('v '):
-            vertexDefs[vOffset:vOffset + 2] = array.array(
-                'f', map(float, line[2:].split(' ')))
-            vOffset += 3
-        elif line.startswith('vt '):
-            texCoordDefs[vtOffset:vtOffset + 1] = array.array(
-                'f', map(float, line[3:].split(' ')))
-            vtOffset += 2
-        elif line.startswith('vn '):
-            normalDefs[vnOffset:vnOffset + 2] = array.array(
-                'f', map(float, line[3:].split(' ')))
-            vnOffset += 3
+
+        if line.startswith('v '):  # new vertex position
+            positionDefs.append(tuple(map(float, line[2:].split(' '))))
+        elif line.startswith('vt '):  # new vertex texture coordinate
+            texCoordDefs.append(tuple(map(float, line[3:].split(' '))))
+        elif line.startswith('vn '):  # new vertex normal
+            normalDefs.append(tuple(map(float, line[3:].split(' '))))
         elif line.startswith('f '):
-            f0, f1, f2 = line[2:].split(' ')
-            faceDefs[fOffset:fOffset + 2] = array.array(
-                'i', map(int, f0.split('/')))
-            faceDefs[fOffset + 3:fOffset + 5] = array.array(
-                'i', map(int, f1.split('/')))
-            faceDefs[fOffset + 6:fOffset + 8] = array.array(
-                'i', map(int, f2.split('/')))
-            fOffset += 9
-            # material ID for this face
-            matIdx[matOffset] = current_material
-            matOffset += 1
-            # object index
-            objIdx[objOffset] = current_object
-            objOffset += 1
-        elif line.startswith('o '):
-            # new object
-            current_object += 1
-            objectRefs[line[2:]] = current_object
+            faceDef = []
+            for attrs in line[2:].split(' '):
+                # check if vertex attribute already loaded, create a new index
+                # if not.
+                if attrs not in vertexAttrs.keys():
+                    p, t, n = map(int, attrs.split('/'))
+                    vertexAttrs[attrs] = (
+                        positionDefs[p - 1],
+                        texCoordDefs[t - 1],
+                        normalDefs[n - 1])
+                    vertexIndices[attrs] = vertexIdx
+                    vertexIdx += 1
+                faceDef.append(vertexIndices[attrs])
+            materialGroups[materialGroup].extend(faceDef)
+            faceIdx += 1  # for computing material offsets
+        # elif line.startswith('o '):
+        #    pass
         elif line.startswith('usemtl '):
-            # material
-            newMaterialName = line[7:]
-            # check if exists
-            if newMaterialName not in materialRefs.keys():
-                materialRefs[newMaterialName] = idx_materials
-                current_material = idx_materials
-                idx_materials += 1
-            else:
-                current_material = materialRefs[newMaterialName]
+            materialGroup = line[7:]
+            if materialGroup not in materialGroups.keys():
+                materialGroups[materialGroup] = []
+                materialOffsets[materialGroup] = faceIdx
 
-    # TODO - Group faces by material, since each VAO associated with this model
-    # will have a pointer offset assigned for each material. This is a feature
-    # we'll need to worry about someday.
+    class CVertAttr(ctypes.Structure):
+        _fields_ = [('pos', GL.GLfloat * 3),
+                    ('texCoord', GL.GLfloat * 2),
+                    ('norm', GL.GLfloat * 3)]
 
-    # build vertex buffer arrays using face indices
-    vertexArray = array.array('f', [0.0 for _ in range(nFaces * 9)])
-    texCoordArray = array.array('f', [0.0 for _ in range(nFaces * 6)])
-    normalArray = array.array('f', [0.0 for _ in range(nFaces * 9)])
+    invIdx = vertexIndices.__class__(map(reversed, vertexIndices.items()))
+    attrList = [vertexAttrs[invIdx[i]] for i in range(len(invIdx))]
 
-    vOffset = vtOffset = vnOffset = 0
-    for face in range(nFaces):
-        base = face * 9
-        faceIndices = faceDefs[base:base + 9]
+    # load vertex data to the graphics device using an abstract buffer
+    vboId = GL.GLuint()
+    GL.glGenBuffers(1, ctypes.byref(vboId))
+    GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vboId)
+    GL.glBufferData(GL.GL_ARRAY_BUFFER,
+                    ctypes.sizeof(CVertAttr),
+                    (CVertAttr * len(attrList))(*attrList),
+                    GL.GL_STATIC_DRAW)
+    GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
 
-        # copy vertex data
-        for i in (0, 3, 6):
-            for j in range(3):
-                vertexArray[vOffset] = \
-                    vertexDefs[(faceIndices[i] - 1) * 3 + j]
-                vOffset += 1
-
-        # texture coords
-        for i in (1, 4, 7):
-            for j in range(2):
-                texCoordArray[vtOffset] = \
-                    texCoordDefs[(faceIndices[i] - 1) * 2 + j]
-                vtOffset += 1
-
-        # normals
-        for i in (2, 5, 8):
-            for j in range(3):
-                normalArray[vnOffset] = \
-                    normalDefs[(faceIndices[i] - 1) * 3 + j]
-                vnOffset += 1
-
-    # load vertex data to the video device
-    vertexVBO = createVBO(vertexArray, 3)
-    texVBO = createVBO(texCoordArray, 2)
-    normalVBO = createVBO(normalArray, 3)
-
-    # Create a separate VAO for each material, here we are not calling createVAO
-    # since that function does not allow for attribute pointers to be assigned.
-    vao = []
-    for i in range(nMaterials):
-        # create a vertex buffer ID
+    objVAOs = {}
+    for group, elements in materialGroups.items():
         vaoId = GL.GLuint()
         GL.glGenVertexArrays(1, ctypes.byref(vaoId))
         GL.glBindVertexArray(vaoId)
-
-        baseAddr = matIdx.index(i)
-
-        # bind and set the vertex pointer, this is must be bound
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vertexVBO.id)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vboId)
         GL.glVertexPointer(
-            3, GL.GL_FLOAT, 0, baseAddr * ctypes.sizeof(GL.GLfloat) * 9)
+            3, GL.GL_FLOAT, 0, ctypes.c_void_p(CVertAttr.pos.offset))
         GL.glEnableClientState(GL.GL_VERTEX_ARRAY)
-
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, texVBO.id)
         GL.glTexCoordPointer(
-            2, GL.GL_FLOAT, 0, baseAddr * ctypes.sizeof(GL.GLfloat) * 6)
+            2, GL.GL_FLOAT, 0, ctypes.c_void_p(CVertAttr.texCoord.offset))
         GL.glEnableClientState(GL.GL_TEXTURE_COORD_ARRAY)
-
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, normalVBO.id)
         GL.glNormalPointer(
-            GL.GL_FLOAT, 0, baseAddr * ctypes.sizeof(GL.GLfloat) * 9)
+            GL.GL_FLOAT, 0, ctypes.c_void_p(CVertAttr.norm.offset))
         GL.glEnableClientState(GL.GL_NORMAL_ARRAY)
 
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
-        GL.glBindVertexArray(0)
-        vao.append(VertexArrayObject(vaoId, int(matIdx.count(i) * 3), dict()))
+        # define the type for element indices
+        if max(elements) < 2 ** 16:
+            elementDataType = GL.GLushort
+        else:
+            elementDataType = GL.GLuint
 
-    return vao
+        # create element array buffer
+        elementIndices = (elementDataType * len(elements))(*elements)
+        elementArrayId = GL.GLuint()
+        GL.glGenBuffers(1, ctypes.byref(elementArrayId))
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, elementArrayId)
+        GL.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER,
+                        ctypes.sizeof(elementIndices),
+                        elementIndices,
+                        GL.GL_STATIC_DRAW)
+        GL.glBindVertexArray(0)
+
+        objVAOs[group] = VertexArrayObject(elementArrayId,
+                                           int(len(elementIndices) / 3),
+                                           dict())
+        objVAOs[group].userData['dtype'] = elementDataType
+
+    print(objVAOs)
 
 
 def drawObjModel(objDesc, matlib=None):
@@ -1609,6 +1582,3 @@ rubberMaterials = namedtuple(
          (GL.GL_SPECULAR, (0.7, 0.7, 0.04, 1.0)),
          (GL.GL_SHININESS, 0.078125 * 128.0)])
 )
-
-if __name__ == "__main__":
-    loadObjFile(r"C:\Users\Matthew Cutone\Desktop\DEX\MAP02.obj")
