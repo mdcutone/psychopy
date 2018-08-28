@@ -12,7 +12,6 @@ import ctypes
 import array
 from io import StringIO
 from collections import namedtuple, OrderedDict
-import psychopy.visual
 import pyglet.gl as GL  # using Pyglet for now
 from contextlib import contextmanager
 from PIL import Image
