@@ -32,10 +32,8 @@ def computeOffAxisFrustums(fov,
         The display's horizontal field of view in degrees.
     aspect : float
         Aspect ratio of the display (width / height).
-    scrDist : float
-        Distance to the screen in meters from the viewer.
     convergeDist : float
-        Distance to the convergence plane in meters. Objects falling on this
+        Offset of the convergence plane from the screen. Objects falling on this
         plane will have zero disparity. For best results, the convergence plane
         should be set to the same distance as the screen.
     eyeOffset : float
@@ -58,30 +56,23 @@ def computeOffAxisFrustums(fov,
     -----
     The view point must be transformed by the screen distance and eye offset for
     objects to appear correctly. For instance, if the screen distance is 1.0
-    meter, the scene must be transformed by -1.0 units.
+    meter, the scene must be transformed by -1.0 units in the z-direction.
+    Offsets in the x-direction must be applied +/- eyeOffset to account for
+    inter-ocular separation.
 
     """
-    hfovx = math.tan(math.radians(fov) / 2.0)
-    hfovy = hfovx / float(aspect)
-
-    d1 = hfovx * (convergeDist + scrDist) + eyeOffset
-    d2 = hfovx * (convergeDist + scrDist) - eyeOffset
+    horzFov = math.tan(math.radians(fov) / 2.0)
+    d = horzFov * (convergeDist + scrDist)
     ratio = nearClip / float((nearClip + scrDist))
 
-    # left view frustum
-    leftL = -1.0 * d1 * ratio
-    rightL = d2 * ratio
-    topL = hfovy * nearClip
-    bottomL = -topL
+    rightR = (d + eyeOffset) * ratio
+    rightL = (d - eyeOffset) * ratio
+    leftL = -rightR
+    leftR = -rightL
+    topR = topL = (horzFov / float(aspect)) * nearClip
+    bottomR = bottomL = -topR
 
     leftFrustum = Frustum(leftL, rightL, bottomL, topL, nearClip, farClip)
-
-    # right view frustum
-    leftR = -1.0 * d2 * ratio
-    rightR = d1 * ratio
-    topR = hfovy * nearClip
-    bottomR = -topR
-
     rightFrustum = Frustum(leftR, rightR, bottomR, topR, nearClip, farClip)
 
     # apply frustums as such, for example the left eye ...
