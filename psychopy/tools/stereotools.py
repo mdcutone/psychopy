@@ -17,7 +17,7 @@ Frustum = namedtuple(
     ['left', 'right', 'bottom', 'top', 'nearVal', 'farVal'])
 
 
-def computeOffAxisFrustums(fov,
+def computeOffAxisFrustums(horzFov,
                            aspect,
                            scrDist,
                            convergeDist,
@@ -28,8 +28,9 @@ def computeOffAxisFrustums(fov,
 
     Parameters
     ----------
-    fov : float
-        The display's horizontal field of view in degrees.
+    horzFov : float
+        The display's horizontal field of view in radians. Calculate as
+        2.0 * atan(screenWidth / (2.0 * screenDistance)) with units in meters.
     aspect : float
         Aspect ratio of the display (width / height).
     convergeDist : float
@@ -54,22 +55,22 @@ def computeOffAxisFrustums(fov,
 
     Notes
     -----
-    The view point must be transformed by the screen distance and eye offset for
-    objects to appear correctly. For instance, if the screen distance is 1.0
-    meter, the scene must be transformed by -1.0 units in the z-direction.
-    Offsets in the x-direction must be applied +/- eyeOffset to account for
-    inter-ocular separation.
+    The view point must be transformed for objects to appear correctly. Offsets
+    in the X-direction must be applied +/- eyeOffset to account for inter-ocular
+    separation. A transformation in the Z-direction must be applied to account
+    for screen distance. These offsets MUST be applied to the MODELVIEW matrix,
+    not the PROJECTION matrix! Doing so will break lighting calculations.
 
     """
-    horzFov = math.tan(math.radians(fov) / 2.0)
-    d = horzFov * (convergeDist + scrDist)
+    halfHorzFov = math.tan(horzFov / 2.0)
+    d = halfHorzFov * (convergeDist + scrDist)
     ratio = nearClip / float((nearClip + scrDist))
 
     rightR = (d + eyeOffset) * ratio
     rightL = (d - eyeOffset) * ratio
     leftL = -rightR
     leftR = -rightL
-    topR = topL = (horzFov / float(aspect)) * nearClip
+    topR = topL = (halfHorzFov / float(aspect)) * nearClip
     bottomR = bottomL = -topR
 
     leftFrustum = Frustum(leftL, rightL, bottomL, topL, nearClip, farClip)
