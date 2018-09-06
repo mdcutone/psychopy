@@ -718,7 +718,7 @@ class Window(object):
                 # need blit the framebuffer object to the actual back buffer
 
                 # unbind the framebuffer as the render target
-                GL.glBindFramebufferEXT(GL.GL_FRAMEBUFFER_EXT, 0)
+                GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
                 GL.glDisable(GL.GL_BLEND)
                 stencilOn = GL.glIsEnabled(GL.GL_STENCIL_TEST)
                 GL.glDisable(GL.GL_STENCIL_TEST)
@@ -935,32 +935,32 @@ class Window(object):
                 win.flip()
 
         """
-        if self.stereo in ('Anaglyph', 'Span'):
-            if buffer == 'left':
+        # using multiple stereo buffers
+        if hasattr(self, '_stereoBuffers'):
+            try:
                 GL.glBindFramebuffer(
-                    GL.GL_FRAMEBUFFER, self._stereoBuffers[0].id)
-            elif buffer == 'right':
-                GL.glBindFramebuffer(
-                    GL.GL_FRAMEBUFFER, self._stereoBuffers[1].id)
-            else:
-                raise "Unknown buffer '%s' requested in Window.setBuffer" % \
-                      buffer
-            self.buffer = buffer
-        elif self.stereo is True:
-            # old-style quad buffer for compatibility
-            if buffer == 'left':
-                GL.glDrawBuffer(GL.GL_BACK_LEFT)
-            elif buffer == 'right':
-                GL.glDrawBuffer(GL.GL_BACK_RIGHT)
-            else:
-                raise "Unknown buffer '%s' requested in Window.setBuffer" % \
-                      buffer
-            self.buffer = buffer
-        else:
-            self.buffer = None
+                    GL.GL_FRAMEBUFFER,
+                    self._stereoBuffers[buffer].id)
+                GL.glReadBuffer(GL.GL_COLOR_ATTACHMENT0)
+                GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0)
+            except KeyError:
+                print("Invalid buffer specified. Exiting.")
+
+        self.buffer = buffer
+
+        # setup viewport for this buffer
+        GL.glViewport(0, 0, self.size[0], self.size[1])
 
         if clear:
-            self.clearBuffer()
+            self.setColor(self.color)  # clear the texture to the window color
+            GL.glClear(
+                GL.GL_COLOR_BUFFER_BIT |
+                GL.GL_DEPTH_BUFFER_BIT |
+                GL.GL_STENCIL_BUFFER_BIT
+            )
+
+        GL.glDisable(GL.GL_TEXTURE_2D)
+        GL.glEnable(GL.GL_BLEND)
 
     def clearBuffer(self):
         """Clear the back buffer (to which you are currently drawing) without
@@ -1001,8 +1001,6 @@ class Window(object):
         None
 
         """
-        GL.glViewport(0, 0, self.size[0], self.size[1])
-        GL.glScissor(0, 0, self.size[0], self.size[1])
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glLoadIdentity()
         GL.glOrtho(-1, 1, -1, 1, -1, 1)
@@ -1012,7 +1010,7 @@ class Window(object):
         if clearDepth:
             GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
 
-    def setOffAxisView(self, clearDepth=True, forceBuffer=None):
+    def setOffAxisView(self, clearDepth=True):
         """Apply an off-axis projection for stereoscopic rendering.
 
         Parameters
@@ -1024,8 +1022,6 @@ class Window(object):
         -------
 
         """
-        GL.glViewport(0, 0, self.size[0], self.size[1])
-        GL.glScissor(0, 0, self.size[0], self.size[1])
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glLoadIdentity()
         GL.glFrustum(*self.frustum)
@@ -1034,9 +1030,9 @@ class Window(object):
 
         eyeOffset = self.iod / 2.0
         if self.buffer == 'left':
-            GL.glTranslatef(-eyeOffset, 0.0, -0.5)
-        elif self.buffer == 'right':
             GL.glTranslatef(eyeOffset, 0.0, -0.5)
+        elif self.buffer == 'right':
+            GL.glTranslatef(-eyeOffset, 0.0, -0.5)
         else:
             GL.glTranslatef(0.0, 0.0, -0.5)
 
@@ -1579,14 +1575,15 @@ class Window(object):
             texPars = ((GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR),
                        (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR))
 
-            # create a framebuffer for each eye
-            self._stereoBuffers = [gltools.createFBO(), gltools.createFBO()]
+            self._stereoBuffers = {
+                'left': gltools.createFBO(),
+                'right' : gltools.createFBO()}
 
             # setup image attachments for each FBO
-            for eye in range(2):
+            for eye in ('left', 'right'):
                 colorTex = gltools.createTexImage2D(
                     self.size[0], self.size[1],
-                    internalFormat=GL.GL_RGBA32F_ARB,
+                    internalFormat=GL.GL_RGBA8,
                     texParameters=texPars)
                 depthRb = gltools.createRenderbuffer(
                     self.size[0], self.size[1],
@@ -1598,6 +1595,7 @@ class Window(object):
                 # keep track of the image descriptors
                 self._stereoBuffers[eye].userData["frameTexture"] = colorTex
                 self._stereoBuffers[eye].userData["stencilTexture"] = depthRb
+                #self.clearBuffer()
 
         # Setup framebuffer
         self.frameBuffer = GL.GLuint()
@@ -1864,6 +1862,7 @@ class Window(object):
         occurring and can override this method as needed. Return True to
         indicate hardware flip.
         """
+        self._prepareAnaglyph()
         return True
 
     def _renderFBO(self):
@@ -1895,11 +1894,12 @@ class Window(object):
         """
         if clearBuffer:
             GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        pass
 
     def resolveMSAA(self):
         pass
 
-    def _displayAnaglyph(self):
+    def _prepareAnaglyph(self):
         """Prepare an anaglyph image to be displayed. This replaces
         _startOfFlip().
 
@@ -1908,6 +1908,33 @@ class Window(object):
         True
 
         """
+        self._prepareFBOrender()
+        # need blit the framebuffer object to the actual back buffer
+        # unbind the framebuffer as the render target
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER_EXT, self.frameBuffer)
+        GL.glDisable(GL.GL_BLEND)
+        stencilOn = GL.glIsEnabled(GL.GL_STENCIL_TEST)
+        GL.glDisable(GL.GL_STENCIL_TEST)
+
+        GL.glActiveTexture(GL.GL_TEXTURE0)
+        GL.glEnable(GL.GL_TEXTURE_2D)
+        self.setDefaultView()
+        for eye in ('left', 'right'):
+            GL.glBindTexture(
+                GL.GL_TEXTURE_2D,
+                self._stereoBuffers[eye].userData["frameTexture"].id)
+
+            GL.glColor3f(0.5, 1.0, 1.0)  # glColor multiplies with texture
+            if eye == 'left':
+                GL.glColorMask(True, False, False, True)
+            else:
+                GL.glColorMask(False, True, True, True)
+
+            self._renderFBO()
+
+        GL.glEnable(GL.GL_BLEND)
+        GL.glDisable(GL.GL_TEXTURE_2D)
+        self._finishFBOrender()
 
         return True
 

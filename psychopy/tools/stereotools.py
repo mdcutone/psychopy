@@ -66,8 +66,8 @@ def computeOffAxisFrustums(horzFov,
     d = halfHorzFov * (convergeDist + scrDist)
     ratio = nearClip / float((nearClip + scrDist))
 
-    rightR = (d + eyeOffset) * ratio
-    rightL = (d - eyeOffset) * ratio
+    rightR = (d - eyeOffset) * ratio
+    rightL = (d + eyeOffset) * ratio
     leftL = -rightR
     leftR = -rightL
     topR = topL = (halfHorzFov / float(aspect)) * nearClip
