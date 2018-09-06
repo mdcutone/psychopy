@@ -346,8 +346,8 @@ class Window(object):
 
         # projection parameters
         aspect = float(self.size[0]) / float(self.size[1])
-        if self.stereo in ('anaglyph', 'span') or self.stereo is True:
-
+        if self.stereo in ('Anaglyph', 'Span') or self.stereo is True:
+            self.useFBO = True
             self._frustum = stereotools.computeOffAxisFrustums(
                     math.radians(45.0), aspect, 0.5, 0.0, self.iod / 2.0)
         else:
@@ -935,18 +935,27 @@ class Window(object):
                 win.flip()
 
         """
-        self.buffer = buffer
-
-        if self.stereo:
+        if self.stereo in ('Anaglyph', 'Span'):
             if buffer == 'left':
-                self.buffer = 'left'
-                #GL.glDrawBuffer(GL.GL_BACK_LEFT)
+                GL.glBindFramebuffer(
+                    GL.GL_FRAMEBUFFER, self._stereoBuffers[0].id)
             elif buffer == 'right':
-                self.buffer = 'right'
-                #GL.glDrawBuffer(GL.GL_BACK_RIGHT)
+                GL.glBindFramebuffer(
+                    GL.GL_FRAMEBUFFER, self._stereoBuffers[1].id)
             else:
                 raise "Unknown buffer '%s' requested in Window.setBuffer" % \
                       buffer
+            self.buffer = buffer
+        elif self.stereo is True:
+            # old-style quad buffer for compatibility
+            if buffer == 'left':
+                GL.glDrawBuffer(GL.GL_BACK_LEFT)
+            elif buffer == 'right':
+                GL.glDrawBuffer(GL.GL_BACK_RIGHT)
+            else:
+                raise "Unknown buffer '%s' requested in Window.setBuffer" % \
+                      buffer
+            self.buffer = buffer
         else:
             self.buffer = None
 
@@ -1516,10 +1525,6 @@ class Window(object):
 
         # identify gfx card vendor
         self.glVendor = GL.gl_info.get_vendor().lower()
-        print(self.stereo)
-        # setup stereo framebuffers
-        if self.stereo == 'anaglyph':
-            self._setupStereoFrameBuffers()
 
         requestedFBO = self.useFBO
         if self._haveShaders:  # do this after setting up FrameBufferObject
@@ -1565,38 +1570,35 @@ class Window(object):
         self._shaders['imageStim_adding'] = _shaders.compileProgram(
             _shaders.vertSimple, _shaders.fragImageStim_adding)
 
-    def _setupStereoFrameBuffers(self):
-        # setup additional framebuffers required for stereoscopy
-
-        texPars = ((GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR),
-                   (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR))
-
-        colorTex = gltools.createTexImage2D(
-            self.size[0], self.size[1],
-            internalFormat=GL.GL_RGBA16F_ARB,
-            texParameters=texPars)
-        depthRb = gltools.createRenderbuffer(
-            self.size[0], self.size[1],
-            internalFormat=GL.GL_DEPTH24_STENCIL8)
-
-        leftFBO = gltools.createFBO()
-        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, leftFBO.id)
-        gltools.attach(GL.GL_COLOR_ATTACHMENT0, colorTex)
-        gltools.attach(GL.GL_DEPTH_STENCIL_ATTACHMENT, depthRb)
-
-        if not gltools.isComplete():
-            logging.error("Error in framebuffer activation")
-            # UNBIND THE FRAME BUFFER OBJECT THAT WE HAD CREATED
-            GL.glBindFramebufferEXT(GL.GL_FRAMEBUFFER_EXT, 0)
-            return False
-
-        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
-
-        self._stereoBuffers = leftFBO.id
-
-        return True
-
     def _setupFrameBuffer(self):
+        # Create auxiliary framebuffers if we are using a stereo mode that
+        # requires a separate buffer for each view.
+        #
+        if self.stereo in ('Anaglyph', 'Span'):
+            # texture parameters for the render target to use
+            texPars = ((GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR),
+                       (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR))
+
+            # create a framebuffer for each eye
+            self._stereoBuffers = [gltools.createFBO(), gltools.createFBO()]
+
+            # setup image attachments for each FBO
+            for eye in range(2):
+                colorTex = gltools.createTexImage2D(
+                    self.size[0], self.size[1],
+                    internalFormat=GL.GL_RGBA32F_ARB,
+                    texParameters=texPars)
+                depthRb = gltools.createRenderbuffer(
+                    self.size[0], self.size[1],
+                    internalFormat=GL.GL_DEPTH24_STENCIL8)
+                GL.glBindFramebuffer(
+                    GL.GL_FRAMEBUFFER, self._stereoBuffers[eye].id)
+                gltools.attach(GL.GL_COLOR_ATTACHMENT0, colorTex)
+                gltools.attach(GL.GL_DEPTH_STENCIL_ATTACHMENT, depthRb)
+                # keep track of the image descriptors
+                self._stereoBuffers[eye].userData["frameTexture"] = colorTex
+                self._stereoBuffers[eye].userData["stencilTexture"] = depthRb
+
         # Setup framebuffer
         self.frameBuffer = GL.GLuint()
         GL.glGenFramebuffersEXT(1, ctypes.byref(self.frameBuffer))
