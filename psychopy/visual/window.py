@@ -349,10 +349,10 @@ class Window(object):
         if self.stereo in ('Anaglyph', 'Span') or self.stereo is True:
             self.useFBO = True
             self._frustum = stereotools.computeOffAxisFrustums(
-                    math.radians(45.0), aspect, 0.5, 0.0, self.iod / 2.0)
+                    math.radians(38.0), aspect, 0.5, 0.0, self.iod / 2.0)
         else:
             self._frustum = stereotools.computeOffAxisFrustums(
-                math.radians(45.0), aspect, 0.5, 0.0, self.iod / 2.0)[0]
+                math.radians(38.0), aspect, 0.5, 0.5, self.iod / 2.0)[0]
 
         self.anaglyphMode = 'redcyan'
 
@@ -711,6 +711,10 @@ class Window(object):
         for thisStim in self._toDraw:
             thisStim.draw()
 
+        # composite any stereo images before flipping
+        if self.stereo:
+            self._prepareAnaglyph()
+
         flipThisFrame = self._startOfFlip()
         if self.useFBO:
             if flipThisFrame:
@@ -718,8 +722,9 @@ class Window(object):
                 # need blit the framebuffer object to the actual back buffer
 
                 # unbind the framebuffer as the render target
-                GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+                GL.glBindFramebufferEXT(GL.GL_FRAMEBUFFER_EXT, 0)
                 GL.glDisable(GL.GL_BLEND)
+                GL.glDisable(GL.GL_DEPTH_TEST)
                 stencilOn = GL.glIsEnabled(GL.GL_STENCIL_TEST)
                 GL.glDisable(GL.GL_STENCIL_TEST)
 
@@ -1038,6 +1043,10 @@ class Window(object):
 
         if clearDepth:
             GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
+
+        GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glDepthFunc(GL.GL_LEQUAL)
+        GL.glDepthMask(GL.GL_TRUE)
 
     def getMovieFrame(self, buffer='front'):
         """Capture the current Window as an image.
@@ -1575,6 +1584,7 @@ class Window(object):
             texPars = ((GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR),
                        (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR))
 
+            # create the _stereoBuffers attribute here
             self._stereoBuffers = {
                 'left': gltools.createFBO(),
                 'right' : gltools.createFBO()}
@@ -1595,7 +1605,7 @@ class Window(object):
                 # keep track of the image descriptors
                 self._stereoBuffers[eye].userData["frameTexture"] = colorTex
                 self._stereoBuffers[eye].userData["stencilTexture"] = depthRb
-                #self.clearBuffer()
+                self.clearBuffer()
 
         # Setup framebuffer
         self.frameBuffer = GL.GLuint()
@@ -1862,7 +1872,6 @@ class Window(object):
         occurring and can override this method as needed. Return True to
         indicate hardware flip.
         """
-        self._prepareAnaglyph()
         return True
 
     def _renderFBO(self):
@@ -1897,15 +1906,29 @@ class Window(object):
         pass
 
     def resolveMSAA(self):
-        pass
+        """Resolve multisample anti-aliasing (MSAA). If MSAA is enabled, drawing
+        operations are diverted to a special multisample render buffer. Pixel
+        data must be 'resolved' by blitting it to the swap chain texture. If
+        not, the texture will be blank.
 
-    def _prepareAnaglyph(self):
-        """Prepare an anaglyph image to be displayed. This replaces
-        _startOfFlip().
+        NOTE: You cannot perform operations on the default FBO (at frameBuffer)
+        when MSAA is enabled. Any changes will be over-written when 'flip' is
+        called.
 
         Returns
         -------
-        True
+        None
+
+        """
+        pass
+
+    def _prepareAnaglyph(self):
+        """Render a stereoscopic anaglyph image to the display framebuffer. This
+        is happens automatically when 'flip' is called.
+
+        Returns
+        -------
+        None
 
         """
         self._prepareFBOrender()
@@ -1924,7 +1947,7 @@ class Window(object):
                 GL.GL_TEXTURE_2D,
                 self._stereoBuffers[eye].userData["frameTexture"].id)
 
-            GL.glColor3f(0.5, 1.0, 1.0)  # glColor multiplies with texture
+            GL.glColor3f(0.2, 1.0, 1.0)  # glColor multiplies with texture
             if eye == 'left':
                 GL.glColorMask(True, False, False, True)
             else:
@@ -1935,8 +1958,6 @@ class Window(object):
         GL.glEnable(GL.GL_BLEND)
         GL.glDisable(GL.GL_TEXTURE_2D)
         self._finishFBOrender()
-
-        return True
 
 
 def getMsPerFrame(myWin, nFrames=60, showVisual=False, msg='', msDelay=0.):
