@@ -200,9 +200,9 @@ class GLFWBackend(BaseBackend):
                 vidmode_is_supported = True
                 break
 
+        _size, _bpc, _hz = glfw.get_video_mode(this_screen)
         if not vidmode_is_supported:
             # the requested video mode is not supported, use current
-            _size, _bpc, _hz = glfw.get_video_mode(this_screen)
             logging.warning(
                 ("The specified video mode is not supported by this display, "
                  "using native mode ..."))
@@ -225,16 +225,16 @@ class GLFWBackend(BaseBackend):
             use_display = None
 
         # configure stereo
-        use_stereo = 0
-        if win.stereo:
-            # provide warning if stereo buffers are requested but unavailable
-            if not glfw.extension_supported('GL_STEREO'):
-                logging.warning(
-                    'A stereo window was requested but the graphics '
-                    'card does not appear to support GL_STEREO')
-                win.stereo = False
-            else:
-                use_stereo = 1
+        #use_stereo = 0
+        #if win.stereo:
+        #    # provide warning if stereo buffers are requested but unavailable
+        #    if not glfw.extension_supported('GL_STEREO'):
+        #        logging.warning(
+        #            'A stereo window was requested but the graphics '
+        #            'card does not appear to support GL_STEREO')
+        #        win.stereo = False
+        #    else:
+        #        use_stereo = 1
 
         # setup multisampling
         # This enables multisampling on the window backbuffer, not on other
@@ -266,7 +266,7 @@ class GLFWBackend(BaseBackend):
         glfw.window_hint(glfw.GREEN_BITS, win.bpc[1])
         glfw.window_hint(glfw.BLUE_BITS, win.bpc[2])
         glfw.window_hint(glfw.REFRESH_RATE, win.refreshHz)
-        glfw.window_hint(glfw.STEREO, use_stereo)
+        glfw.window_hint(glfw.STEREO, 0)
         glfw.window_hint(glfw.SAMPLES, msaa_samples)
         glfw.window_hint(glfw.STENCIL_BITS, win.stencilBits)
         glfw.window_hint(glfw.DEPTH_BITS, win.depthBits)

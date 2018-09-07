@@ -352,7 +352,7 @@ class Window(object):
                     math.radians(38.0), aspect, 0.5, 0.0, self.iod / 2.0)
         else:
             self._frustum = stereotools.computeOffAxisFrustums(
-                math.radians(38.0), aspect, 0.5, 0.5, self.iod / 2.0)[0]
+                math.radians(38.0), aspect, 0.5, 0.0, self.iod / 2.0)[0]
 
         self.anaglyphMode = 'redcyan'
 
@@ -1947,7 +1947,7 @@ class Window(object):
                 GL.GL_TEXTURE_2D,
                 self._stereoBuffers[eye].userData["frameTexture"].id)
 
-            GL.glColor3f(0.2, 1.0, 1.0)  # glColor multiplies with texture
+            GL.glColor3f(1.0, 1.0, 1.0)  # glColor multiplies with texture
             if eye == 'left':
                 GL.glColorMask(True, False, False, True)
             else:
