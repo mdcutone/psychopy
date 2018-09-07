@@ -84,6 +84,7 @@ from .text import TextStim
 from .grating import GratingStim
 from .helpers import setColor
 from . import globalVars
+from .stereo import StereoMixin, ViewMixin
 
 try:
     from PIL import Image
@@ -126,7 +127,7 @@ class OpenWinList(list):
 openWindows = core.openWindows = OpenWinList()  # core needs this for wait()
 
 
-class Window(object):
+class Window(ViewMixin, StereoMixin, object):
     """Used to set up a context in which to draw objects,
     using either `pyglet <http://www.pyglet.org>`_ or
     `pygame <http://www.pygame.org>`_
@@ -338,23 +339,30 @@ class Window(object):
             msg = "Window: viewPos & viewOri are currently incompatible"
             raise NotImplementedError(msg)
 
-        # setup viewing parameters
-        self.stereo = stereo  # use quad buffer if requested (and if possible)
-        self.buffer = None
+        self._buffer = None
         self._viewport = None  # viewport for each buffer
-        self.iod = 0.064  # interocular separation for stereoscopy
+        self.iod = iod
 
-        # projection parameters
+        # Setup viewing parameters for 3D rendering with perspective. These are
+        # required for stereoscopy.
+        #
         aspect = float(self.size[0]) / float(self.size[1])
-        if self.stereo in ('Anaglyph', 'Span') or self.stereo is True:
+        dist = self.scrDistCM / 100.0
+        width = self.scrWidthCM / 100.0
+        halfIOD = self._iod / 2.0
+        print(self._iod)
+        self.stereo = stereo  # use quad buffer if requested (and if possible)
+        if self.stereo in ("Anaglyph",) or self.stereo is True:
             self.useFBO = True
-            self._frustum = stereotools.computeOffAxisFrustums(
-                    math.radians(38.0), aspect, 0.5, 0.0, self.iod / 2.0)
+            # check if we have the values needed for setting up stereoscopy
+            if self.scrDistCM is None:
+                raise ValueError("Screen distance is required for stereoscopy.")
+            self._frustum = (
+                stereotools.computeFrustum(width, aspect, dist, 0.0, -halfIOD),
+                stereotools.computeFrustum(width, aspect, dist, 0.0, halfIOD))
         else:
-            self._frustum = stereotools.computeOffAxisFrustums(
-                math.radians(38.0), aspect, 0.5, 0.0, self.iod / 2.0)[0]
-
-        self.anaglyphMode = 'redcyan'
+            # single frustum for 3D but not sterescopic rendering
+            self._frustum = stereotools.computeFrustum(width, aspect, dist)
 
         # enable multisampling
         self.multiSample = multiSample
@@ -918,55 +926,6 @@ class Window(object):
             self.flip(clearBuffer=False)
         self.flip(clearBuffer=clearBuffer)
 
-    def setBuffer(self, buffer, clear=True):
-        """Choose which buffer to draw to ('left' or 'right').
-
-        Requires the Window to be initialised with stereo=True and requires a
-        graphics card that supports quad buffering (e,g nVidia Quadro series)
-
-        PsychoPy always draws to the back buffers, so 'left' will use
-        GL_BACK_LEFT This then needs to be flipped once both eye's buffers
-        have been rendered.
-
-        Typical usage::
-
-            win = visual.Window(...., stereo=True)
-            while True:
-                # clear may not actually be needed
-                win.setBuffer('left', clear=True)
-                # do drawing for left eye
-                win.setBuffer('right', clear=True)
-                # do drawing for right eye
-                win.flip()
-
-        """
-        # using multiple stereo buffers
-        if hasattr(self, '_stereoBuffers'):
-            try:
-                GL.glBindFramebuffer(
-                    GL.GL_FRAMEBUFFER,
-                    self._stereoBuffers[buffer].id)
-                GL.glReadBuffer(GL.GL_COLOR_ATTACHMENT0)
-                GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0)
-            except KeyError:
-                print("Invalid buffer specified. Exiting.")
-
-        self.buffer = buffer
-
-        # setup viewport for this buffer
-        GL.glViewport(0, 0, self.size[0], self.size[1])
-
-        if clear:
-            self.setColor(self.color)  # clear the texture to the window color
-            GL.glClear(
-                GL.GL_COLOR_BUFFER_BIT |
-                GL.GL_DEPTH_BUFFER_BIT |
-                GL.GL_STENCIL_BUFFER_BIT
-            )
-
-        GL.glDisable(GL.GL_TEXTURE_2D)
-        GL.glEnable(GL.GL_BLEND)
-
     def clearBuffer(self):
         """Clear the back buffer (to which you are currently drawing) without
         flipping the window. Useful if you want to generate movie sequences
@@ -975,78 +934,6 @@ class Window(object):
         """
         # reset returned buffer for next frame
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
-    @property
-    def frustum(self):
-        """Get the current view buffer's frustum parameters.
-
-        Returns
-        -------
-        namedtuple
-
-        """
-        if self.buffer == 'left':
-            return self._frustum[0]
-        elif self.buffer == 'right':
-            return self._frustum[1]
-
-        return self._frustum
-
-    def setDefaultView(self, clearDepth=True):
-        """Use the default orthographic projection for successive drawing
-        operations.
-
-        Parameters
-        ----------
-        clearDepth : boolean
-            Clear the depth buffer prior after configuring the view parameters.
-
-        Returns
-        -------
-        None
-
-        """
-        GL.glMatrixMode(GL.GL_PROJECTION)
-        GL.glLoadIdentity()
-        GL.glOrtho(-1, 1, -1, 1, -1, 1)
-        GL.glMatrixMode(GL.GL_MODELVIEW)
-        GL.glLoadIdentity()
-
-        if clearDepth:
-            GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
-
-    def setOffAxisView(self, clearDepth=True):
-        """Apply an off-axis projection for stereoscopic rendering.
-
-        Parameters
-        ----------
-        clearDepth
-        forceBuffer
-
-        Returns
-        -------
-
-        """
-        GL.glMatrixMode(GL.GL_PROJECTION)
-        GL.glLoadIdentity()
-        GL.glFrustum(*self.frustum)
-        GL.glMatrixMode(GL.GL_MODELVIEW)
-        GL.glLoadIdentity()
-
-        eyeOffset = self.iod / 2.0
-        if self.buffer == 'left':
-            GL.glTranslatef(eyeOffset, 0.0, -0.5)
-        elif self.buffer == 'right':
-            GL.glTranslatef(-eyeOffset, 0.0, -0.5)
-        else:
-            GL.glTranslatef(0.0, 0.0, -0.5)
-
-        if clearDepth:
-            GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
-
-        GL.glEnable(GL.GL_DEPTH_TEST)
-        GL.glDepthFunc(GL.GL_LEQUAL)
-        GL.glDepthMask(GL.GL_TRUE)
 
     def getMovieFrame(self, buffer='front'):
         """Capture the current Window as an image.
@@ -1580,32 +1467,7 @@ class Window(object):
         # requires a separate buffer for each view.
         #
         if self.stereo in ('Anaglyph', 'Span'):
-            # texture parameters for the render target to use
-            texPars = ((GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR),
-                       (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR))
-
-            # create the _stereoBuffers attribute here
-            self._stereoBuffers = {
-                'left': gltools.createFBO(),
-                'right' : gltools.createFBO()}
-
-            # setup image attachments for each FBO
-            for eye in ('left', 'right'):
-                colorTex = gltools.createTexImage2D(
-                    self.size[0], self.size[1],
-                    internalFormat=GL.GL_RGBA8,
-                    texParameters=texPars)
-                depthRb = gltools.createRenderbuffer(
-                    self.size[0], self.size[1],
-                    internalFormat=GL.GL_DEPTH24_STENCIL8)
-                GL.glBindFramebuffer(
-                    GL.GL_FRAMEBUFFER, self._stereoBuffers[eye].id)
-                gltools.attach(GL.GL_COLOR_ATTACHMENT0, colorTex)
-                gltools.attach(GL.GL_DEPTH_STENCIL_ATTACHMENT, depthRb)
-                # keep track of the image descriptors
-                self._stereoBuffers[eye].userData["frameTexture"] = colorTex
-                self._stereoBuffers[eye].userData["stencilTexture"] = depthRb
-                self.clearBuffer()
+            self._setupStereoBuffers()
 
         # Setup framebuffer
         self.frameBuffer = GL.GLuint()
@@ -1921,43 +1783,6 @@ class Window(object):
 
         """
         pass
-
-    def _prepareAnaglyph(self):
-        """Render a stereoscopic anaglyph image to the display framebuffer. This
-        is happens automatically when 'flip' is called.
-
-        Returns
-        -------
-        None
-
-        """
-        self._prepareFBOrender()
-        # need blit the framebuffer object to the actual back buffer
-        # unbind the framebuffer as the render target
-        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER_EXT, self.frameBuffer)
-        GL.glDisable(GL.GL_BLEND)
-        stencilOn = GL.glIsEnabled(GL.GL_STENCIL_TEST)
-        GL.glDisable(GL.GL_STENCIL_TEST)
-
-        GL.glActiveTexture(GL.GL_TEXTURE0)
-        GL.glEnable(GL.GL_TEXTURE_2D)
-        self.setDefaultView()
-        for eye in ('left', 'right'):
-            GL.glBindTexture(
-                GL.GL_TEXTURE_2D,
-                self._stereoBuffers[eye].userData["frameTexture"].id)
-
-            GL.glColor3f(1.0, 1.0, 1.0)  # glColor multiplies with texture
-            if eye == 'left':
-                GL.glColorMask(True, False, False, True)
-            else:
-                GL.glColorMask(False, True, True, True)
-
-            self._renderFBO()
-
-        GL.glEnable(GL.GL_BLEND)
-        GL.glDisable(GL.GL_TEXTURE_2D)
-        self._finishFBOrender()
 
 
 def getMsPerFrame(myWin, nFrames=60, showVisual=False, msg='', msDelay=0.):

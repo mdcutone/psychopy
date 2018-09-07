@@ -17,29 +17,41 @@ Frustum = namedtuple(
     ['left', 'right', 'bottom', 'top', 'nearVal', 'farVal'])
 
 
-def computeOffAxisFrustums(horzFov,
-                           aspect,
-                           scrDist,
-                           convergeDist,
-                           eyeOffset=0.031,
-                           nearClip=0.01,
-                           farClip=100.0):
-    """Calculate frustum parameters for symmetric off-axis views.
+def visualAngle(size, distance):
+    """Compute the visual angle of an object.
+
+    """
+    return 2.0 * math.atan(size / (2.0 * distance))
+
+
+def computeFrustum(scrWidth,
+                   scrAspect,
+                   scrDist,
+                   convergeOffset=0.0,
+                   eyeOffset=0.0,
+                   nearClip=0.01,
+                   farClip=100.0):
+    """Calculate frustum parameters for rendering stimuli with perspective. If
+    an eye offset is provided, an asymmetric frustum is returned which can be
+    used for stereoscopic rendering.
 
     Parameters
     ----------
-    horzFov : float
-        The display's horizontal field of view in radians. Calculate as
-        2.0 * atan(screenWidth / (2.0 * screenDistance)) with units in meters.
-    aspect : float
+    scrWidth : float
+        The display's width in meters.
+    scrAspect : float
         Aspect ratio of the display (width / height).
-    convergeDist : float
+    scrDist : float
+        Distance to the screen from the view in meters. Measured from the center
+        of their eyes.
+    convergeOffset : float
         Offset of the convergence plane from the screen. Objects falling on this
         plane will have zero disparity. For best results, the convergence plane
-        should be set to the same distance as the screen.
+        should be set to the same distance as the screen (0.0 by default).
     eyeOffset : float
         Half the inter-ocular separation (i.e. the horizontal distance between
-        the nose and center of the pupil) in meters.
+        the nose and center of the pupil) in meters. If eyeOffset is 0.0, a
+        symmetric frustum is returned.
     nearClip : float
         Distance to the near clipping plane in meters from the viewer. Should be
         at least less than scrDist.
@@ -49,44 +61,29 @@ def computeOffAxisFrustums(horzFov,
 
     Returns
     -------
-    tuple of Frustum
-        A tuple which contains Frustum objects which stores the left and right
-        frustums.
+    Frustum
+        Namedtuple with frustum parameters. Can be directly passed to
+        glFrustum (e.g. glFrustum(*f)).
 
     Notes
     -----
-    The view point must be transformed for objects to appear correctly. Offsets
-    in the X-direction must be applied +/- eyeOffset to account for inter-ocular
-    separation. A transformation in the Z-direction must be applied to account
-    for screen distance. These offsets MUST be applied to the MODELVIEW matrix,
-    not the PROJECTION matrix! Doing so will break lighting calculations.
+    1.  The view point must be transformed for objects to appear correctly.
+        Offsets in the X-direction must be applied +/- eyeOffset to account for
+        inter-ocular separation. A transforqmation in the Z-direction must be
+        applied to account for screen distance. These offsets MUST be applied to
+        the MODELVIEW matrix, not the PROJECTION matrix! Doing so will break
+        lighting calculations.
 
     """
-    halfHorzFov = math.tan(horzFov / 2.0)
-    d = halfHorzFov * (convergeDist + scrDist)
-    ratio = nearClip / float((convergeDist + scrDist))
+    d = scrWidth * (convergeOffset + scrDist)
+    ratio = nearClip / float((convergeOffset + scrDist))
 
-    rightR = (d - eyeOffset) * ratio
-    rightL = (d + eyeOffset) * ratio
-    leftL = -rightR
-    leftR = -rightL
-    topR = topL = (halfHorzFov / float(aspect)) * nearClip
-    bottomR = bottomL = -topR
+    right = (d - eyeOffset) * ratio
+    left = (d + eyeOffset) * -ratio
+    top = (scrWidth / float(scrAspect)) * nearClip
+    bottom = -top
 
-    leftFrustum = Frustum(leftL, rightL, bottomL, topL, nearClip, farClip)
-    rightFrustum = Frustum(leftR, rightR, bottomR, topR, nearClip, farClip)
-
-    # apply frustums as such, for example the left eye ...
-    #
-    # GL.glMatrixMode(GL.GL_PROJECTION)
-    # GL.glLoadIdentity()
-    # GL.glFrustum(*leftFrustum)
-    #
-    # translate the viewer in the scene
-    # GL.glMatrixMode(GL.GL_MODELVIEW)
-    # GL.glTranslate(-(iod / 2.0), 0, -scrDist)
-
-    return leftFrustum, rightFrustum
+    return Frustum(left, right, bottom, top, nearClip, farClip)
 
 
 def frustumToProjectionMatrix(f):
@@ -113,3 +110,12 @@ def frustumToProjectionMatrix(f):
     mOut[3, 2] = (2.0 * f.farVal * f.nearVal) / (f.farVal - f.nearVal)
 
     return mOut
+
+
+# Anaglyph color filters
+AnaglyphFilter = namedtuple(
+    'AnaglyphFilter', ['maskLeft', 'maskRight', 'colorBias'])
+
+AnaglyphRedCyan = AnaglyphFilter((True, False, False, False),
+                                 (False, True, True, False),
+                                 (1.0, 1.0, 1.0))
