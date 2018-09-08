@@ -797,7 +797,7 @@ def createVAO(vertexBuffers, indexBuffer=None):
         if attr == GL.GL_VERTEX_ARRAY:
             GL.glVertexPointer(vbo.size, vbo.dtype, 0, None)
             GL.glEnableClientState(GL.GL_VERTEX_ARRAY)
-            nIndices = int(vbo.indices / 3)
+            nIndices = int(vbo.indices)
             hasVertexArray = True
         elif attr == GL.GL_TEXTURE_COORD_ARRAY:
             GL.glTexCoordPointer(vbo.size, vbo.dtype, 0, None)

@@ -342,6 +342,7 @@ class Window(ViewMixin, StereoMixin, object):
         self._buffer = None
         self._viewport = None  # viewport for each buffer
         self.iod = iod
+        self._convergeDist = 0.0
 
         # Setup viewing parameters for 3D rendering with perspective. These are
         # required for stereoscopy.

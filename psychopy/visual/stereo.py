@@ -101,7 +101,7 @@ class ViewMixin(object):
 
 
 class StereoMixin(object):
-    """Mixin class for stereoscopy."""
+    """Window mixin class for stereoscopy."""
 
     @property
     def iod(self):
@@ -153,8 +153,7 @@ class StereoMixin(object):
 
         """
         # this value is internally stored as meters!
-        #return self._iod * 100.0
-        pass
+        return self._convergeDist * 100.0
 
     def setConvergeDist(self, dist):
         """Set the distance of the convergence plane in centimeters.
@@ -165,8 +164,7 @@ class StereoMixin(object):
             Distance to the convergence plane in centimeters.
 
         """
-        #self._iod = float(dist) / 100.0
-        pass
+        self._convergeDist = float(dist) / 100.0
 
     def setBuffer(self, buffer, clear=True):
         """Choose which buffer to draw to ('left' or 'right').
@@ -190,19 +188,40 @@ class StereoMixin(object):
                 win.flip()
 
         """
-        if self.stereo is True:  # legacy mode
-            pass
+        # If 'stereo' is True, behave exactly like previous versions of PsychoPy
+        # for backwards compatibility.
+        if self.stereo is True:
+            if buffer == 'left':
+                GL.glDrawBuffer(GL.GL_BACK_LEFT)
+            elif buffer == 'right':
+                GL.glDrawBuffer(GL.GL_BACK_RIGHT)
+            else:
+                raise ValueError(
+                    "Unknown buffer '%s' requested in Window.setBuffer" %
+                    buffer)
+
+            if clear:
+                self.clearBuffer()
+
+            return
 
         # using multiple stereo buffers
         if hasattr(self, '_stereoBuffers'):
-            try:
+            if buffer == 'left':
                 GL.glBindFramebuffer(
                     GL.GL_FRAMEBUFFER,
-                    self._stereoBuffers[buffer].id)
-                GL.glReadBuffer(GL.GL_COLOR_ATTACHMENT0)
-                GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0)
-            except KeyError:
-                print("Invalid buffer specified. Exiting.")
+                    self._stereoBuffers[0].id)
+            elif buffer == 'right':
+                GL.glBindFramebuffer(
+                    GL.GL_FRAMEBUFFER,
+                    self._stereoBuffers[1].id)
+            else:
+                raise ValueError(
+                    "Unknown buffer '%s' requested in Window.setBuffer" %
+                    buffer)
+
+            GL.glReadBuffer(GL.GL_COLOR_ATTACHMENT0)
+            GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0)
 
         self._buffer = buffer
 
@@ -238,12 +257,10 @@ class StereoMixin(object):
                    (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR))
 
         # create the _stereoBuffers attribute here
-        self._stereoBuffers = {
-            'left': gltools.createFBO(),
-            'right': gltools.createFBO()}
+        self._stereoBuffers = (gltools.createFBO(), gltools.createFBO())
 
         # setup image attachments for each FBO
-        for eye in ('left', 'right'):
+        for eye in range(2):
             colorTex = gltools.createTexImage2D(
                 self.size[0], self.size[1],
                 internalFormat=GL.GL_RGBA32F_ARB,
@@ -259,6 +276,21 @@ class StereoMixin(object):
             self._stereoBuffers[eye].userData["frameTexture"] = colorTex
             self._stereoBuffers[eye].userData["stencilTexture"] = depthRb
             self.clearBuffer()
+
+        # Create vertex buffers to store the plane for rendering the stereo
+        # buffer.
+        leftVertices = gltools.createVBO(
+            [-1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0],
+            size=2, dtype=GL.GL_FLOAT, target=GL.GL_ARRAY_BUFFER)
+        leftTexCoords = gltools.createVBO(
+            [0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0],
+            size=2, dtype=GL.GL_FLOAT, target=GL.GL_ARRAY_BUFFER)
+
+        leftVAO = gltools.createVAO((
+            (GL.GL_VERTEX_ARRAY, leftVertices),
+            (GL.GL_TEXTURE_COORD_ARRAY, leftTexCoords)))
+
+        self._stereoFrameVAOs = (leftVAO, leftVAO)
 
     def _prepareAnaglyph(self):
         """Render a stereoscopic anaglyph image to the display framebuffer. This
@@ -287,27 +319,18 @@ class StereoMixin(object):
         GL.glActiveTexture(GL.GL_TEXTURE0)
         GL.glEnable(GL.GL_TEXTURE_2D)
         self.setDefaultView()
-        for eye in ('left', 'right'):
+        for eye in range(2):
             GL.glBindTexture(
                 GL.GL_TEXTURE_2D,
                 self._stereoBuffers[eye].userData["frameTexture"].id)
 
             GL.glColor3f(1.0, 1.0, 1.0)  # glColor multiplies with texture
-            if eye == 'left':
+            if eye == 0:
                 GL.glColorMask(True, False, False, True)
             else:
                 GL.glColorMask(False, True, True, True)
-
-            GL.glBegin(GL.GL_TRIANGLE_STRIP)
-            GL.glTexCoord2f(0.0, 1.0)
-            GL.glVertex2f(-1.0, 1.0)
-            GL.glTexCoord2f(0.0, 0.0)
-            GL.glVertex2f(-1.0, -1.0)
-            GL.glTexCoord2f(1.0, 1.0)
-            GL.glVertex2f(1.0, 1.0)
-            GL.glTexCoord2f(1.0, 0.0)
-            GL.glVertex2f(1.0, -1.0)
-            GL.glEnd()
+            #GL.glFrontFace(GL.GL_CW)
+            gltools.drawVAO(self._stereoFrameVAOs[eye], GL.GL_TRIANGLE_STRIP)
 
         GL.glEnable(GL.GL_BLEND)
         GL.glDisable(GL.GL_TEXTURE_2D)
