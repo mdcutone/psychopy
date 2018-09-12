@@ -111,7 +111,6 @@ def frustumToProjectionMatrix(f):
 
     return mOut
 
-
 # Anaglyph color filters
 AnaglyphFilter = namedtuple(
     'AnaglyphFilter', ['maskLeft', 'maskRight', 'colorBias'])

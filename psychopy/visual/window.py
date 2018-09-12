@@ -343,6 +343,7 @@ class Window(ViewMixin, StereoMixin, object):
         self._viewport = None  # viewport for each buffer
         self.iod = iod
         self._convergeDist = 0.0
+        self._viewMatrix = None
 
         # Setup viewing parameters for 3D rendering with perspective. These are
         # required for stereoscopy.
@@ -358,12 +359,11 @@ class Window(ViewMixin, StereoMixin, object):
             # check if we have the values needed for setting up stereoscopy
             if self.scrDistCM is None:
                 raise ValueError("Screen distance is required for stereoscopy.")
-            self._frustum = (
-                stereotools.computeFrustum(width, aspect, dist, 0.0, -halfIOD),
-                stereotools.computeFrustum(width, aspect, dist, 0.0, halfIOD))
+            self.frustum = stereotools.computeFrustum(width, aspect, dist, 0.0, halfIOD)
+
         else:
             # single frustum for 3D but not sterescopic rendering
-            self._frustum = stereotools.computeFrustum(width, aspect, dist)
+            self.frustum = stereotools.computeFrustum(width, aspect, dist)
 
         # enable multisampling
         self.multiSample = multiSample
