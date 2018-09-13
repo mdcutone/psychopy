@@ -1476,47 +1476,31 @@ class Window(object):
         w = int(self.size[0])
         h = int(self.size[1])
 
-        # create a texture to render to
-        colorBuffer = gltools.createTexImage2D(
-            int(self.size[0]),
-            int(self.size[1]),
+        colorBuffer = gltools.TexImage2dInfo(
             internalFormat=GL.GL_RGBA32F_ARB,
-            pixelFormat=GL.GL_RGBA,
             texParameters=(
                 (GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR),
                 (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)))
 
-        # Create a depth/stencil buffer. We need to determine whether to include
-        # a stencil buffer by checking 'allowStencil'.
-        if self.allowStencil:
-            depthFormat = GL.GL_DEPTH24_STENCIL8
-            depthAttach = GL.GL_DEPTH_STENCIL_ATTACHMENT
-        else:
-            depthFormat = GL.GL_DEPTH_COMPONENT24
-            depthAttach = GL.GL_DEPTH_ATTACHMENT
-
-        # create the render buffer
-        depthBuffer = gltools.createRenderbuffer(
-            int(self.size[0]),
-            int(self.size[1]),
-            internalFormat=depthFormat)
-
-        # create the framebuffer and attach the depth and color buffers
+        depthBuffer = gltools.RenderbufferInfo(
+            internalFormat=GL.GL_DEPTH24_STENCIL8)
 
         frameBuffer = gltools.FramebufferInfo(
             width=w, height=h,
-            colorAttachments={GL.GL_COLOR_ATTACHMENT0: colorBuffer,
-                              GL.GL_DEPTH_STENCIL_ATTACHMENT: depthBuffer})
+            imageAttachments={
+                GL.GL_COLOR_ATTACHMENT0: colorBuffer,
+                GL.GL_DEPTH_STENCIL_ATTACHMENT: depthBuffer})
 
-        print(gltools.createFBO(frameBuffer))
+        # initialize the FBO, check for completeness
+        if not gltools.createFramebuffer(frameBuffer):
+            logging.error("Error in framebuffer activation")
+            # UNBIND THE FRAME BUFFER OBJECT THAT WE HAD CREATED
+            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+            return False
 
-        # check the FBO for completeness
-        #status = GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER)
-        #if status != GL.GL_FRAMEBUFFER_COMPLETE:
-        #     logging.error("Error in framebuffer activation")
-        #     # UNBIND THE FRAME BUFFER OBJECT THAT WE HAD CREATED
-        #     GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
-        #     return False
+        print(frameBuffer.imageAttachments)
+
+        print(depthBuffer.id)
 
         GL.glDisable(GL.GL_TEXTURE_2D)
 
@@ -1536,13 +1520,13 @@ class Window(object):
         self.frameBuffer = getFramebuffer()
 
         def getFrameTexture():
-            return self._viewBuffers[self._buffer].colorAttachments[
+            return self._viewBuffers[self._buffer].imageAttachments[
                 GL.GL_COLOR_ATTACHMENT0].id
 
         self.frameTexture = getFrameTexture()
 
         def getFrameStencil():
-            return self._viewBuffers[self._buffer].colorAttachments[
+            return self._viewBuffers[self._buffer].imageAttachments[
                 GL.GL_DEPTH_STENCIL_ATTACHMENT].id
 
         self._frameStencil = getFrameStencil()

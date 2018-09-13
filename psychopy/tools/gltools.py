@@ -17,20 +17,17 @@ from contextlib import contextmanager
 from PIL import Image
 import numpy as np
 import os
+from psychopy import logging
 
-# -----------------------------------
-# Framebuffer Objects (FBO) Functions
-# -----------------------------------
-#
-# The functions below simplify the creation and management of Framebuffer
-# Objects (FBOs). FBO are containers for image buffers (textures or
-# renderbuffers) frequently used for off-screen rendering.
-#
 
+# -------------------------
+# Framebuffer Objects (FBO)
+# -------------------------
+#
 class FramebufferInfo(object):
     """Framebuffer data descriptor. This class only stores information used to
     create and access framebuffers. There is no guarantee the data stored
-    represents the current state of the framebuffer.
+    represents the current state of the framebuffer it references.
 
     """
     __slots__ = [
@@ -38,68 +35,76 @@ class FramebufferInfo(object):
         'target',
         'width',
         'height',
-        'colorAttachments',
-        'depthStencilAttachment']
+        'samples',
+        'imageAttachments']
 
     def __init__(self,
                  name=GL.GLuint(0),
                  target=GL.GL_FRAMEBUFFER,
-                 width=800,
-                 height=600,
-                 colorAttachments=None,
-                 depthStencilAttachment=None):
-        """
+                 width=0,
+                 height=0,
+                 samples=1,
+                 imageAttachments=None):
+        """Constructor for FramebufferInfo. No framebuffer is created during
+        initialization of this class.
+
         Parameters
         ----------
         name : GLuint
             Assigned framebuffer name, uninitialized if 0.
         target : int
             Framebuffer target (either GL_FRAMEBUFFER or GL_FRAMEBUFFER_EXT).
-        width : int
-            Width of the framebuffer in pixels.
-        height : int
-            Height of the framebuffer in pixels.
-        colorAttachments : dict
+        width and height : int
+            Dimensions of the framebuffer in pixels. Dimensions are only
+            informative to ensure attachments have appropriate dimensions. Both
+            values must be >0.
+        samples : int
+            Number of samples for multisample image attachments. This is only
+            informative, allowing us to check if all attachments use the same
+            number of samples.
+        imageAttachments : dict
             Image attachments associated with this framebuffer. Attachments are
             specified as a dictionary where keys are attachment points (e.g.
-            GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, etc.) and buffer
-            descriptor type (Renderbuffer or TexImage2D). If using a combined
-            depth/stencil format such as GL_DEPTH24_STENCIL8,
-            GL_DEPTH_ATTACHMENT and GL_STENCIL_ATTACHMENT must be passed the
-            same buffer. Alternatively, one can use GL_DEPTH_STENCIL_ATTACHMENT
-            instead. If using multisample buffers, all attachment images must
-            use the same number of samples!.
-        depthStencilAttachment : dict
-            todo
+            GL_COLOR_ATTACHMENT0) and color buffer descriptor types
+            (RenderbufferInfo or TexImage2D) are values.
+        depthStencilAttachments : dict
+            Depth-stencil attachment. Depth-only buffers are allowed. The
+            internal format is checked to determine the attachment type.
+
+        Notes
+        -----
+        If using multisample buffers, all attachment images must use the same
+        number of samples!.
 
         """
         self.id = name
         self.target = target
-        self.width = width
-        self.height = height
-        self.colorAttachments = colorAttachments
-        self.depthStencilAttachment = depthStencilAttachment
+        self.width = int(width)
+        self.height = int(height)
+        self.samples = int(samples)
+        self.imageAttachments = \
+            dict() if imageAttachments is None else imageAttachments
 
     def __eq__(self, other):
         # equivalent if the target and ID are the same
         if not isinstance(other, FramebufferInfo):
-            raise TypeError()
+            raise TypeError(
+                "Incompatible type '{}' for binary operator '=='.".format(
+                    type(other).__name__))
 
         return self.id == other.id and self.target == other.target
 
 
-def RenderPassInfo(object):
-    """Class which describes how to render a Framebuffer."""
-    pass
-
-
-def createFBO(fboInfo):
+def createFramebuffer(fboInfo, configAttachments=True):
     """Create a Framebuffer Object.
 
     Parameters
     ----------
     fboInfo : :obj:`FramebufferInfo`
         Framebuffer data descriptor.
+    configAttachments : :obj:`bool`
+        Configure any uninitialized attachments to match the framebuffer's
+        properties.
 
     Returns
     -------
@@ -115,108 +120,170 @@ def createFBO(fboInfo):
 
     Examples
     --------
-    # empty framebuffer with no attachments
-    fbo = createFBO()  # invalid until attachments are added
+    # create a framebuffer with image attachments
+    colorTex = gltools.TexImage2dInfo(width=800, height=600)
+    depthRb = gltools.RenderbufferInfo(width=800, height=600,
+        internalFormat=GL.GL_DEPTH24_STENCIL8)
 
-    # create a render target with multiple color texture attachments
-    colorTex = createTexImage2D(1024,1024)  # empty texture
-    depthRb = createRenderbuffer(800,600,internalFormat=GL.GL_DEPTH24_STENCIL8)
+    fbo = gltools.FramebufferInfo(
+        width=800,
+        height=600,
+        imageAttachments={
+            GL.GL_COLOR_ATTACHMENT0: colorBuffer,
+            GL.GL_DEPTH_STENCIL_ATTACHMENT: depthBuffer}
+    )
 
-    # attach images
-    GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo.id)
-    attach(GL.GL_COLOR_ATTACHMENT0, colorTex)
-    attach(GL.GL_DEPTH_ATTACHMENT, depthRb)
-    attach(GL.GL_STENCIL_ATTACHMENT, depthRb)
-    # or attach(GL.GL_DEPTH_STENCIL_ATTACHMENT, depthRb)
-    GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+    isComplete = gltools.createFramebuffer(fbo)
 
-    # above is the same as
-    with useFBO(fbo):
-        attach(GL.GL_COLOR_ATTACHMENT0, colorTex)
-        attach(GL.GL_DEPTH_ATTACHMENT, depthRb)
-        attach(GL.GL_STENCIL_ATTACHMENT, depthRb)
-
-    # examples of userData some custom function might access
-    fbo.userData['flags'] = ['left_eye', 'clear_before_use']
-
-
-
-    # depth only texture (for shadow mapping?)
-    depthTex = createTexImage2D(800, 600,
-                                internalFormat=GL.GL_DEPTH_COMPONENT24,
-                                pixelFormat=GL.GL_DEPTH_COMPONENT)
-    fbo = createFBO([(GL.GL_DEPTH_ATTACHMENT, depthTex)])  # is valid
-
-    # discard FBO descriptor, just give me the ID
-    frameBuffer = createFBO().id
+    # adding attachments can be deferred to after framebuffer initialization
+    gltools.updateFBO(fbo, {GL.GL_COLOR_ATTACHMENT1: colorBuffer2})
 
     """
     # create a framebuffer descriptor
     GL.glGenFramebuffers(1, ctypes.byref(fboInfo.id))
 
     # setup attachments
-    if fboInfo.colorAttachments:
-        # get the previous binding, restore it after setup
-        prevFBO = GL.GLint()
-        GL.glGetIntegerv(GL.GL_FRAMEBUFFER_BINDING, ctypes.byref(prevFBO))
-        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fboInfo.id)
+    if fboInfo.imageAttachments:
+        return updateFBO(fboInfo, fboInfo.imageAttachments, configAttachments)
 
-        for attachPoint, imageBuffer in fboInfo.colorAttachments.items():
-            if imageBuffer.width != fboInfo.width or \
-                    imageBuffer.height != fboInfo.height:
-                pass
-
-            attach(attachPoint, imageBuffer)
-
-        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, prevFBO.value)
-
-    return True
+    return False  # no attachments, buffer is incomplete
 
 
-def attach(attachPoint, imageBuffer):
-    """Attach an image to a specified attachment point on the presently bound
-    FBO.
+def updateFBO(fboInfo,
+              imageAttachments=None,
+              configAttachments=True,
+              keepBindState=False):
+    """Update a framebuffer's image attachments.
 
     Parameters
     ----------
-    attachPoint :obj:`int`
-        Attachment point for 'imageBuffer' (e.g. GL.GL_COLOR_ATTACHMENT0).
-    imageBuffer : :obj:`TexImage2D` or :obj:`Renderbuffer`
-        Framebuffer-attachable buffer descriptor.
+    fboInfo : FramebufferInfo
+        Framebuffer descriptor to update attachments.
+    imageAttachments : dict
+        Image attachments to update. Attachments are specified as a dictionary
+        where keys are attachment points (e.g. GL_COLOR_ATTACHMENT0,
+        GL_DEPTH_STENCIL_ATTACHMENT etc.) and image buffer descriptor types
+        (RenderbufferInfo or TexImage2dInfo) are values. If descriptors are not
+        initialized (name == 0), they will be before binding.
+    configAttachments : :obj:`bool`
+        Configure any uninitialized attachments to match the framebuffer's
+        properties.
+    keepBindState : bool
+        Keep the current framebuffer binding state. This is not required if the
+        FBO referenced in fboInfo is currently bound. This incurs some
+        additional overhead but may be necessary if you want to make changes to
+        the FBO without disturbing the current binding state.
 
     Returns
     -------
-    None
-
-    Examples
-    --------
-    # with descriptors colorTex and depthRb
-    GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
-    attach(GL.GL_COLOR_ATTACHMENT0, colorTex)
-    attach(GL.GL_DEPTH_STENCIL_ATTACHMENT, depthRb)
-    GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, lastBoundFbo)
-
-    # same as above, but using a context manager
-    with useFBO(fbo):
-        attach(GL.GL_COLOR_ATTACHMENT0, colorTex)
-        attach(GL.GL_DEPTH_STENCIL_ATTACHMENT, depthRb)
+    bool
+        Completeness status of the framebuffer after adding attachments.
 
     """
-    # We should also support binding GL names specified as integers. Right now
-    # you need as descriptor which contains the target and name for the buffer.
-    #
-    if isinstance(imageBuffer, (TexImage2D, TexImage2DMultisample)):
-        GL.glFramebufferTexture2D(
-            GL.GL_FRAMEBUFFER,
-            attachPoint,
-            imageBuffer.target,
-            imageBuffer.id, 0)
-    elif isinstance(imageBuffer, RenderbufferInfo):
-        GL.glFramebufferRenderbuffer(
-            GL.GL_FRAMEBUFFER,
-            attachPoint,
-            imageBuffer.target,
-            imageBuffer.id)
+    # handle framebuffer bindings
+    prevFBO = 0
+    if not keepBindState:  # avoid the unnecessary glGet* call
+        prevFBO = getIntegerv(GL.GL_FRAMEBUFFER_BINDING)
+        # don't rebind if the target FBO is already bound
+        if fboInfo.id != prevFBO:
+            GL.glBindFramebuffer(fboInfo.target, fboInfo.id)
+
+    # update color and depth-stencil attachments
+    if imageAttachments is not None:
+        for attachPoint, imageBuffer in fboInfo.imageAttachments.items():
+            # attach the buffer, how it's done depends on the type
+            if isinstance(imageBuffer, (TexImage2dInfo, TexImage2DMultisample)):
+                if imageBuffer.id.value == GL.GL_NONE:  # not initialized
+                    if configAttachments:
+                        imageBuffer.width = fboInfo.width
+                        imageBuffer.height = fboInfo.height
+                    createTexImage2D(imageBuffer)
+                GL.glFramebufferTexture2D(
+                    fboInfo.target, attachPoint, imageBuffer.target,
+                    imageBuffer.id, 0)
+            elif isinstance(imageBuffer, RenderbufferInfo):
+                if imageBuffer.id.value == GL.GL_NONE:  # not initialized
+                    if configAttachments:
+                        imageBuffer.width = fboInfo.width
+                        imageBuffer.height = fboInfo.height
+                        imageBuffer.samples = fboInfo.samples
+                    createRenderbuffer(imageBuffer)
+                GL.glFramebufferRenderbuffer(
+                    fboInfo.target, attachPoint, imageBuffer.target,
+                    imageBuffer.id)
+
+            # update the attachment point in the descriptor
+            fboInfo.imageAttachments[attachPoint] = imageBuffer
+
+    # check the FBO for completeness
+    isComplete = GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER) == \
+                 GL.GL_FRAMEBUFFER_COMPLETE
+
+    # rebind previous framebuffer
+    if not keepBindState and fboInfo.id != prevFBO:
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, prevFBO)
+
+    return isComplete
+
+
+def validateFBO(fboInfo, keepBindState=False):
+    """Check if all references in the framebuffer descriptor match the OpenGL
+    state. This is intended for debugging purposes only.
+
+    Parameters
+    ----------
+    fboInfo : FramebufferInfo
+        Framebuffer descriptor to query.
+    keepBindState : bool
+        Keep the current framebuffer binding state. This is not required if the
+        FBO referenced in fboInfo is currently bound. This incurs some
+        additional overhead but may be necessary if you want to make changes to
+        the FBO without disturbing the current binding state.
+
+    Returns
+    -------
+    bool
+        True if all descriptor values are congruent with the driver's.
+
+    """
+    # handle framebuffer bindings
+    prevFBO = 0
+    if not keepBindState:
+        prevFBO = getIntegerv(GL.GL_FRAMEBUFFER_BINDING)
+        # don't rebind if the target FBO is already bound
+        if fboInfo.id != prevFBO:
+            GL.glBindFramebuffer(fboInfo.target, fboInfo.id)
+
+    isValid = True
+    if fboInfo.imageAttachments is not None:
+        objType = GL.GLint()
+        objName = GL.GLint()
+        for attachPoint, imageBuffer in fboInfo.imageAttachments.items():
+            GL.glGetFramebufferAttachmentParameteriv(
+                fboInfo.target, attachPoint,
+                GL.GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,
+                ctypes.byref(objType))
+
+            isTextureType = isinstance(
+                imageBuffer, (TexImage2dInfo, TexImage2DMultisample,))
+            isRenderBufferType = isinstance(imageBuffer, RenderbufferInfo)
+
+            if objType.value == GL.GL_TEXTURE and isTextureType or \
+                    objType.value == GL.GL_RENDERBUFFER and isRenderBufferType:
+                GL.glGetFramebufferAttachmentParameteriv(
+                    fboInfo.target, attachPoint,
+                    GL.GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,
+                    ctypes.byref(objName))
+                if imageBuffer.id.value != objName.value:
+                    isValid = False
+            else:
+                isValid = False
+
+    # rebind previous framebuffer
+    if not keepBindState and fboInfo.id != prevFBO:
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, prevFBO)
+
+    return isValid
 
 
 def isComplete():
@@ -231,7 +298,7 @@ def isComplete():
            GL.GL_FRAMEBUFFER_COMPLETE
 
 
-def deleteFBO(fbo):
+def deleteFBO(fboInfo):
     """Delete a framebuffer.
 
     Returns
@@ -239,8 +306,7 @@ def deleteFBO(fbo):
     :obj:`None'
 
     """
-    GL.glDeleteFramebuffers(
-        1, fbo.id if isinstance(fbo, Framebuffer) else int(fbo))
+    GL.glDeleteFramebuffers(1, fboInfo.id)
 
 
 def blitFBO(srcRect, dstRect=None, filter=GL.GL_LINEAR):
@@ -354,7 +420,7 @@ class RenderbufferInfo(object):
     """Renderbuffer data descriptor."""
     __slots__ = ['id', 'target', 'width', 'height', 'internalFormat', 'samples']
 
-    def __init__(self, name=GL.GLuint(0), target=GL.GL_FRAMEBUFFER, width=0,
+    def __init__(self, name=GL.GLuint(0), target=GL.GL_RENDERBUFFER, width=0,
                  height=0, internalFormat=GL.GL_RGBA8, samples=1):
         self.id = name
         self.target = target
@@ -375,7 +441,7 @@ class RenderbufferInfo(object):
         return self.samples > 1
 
 
-def createRenderbuffer(width, height, internalFormat=GL.GL_RGBA8, samples=1):
+def createRenderbuffer(rbInfo):
     """Create a new Renderbuffer Object with a specified internal format. A
     multisample storage buffer is created if samples > 1.
 
@@ -406,47 +472,37 @@ def createRenderbuffer(width, height, internalFormat=GL.GL_RGBA8, samples=1):
     be used to store arbitrary data associated with the buffer.
 
     """
-    width = int(width)
-    height = int(height)
-
     # create a new renderbuffer ID
-    rbId = GL.GLuint()
-    GL.glGenRenderbuffers(1, ctypes.byref(rbId))
-    GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, rbId)
+    GL.glGenRenderbuffers(1, ctypes.byref(rbInfo.id))
+    GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, rbInfo.id)
 
-    if samples > 1:
+    if rbInfo.samples > 1:
         # determine if the 'samples' value is valid
         maxSamples = getIntegerv(GL.GL_MAX_SAMPLES)
-        if (samples & (samples - 1)) != 0:
+        if (rbInfo.samples & (rbInfo.samples - 1)) != 0:
             raise ValueError('Invalid number of samples, must be power-of-two.')
-        elif samples > maxSamples:
+        elif rbInfo.samples > maxSamples:
             raise ValueError('Invalid number of samples, must be <{}.'.format(
                 maxSamples))
 
         # create a multisample render buffer storage
         GL.glRenderbufferStorageMultisample(
-            GL.GL_RENDERBUFFER,
-            samples,
-            internalFormat,
-            width,
-            height)
+            rbInfo.target,
+            rbInfo.samples,
+            rbInfo.internalFormat,
+            rbInfo.width,
+            rbInfo.height)
 
     else:
+        print("make rb")
         GL.glRenderbufferStorage(
-            GL.GL_RENDERBUFFER,
-            internalFormat,
-            width,
-            height)
+            rbInfo.target,
+            rbInfo.internalFormat,
+            rbInfo.width,
+            rbInfo.height)
 
     # done, unbind it
-    GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, 0)
-
-    return RenderbufferInfo(rbId,
-                            GL.GL_RENDERBUFFER,
-                            width,
-                            height,
-                            internalFormat,
-                            samples)
+    GL.glBindRenderbuffer(rbInfo.target, 0)
 
 
 def deleteRenderbuffer(renderBuffer):
@@ -489,52 +545,103 @@ TexImage2D = namedtuple(
      'userData'])
 
 
-def createTexImage2D(width, height, target=GL.GL_TEXTURE_2D, level=0,
-                     internalFormat=GL.GL_RGBA8, pixelFormat=GL.GL_RGBA,
-                     dataType=GL.GL_FLOAT, data=None, unpackAlignment=4,
-                     texParameters=()):
+class TexImage2dInfo(object):
+    """Framebuffer data descriptor. This class only stores information used to
+    create and access framebuffers. There is no guarantee the data stored
+    represents the current state of the framebuffer it references.
+
+    """
+    __slots__ = [
+        'id',
+        'target',
+        'width',
+        'height',
+        'level',
+        'internalFormat',
+        'pixelFormat',
+        'dataType',
+        'unpackAlignment',
+        'texParameters',
+        'dataPtr']
+
+    def __init__(self,
+                 name=GL.GLuint(0),
+                 target=GL.GL_TEXTURE_2D,
+                 width=0,
+                 height=0,
+                 level=0,
+                 internalFormat=GL.GL_RGBA8,
+                 pixelFormat=GL.GL_RGBA,
+                 dataType=GL.GL_FLOAT,
+                 unpackAlignment=4,
+                 texParameters=None,
+                 dataPtr=None):
+        """Constructor for TexImage2dInfo. No texture is initialized.
+
+        Parameters
+        ----------
+        width : :obj:`int`
+            Texture width in pixels.
+        height : :obj:`int`
+            Texture height in pixels.
+        target : :obj:`int`
+            The target texture should only be either GL_TEXTURE_2D or
+            GL_TEXTURE_RECTANGLE.
+        level : :obj:`int`
+            LOD number of the texture, should be 0 if GL_TEXTURE_RECTANGLE is
+            the target.
+        internalFormat : :obj:`int`
+            Internal format for texture data (e.g. GL_RGBA8, GL_R11F_G11F_B10F).
+        pixelFormat : :obj:`int`
+            Pixel data format (e.g. GL_RGBA, GL_DEPTH_STENCIL)
+        dataType : :obj:`int`
+            Data type for pixel data (e.g. GL_FLOAT, GL_UNSIGNED_BYTE).
+        dataPtr : :obj:`ctypes` or :obj:`None`
+            Ctypes pointer to image data. If None is specified, the texture will
+            be created but pixel data will be uninitialized.
+        unpackAlignment : :obj:`int`
+            Alignment requirements of each row in memory. Default is 4.
+        texParameters : :obj:`list` of :obj:`tuple` of :obj:`int`
+            Optional texture parameters specified as a list of tuples. These
+            values are passed to 'glTexParameteri'. Each tuple must contain a
+            parameter name and value. For example, texParameters=[
+            (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR), (GL.GL_TEXTURE_MAG_FILTER,
+            GL.GL_LINEAR)]
+
+        """
+        self.id = name
+        self.target = target
+        self.width = int(width)
+        self.height = int(height)
+        self.level = int(level)
+        self.internalFormat = int(internalFormat)
+        self.pixelFormat = pixelFormat
+        self.dataType = dataType
+        self.unpackAlignment = unpackAlignment
+        self.dataPtr = dataPtr
+        self.texParameters = texParameters
+
+    def __eq__(self, other):
+        # equivalent if the target and ID are the same
+        if not isinstance(other, FramebufferInfo):
+            raise TypeError(
+                "Incompatible type '{}' for binary operator '=='.".format(
+                    type(other).__name__))
+
+        return self.id == other.id and self.target == other.target
+
+
+def createTexImage2D(textureInfo):
     """Create a 2D texture in video memory. This can only create a single 2D
     texture with targets GL_TEXTURE_2D or GL_TEXTURE_RECTANGLE.
 
     Parameters
     ----------
-    width : :obj:`int`
-        Texture width in pixels.
-    height : :obj:`int`
-        Texture height in pixels.
-    target : :obj:`int`
-        The target texture should only be either GL_TEXTURE_2D or
-        GL_TEXTURE_RECTANGLE.
-    level : :obj:`int`
-        LOD number of the texture, should be 0 if GL_TEXTURE_RECTANGLE is the
-        target.
-    internalFormat : :obj:`int`
-        Internal format for texture data (e.g. GL_RGBA8, GL_R11F_G11F_B10F).
-    pixelFormat : :obj:`int`
-        Pixel data format (e.g. GL_RGBA, GL_DEPTH_STENCIL)
-    dataType : :obj:`int`
-        Data type for pixel data (e.g. GL_FLOAT, GL_UNSIGNED_BYTE).
-    data : :obj:`ctypes` or :obj:`None`
-        Ctypes pointer to image data. If None is specified, the texture will be
-        created but pixel data will be uninitialized.
-    unpackAlignment : :obj:`int`
-        Alignment requirements of each row in memory. Default is 4.
-    texParameters : :obj:`list` of :obj:`tuple` of :obj:`int`
-        Optional texture parameters specified as a list of tuples. These values
-        are passed to 'glTexParameteri'. Each tuple must contain a parameter
-        name and value. For example, texParameters=[(GL.GL_TEXTURE_MIN_FILTER,
-        GL.GL_LINEAR), (GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)]
-
-    Returns
-    -------
-    :obj:`TexImage2D`
-        A TexImage2D descriptor.
+    textureInfo : TexImage2dInfo
+        2D texture descriptor.
 
     Notes
     -----
-    The 'userData' field of the returned descriptor is a dictionary that can
-    be used to store arbitrary data associated with the texture.
-
     Previous textures are unbound after calling 'createTexImage2D'.
 
     Examples
@@ -568,45 +675,38 @@ def createTexImage2D(width, height, target=GL.GL_TEXTURE_2D, level=0,
     GL.glBindTexture(GL.GL_TEXTURE_2D, textureDesc.id)
 
     """
-    width = int(width)
-    height = int(height)
+    width = int(textureInfo.width)
+    height = int(textureInfo.height)
 
     if width <= 0 or height <= 0:
         raise ValueError("Invalid image dimensions {} x {}.".format(
             width, height))
 
-    if target == GL.GL_TEXTURE_RECTANGLE:
-        if level != 0:
+    if textureInfo.target == GL.GL_TEXTURE_RECTANGLE:
+        if textureInfo.level != 0:
             raise ValueError("Invalid level for target GL_TEXTURE_RECTANGLE, "
                              "must be 0.")
         GL.glEnable(GL.GL_TEXTURE_RECTANGLE)
 
-    colorTexId = GL.GLuint()
-    GL.glGenTextures(1, ctypes.byref(colorTexId))
-    GL.glBindTexture(target, colorTexId)
-    GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, int(unpackAlignment))
-    GL.glTexImage2D(target, level, internalFormat,
+    GL.glGenTextures(1, ctypes.byref(textureInfo.id))
+    GL.glBindTexture(textureInfo.target, textureInfo.id)
+    GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, textureInfo.unpackAlignment)
+    GL.glTexImage2D(textureInfo.target,
+                    textureInfo.level,
+                    textureInfo.internalFormat,
                     width, height, 0,
-                    pixelFormat, dataType, data)
+                    textureInfo.pixelFormat,
+                    textureInfo.dataType,
+                    textureInfo.dataPtr)
+
+    print(textureInfo.id)
 
     # apply texture parameters
-    if texParameters:
-        for pname, param in texParameters:
-            GL.glTexParameteri(target, pname, param)
+    if textureInfo.texParameters:
+        for pname, param in textureInfo.texParameters:
+            GL.glTexParameteri(textureInfo.target, pname, param)
 
-    GL.glBindTexture(target, 0)
-
-    return TexImage2D(colorTexId,
-                      target,
-                      width,
-                      height,
-                      internalFormat,
-                      pixelFormat,
-                      dataType,
-                      unpackAlignment,
-                      1,
-                      False,
-                      dict())
+    GL.glBindTexture(textureInfo.target, 0)
 
 
 # Descriptor for 2D mutlisampled texture
