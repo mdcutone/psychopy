@@ -33,14 +33,21 @@ class FramebufferInfo(object):
     represents the current state of the framebuffer.
 
     """
-    __slots__ = ['id', 'target', 'width', 'height', 'colorAttachments']
+    __slots__ = [
+        'id',
+        'target',
+        'width',
+        'height',
+        'colorAttachments',
+        'depthStencilAttachment']
 
     def __init__(self,
                  name=GL.GLuint(0),
                  target=GL.GL_FRAMEBUFFER,
                  width=800,
                  height=600,
-                 colorAttachments=None):
+                 colorAttachments=None,
+                 depthStencilAttachment=None):
         """
         Parameters
         ----------
@@ -62,6 +69,8 @@ class FramebufferInfo(object):
             same buffer. Alternatively, one can use GL_DEPTH_STENCIL_ATTACHMENT
             instead. If using multisample buffers, all attachment images must
             use the same number of samples!.
+        depthStencilAttachment : dict
+            todo
 
         """
         self.id = name
@@ -69,6 +78,7 @@ class FramebufferInfo(object):
         self.width = width
         self.height = height
         self.colorAttachments = colorAttachments
+        self.depthStencilAttachment = depthStencilAttachment
 
     def __eq__(self, other):
         # equivalent if the target and ID are the same
