@@ -421,7 +421,7 @@ class GLFWBackend(BaseBackend):
 
             win = self.win  # it's a weakref so faster to call just once
             # if we are using an FBO, bind it
-            if hasattr(win, 'frameBuffer'):
+            if hasattr(win, '_viewBuffers'):
                 GL.glBindFramebufferEXT(GL.GL_FRAMEBUFFER_EXT,
                                         win.frameBuffer)
                 GL.glReadBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)

@@ -27,37 +27,74 @@ import os
 # renderbuffers) frequently used for off-screen rendering.
 #
 
-# FBO descriptor
-Framebuffer = namedtuple(
-    'Framebuffer',
-    ['id',
-     'target',
-     'userData']
-)
+class FramebufferInfo(object):
+    """Framebuffer data descriptor. This class only stores information used to
+    create and access framebuffers. There is no guarantee the data stored
+    represents the current state of the framebuffer.
+
+    """
+    __slots__ = ['id', 'target', 'width', 'height', 'colorAttachments']
+
+    def __init__(self,
+                 name=GL.GLuint(0),
+                 target=GL.GL_FRAMEBUFFER,
+                 width=800,
+                 height=600,
+                 colorAttachments=None):
+        """
+        Parameters
+        ----------
+        name : GLuint
+            Assigned framebuffer name, uninitialized if 0.
+        target : int
+            Framebuffer target (either GL_FRAMEBUFFER or GL_FRAMEBUFFER_EXT).
+        width : int
+            Width of the framebuffer in pixels.
+        height : int
+            Height of the framebuffer in pixels.
+        colorAttachments : dict
+            Image attachments associated with this framebuffer. Attachments are
+            specified as a dictionary where keys are attachment points (e.g.
+            GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, etc.) and buffer
+            descriptor type (Renderbuffer or TexImage2D). If using a combined
+            depth/stencil format such as GL_DEPTH24_STENCIL8,
+            GL_DEPTH_ATTACHMENT and GL_STENCIL_ATTACHMENT must be passed the
+            same buffer. Alternatively, one can use GL_DEPTH_STENCIL_ATTACHMENT
+            instead. If using multisample buffers, all attachment images must
+            use the same number of samples!.
+
+        """
+        self.id = name
+        self.target = target
+        self.width = width
+        self.height = height
+        self.colorAttachments = colorAttachments
+
+    def __eq__(self, other):
+        # equivalent if the target and ID are the same
+        if not isinstance(other, FramebufferInfo):
+            raise TypeError()
+
+        return self.id == other.id and self.target == other.target
 
 
-def createFBO(attachments=()):
+def RenderPassInfo(object):
+    """Class which describes how to render a Framebuffer."""
+    pass
+
+
+def createFBO(fboInfo):
     """Create a Framebuffer Object.
 
     Parameters
     ----------
-    attachments : :obj:`list` or :obj:`tuple` of :obj:`tuple`
-        Optional attachments to initialize the Framebuffer with. Attachments are
-        specified as a list of tuples. Each tuple must contain an attachment
-        point (e.g. GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, etc.) and a
-        buffer descriptor type (Renderbuffer or TexImage2D). If using a combined
-        depth/stencil format such as GL_DEPTH24_STENCIL8, GL_DEPTH_ATTACHMENT
-        and GL_STENCIL_ATTACHMENT must be passed the same buffer. Alternatively,
-        one can use GL_DEPTH_STENCIL_ATTACHMENT instead. If using multisample
-        buffers, all attachment images must use the same number of samples!. As
-        an example, one may specify attachments as 'attachments=((
-        GL.GL_COLOR_ATTACHMENT0, frameTexture), (GL.GL_DEPTH_STENCIL_ATTACHMENT,
-        depthRenderBuffer))'.
+    fboInfo : :obj:`FramebufferInfo`
+        Framebuffer data descriptor.
 
     Returns
     -------
-    :obj:`Framebuffer`
-        Framebuffer descriptor.
+    :obj:`bool`
+        True or False, whether the framebuffer is complete.
 
     Notes
     -----
@@ -104,19 +141,26 @@ def createFBO(attachments=()):
     frameBuffer = createFBO().id
 
     """
-    fboId = GL.GLuint()
-    GL.glGenFramebuffers(1, ctypes.byref(fboId))
-
     # create a framebuffer descriptor
-    fboDesc = Framebuffer(fboId, GL.GL_FRAMEBUFFER, dict())
+    GL.glGenFramebuffers(1, ctypes.byref(fboInfo.id))
 
-    # initial attachments for this framebuffer
-    if attachments:
-        with useFBO(fboDesc):
-            for attachPoint, imageBuffer in attachments:
-                attach(attachPoint, imageBuffer)
+    # setup attachments
+    if fboInfo.colorAttachments:
+        # get the previous binding, restore it after setup
+        prevFBO = GL.GLint()
+        GL.glGetIntegerv(GL.GL_FRAMEBUFFER_BINDING, ctypes.byref(prevFBO))
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fboInfo.id)
 
-    return fboDesc
+        for attachPoint, imageBuffer in fboInfo.colorAttachments.items():
+            if imageBuffer.width != fboInfo.width or \
+                    imageBuffer.height != fboInfo.height:
+                pass
+
+            attach(attachPoint, imageBuffer)
+
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, prevFBO.value)
+
+    return True
 
 
 def attach(attachPoint, imageBuffer):
@@ -157,7 +201,7 @@ def attach(attachPoint, imageBuffer):
             attachPoint,
             imageBuffer.target,
             imageBuffer.id, 0)
-    elif isinstance(imageBuffer, Renderbuffer):
+    elif isinstance(imageBuffer, RenderbufferInfo):
         GL.glFramebufferRenderbuffer(
             GL.GL_FRAMEBUFFER,
             attachPoint,
@@ -281,7 +325,7 @@ def useFBO(fbo):
     """
     prevFBO = GL.GLint()
     GL.glGetIntegerv(GL.GL_FRAMEBUFFER_BINDING, ctypes.byref(prevFBO))
-    toBind = fbo.id if isinstance(fbo, Framebuffer) else int(fbo)
+    toBind = fbo.id if isinstance(fbo, FramebufferInfo) else int(fbo)
     GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, toBind)
     try:
         yield toBind
@@ -296,19 +340,29 @@ def useFBO(fbo):
 # The functions below handle the creation and management of Renderbuffers
 # Objects.
 #
+class RenderbufferInfo(object):
+    """Renderbuffer data descriptor."""
+    __slots__ = ['id', 'target', 'width', 'height', 'internalFormat', 'samples']
 
-# Renderbuffer descriptor type
-Renderbuffer = namedtuple(
-    'Renderbuffer',
-    ['id',
-     'target',
-     'width',
-     'height',
-     'internalFormat',
-     'samples',
-     'multiSample',  # boolean, check if a texture is multisample
-     'userData']  # dictionary for user defined data
-)
+    def __init__(self, name=GL.GLuint(0), target=GL.GL_FRAMEBUFFER, width=0,
+                 height=0, internalFormat=GL.GL_RGBA8, samples=1):
+        self.id = name
+        self.target = target
+        self.width = width
+        self.height = height
+        self.internalFormat = internalFormat
+        self.samples = samples
+
+    def __eq__(self, other):
+        # equivalent if the target and ID are the same
+        if not isinstance(other, RenderbufferInfo):
+            raise TypeError()
+
+        return self.id == other.id and self.target == other.target
+
+    @property
+    def isMultisample(self):
+        return self.samples > 1
 
 
 def createRenderbuffer(width, height, internalFormat=GL.GL_RGBA8, samples=1):
@@ -377,14 +431,12 @@ def createRenderbuffer(width, height, internalFormat=GL.GL_RGBA8, samples=1):
     # done, unbind it
     GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, 0)
 
-    return Renderbuffer(rbId,
-                        GL.GL_RENDERBUFFER,
-                        width,
-                        height,
-                        internalFormat,
-                        samples,
-                        samples > 1,
-                        dict())
+    return RenderbufferInfo(rbId,
+                            GL.GL_RENDERBUFFER,
+                            width,
+                            height,
+                            internalFormat,
+                            samples)
 
 
 def deleteRenderbuffer(renderBuffer):

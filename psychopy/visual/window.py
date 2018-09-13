@@ -14,6 +14,7 @@ import os
 import sys
 import weakref
 import atexit
+import collections
 
 from builtins import map
 from builtins import object
@@ -21,6 +22,7 @@ from builtins import range
 from builtins import str
 from past.builtins import basestring
 
+from psychopy.tools import gltools
 from psychopy.contrib.lazy_import import lazy_import
 from psychopy import colors
 # try to find avbin (we'll overload pyglet's load_library tool and then
@@ -399,6 +401,13 @@ class Window(object):
         # also will need to check for ARB_float extension,
         # but that should be done after context is created
         self._haveShaders = self.backend.shadersSupported
+
+        # additional framebuffers are stored here
+        self._buffer = 'main'
+
+        # Descriptors for view buffers, these store information on how they are
+        # created and used.
+        self._viewBufferDesc = list()
 
         self._setupGL()
 
@@ -990,7 +999,7 @@ class Window(object):
         im = im.convert('RGB')
 
         if self.useFBO and buffer == 'front':
-            GL.glBindFramebufferEXT(GL.GL_FRAMEBUFFER_EXT, self.frameBuffer)
+            GL.glBindFramebufferEXT(GL.GL_FRAMEBUFFER_EXT, self._frameBuffer)
         return im
 
     def saveMovieFrames(self, fileName, codec='libx264',
@@ -1453,56 +1462,91 @@ class Window(object):
         self._shaders['imageStim_adding'] = _shaders.compileProgram(
             _shaders.vertSimple, _shaders.fragImageStim_adding)
 
+    def _setupViewBuffers(self):
+        """Factory function for creating view buffers."""
+        pass
+
     def _setupFrameBuffer(self):
+        """Setup framebuffers for rendering.
 
-        # Setup framebuffer
-        self.frameBuffer = GL.GLuint()
-        GL.glGenFramebuffersEXT(1, ctypes.byref(self.frameBuffer))
-        GL.glBindFramebufferEXT(GL.GL_FRAMEBUFFER_EXT, self.frameBuffer)
+        """
+        # if framebuffers are being used, we gain the "_viewBuffers" attribute
+        self._viewBuffers = {}
 
-        # Create texture to render to
-        self.frameTexture = GL.GLuint()
-        GL.glGenTextures(1, ctypes.byref(self.frameTexture))
-        GL.glBindTexture(GL.GL_TEXTURE_2D, self.frameTexture)
-        GL.glTexParameteri(GL.GL_TEXTURE_2D,
-                           GL.GL_TEXTURE_MAG_FILTER,
-                           GL.GL_LINEAR)
-        GL.glTexParameteri(GL.GL_TEXTURE_2D,
-                           GL.GL_TEXTURE_MIN_FILTER,
-                           GL.GL_LINEAR)
-        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA32F_ARB,
-                        int(self.size[0]), int(self.size[1]), 0,
-                        GL.GL_RGBA, GL.GL_FLOAT, None)
-        # attach texture to the frame buffer
-        GL.glFramebufferTexture2DEXT(GL.GL_FRAMEBUFFER_EXT,
-                                     GL.GL_COLOR_ATTACHMENT0_EXT,
-                                     GL.GL_TEXTURE_2D, self.frameTexture, 0)
+        w = int(self.size[0])
+        h = int(self.size[1])
 
-        # add a stencil buffer
-        self._stencilTexture = GL.GLuint()
-        GL.glGenRenderbuffersEXT(1, ctypes.byref(
-            self._stencilTexture))  # like glGenTextures
-        GL.glBindRenderbufferEXT(GL.GL_RENDERBUFFER_EXT, self._stencilTexture)
-        GL.glRenderbufferStorageEXT(GL.GL_RENDERBUFFER_EXT,
-                                    GL.GL_DEPTH24_STENCIL8_EXT,
-                                    int(self.size[0]), int(self.size[1]))
-        GL.glFramebufferRenderbufferEXT(GL.GL_FRAMEBUFFER_EXT,
-                                        GL.GL_STENCIL_ATTACHMENT_EXT,
-                                        GL.GL_RENDERBUFFER_EXT,
-                                        self._stencilTexture)
+        # create a texture to render to
+        colorBuffer = gltools.createTexImage2D(
+            int(self.size[0]),
+            int(self.size[1]),
+            internalFormat=GL.GL_RGBA32F_ARB,
+            pixelFormat=GL.GL_RGBA,
+            texParameters=(
+                (GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR),
+                (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)))
 
-        status = GL.glCheckFramebufferStatusEXT(GL.GL_FRAMEBUFFER_EXT)
-        if status != GL.GL_FRAMEBUFFER_COMPLETE_EXT:
-            logging.error("Error in framebuffer activation")
-            # UNBIND THE FRAME BUFFER OBJECT THAT WE HAD CREATED
-            GL.glBindFramebufferEXT(GL.GL_FRAMEBUFFER_EXT, 0)
-            return False
+        # Create a depth/stencil buffer. We need to determine whether to include
+        # a stencil buffer by checking 'allowStencil'.
+        if self.allowStencil:
+            depthFormat = GL.GL_DEPTH24_STENCIL8
+            depthAttach = GL.GL_DEPTH_STENCIL_ATTACHMENT
+        else:
+            depthFormat = GL.GL_DEPTH_COMPONENT24
+            depthAttach = GL.GL_DEPTH_ATTACHMENT
+
+        # create the render buffer
+        depthBuffer = gltools.createRenderbuffer(
+            int(self.size[0]),
+            int(self.size[1]),
+            internalFormat=depthFormat)
+
+        # create the framebuffer and attach the depth and color buffers
+
+        frameBuffer = gltools.FramebufferInfo(
+            width=w, height=h,
+            colorAttachments={GL.GL_COLOR_ATTACHMENT0: colorBuffer,
+                              GL.GL_DEPTH_STENCIL_ATTACHMENT: depthBuffer})
+
+        print(gltools.createFBO(frameBuffer))
+
+        # check the FBO for completeness
+        #status = GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER)
+        #if status != GL.GL_FRAMEBUFFER_COMPLETE:
+        #     logging.error("Error in framebuffer activation")
+        #     # UNBIND THE FRAME BUFFER OBJECT THAT WE HAD CREATED
+        #     GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+        #     return False
+
         GL.glDisable(GL.GL_TEXTURE_2D)
-        # clear the buffers (otherwise the texture memory can contain
-        # junk from other app)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        GL.glClear(GL.GL_STENCIL_BUFFER_BIT)
-        GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
+
+        # clear the buffers
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+        if self.allowStencil:
+            GL.glClear(GL.GL_STENCIL_BUFFER_BIT)
+
+        # add the new render target to the storage dictionary
+        self._viewBuffers['main'] = frameBuffer
+
+        # We need to create these getters for backwards compatibility. They
+        # retrieve the OpenGL name of whatever buffer is currently active.
+        def getFramebuffer():
+            return self._viewBuffers[self._buffer].id
+
+        self.frameBuffer = getFramebuffer()
+
+        def getFrameTexture():
+            return self._viewBuffers[self._buffer].colorAttachments[
+                GL.GL_COLOR_ATTACHMENT0].id
+
+        self.frameTexture = getFrameTexture()
+
+        def getFrameStencil():
+            return self._viewBuffers[self._buffer].colorAttachments[
+                GL.GL_DEPTH_STENCIL_ATTACHMENT].id
+
+        self._frameStencil = getFrameStencil()
+
         return True
 
     @attributeSetter
@@ -1751,6 +1795,34 @@ class Window(object):
         """
         if clearBuffer:
             GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+
+    @property
+    def frameBufferAspect(self):
+        """Get the aspect ratio of the current framebuffer."""
+        w, h = self.frameBufferSize
+        return float(w) / float(h)
+
+    @frameBufferAspect.setter
+    def frameBufferAspect(self, value):
+        raise NotImplementedError(
+            "Attribute 'frameBufferAspect' is read-only. Exiting.")
+
+    @property
+    def frameBufferSize(self):
+        """Dimensions of the current framebuffer in pixels. This can differ from
+        the window size.
+
+        """
+        # Stimulus classes should access this property when checking the size
+        # of the render area instead of the window size since they can
+        # frequently differ.
+        #
+        return self.size
+
+    @frameBufferSize.setter
+    def frameBufferSize(self, value):
+        raise NotImplementedError(
+            "Attribute 'frameBufferSize' is read-only. Exiting.")
 
 
 def getMsPerFrame(myWin, nFrames=60, showVisual=False, msg='', msDelay=0.):
