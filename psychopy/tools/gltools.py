@@ -45,7 +45,7 @@ class FramebufferInfo(object):
                  height=0,
                  samples=1,
                  imageAttachments=None):
-        """Constructor for FramebufferInfo. No framebuffer is created during
+        """Constructor for FramebufferInfo. No framebuffer is created during the
         initialization of this class.
 
         Parameters
@@ -67,9 +67,6 @@ class FramebufferInfo(object):
             specified as a dictionary where keys are attachment points (e.g.
             GL_COLOR_ATTACHMENT0) and color buffer descriptor types
             (RenderbufferInfo or TexImage2D) are values.
-        depthStencilAttachments : dict
-            Depth-stencil attachment. Depth-only buffers are allowed. The
-            internal format is checked to determine the attachment type.
 
         Notes
         -----
@@ -121,18 +118,13 @@ def createFramebuffer(fboInfo, configAttachments=True):
     Examples
     --------
     # create a framebuffer with image attachments
-    colorTex = gltools.TexImage2dInfo(width=800, height=600)
-    depthRb = gltools.RenderbufferInfo(width=800, height=600,
-        internalFormat=GL.GL_DEPTH24_STENCIL8)
-
+    colorTex = gltools.TexImage2dInfo()
+    depthRb = gltools.RenderbufferInfo(internalFormat=GL.GL_DEPTH24_STENCIL8)
     fbo = gltools.FramebufferInfo(
         width=800,
         height=600,
-        imageAttachments={
-            GL.GL_COLOR_ATTACHMENT0: colorBuffer,
-            GL.GL_DEPTH_STENCIL_ATTACHMENT: depthBuffer}
-    )
-
+        imageAttachments={GL.GL_COLOR_ATTACHMENT0: colorBuffer,
+                          GL.GL_DEPTH_STENCIL_ATTACHMENT: depthBuffer})
     isComplete = gltools.createFramebuffer(fbo)
 
     # adding attachments can be deferred to after framebuffer initialization

@@ -1424,6 +1424,21 @@ class Window(object):
         else:
             self.useFBO = False
         if self.useFBO:
+            frameBuffer = gltools.FramebufferInfo(
+                width=self.size[0],
+                height=self.size[1],
+                imageAttachments={
+                    GL.GL_COLOR_ATTACHMENT0: gltools.TexImage2dInfo(
+                        internalFormat=GL.GL_RGBA32F_ARB,
+                        texParameters=(
+                            (GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR),
+                            (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR))),
+                    GL.GL_DEPTH_STENCIL_ATTACHMENT: gltools.RenderbufferInfo(
+                        internalFormat=GL.GL_DEPTH24_STENCIL8)
+                }
+            )
+            self._viewBuffers = {'main': frameBuffer}
+            # setup view buffers
             success = self._setupFrameBuffer()
             if not success:
                 self.useFBO = False
@@ -1470,47 +1485,21 @@ class Window(object):
         """Setup framebuffers for rendering.
 
         """
-        # if framebuffers are being used, we gain the "_viewBuffers" attribute
-        self._viewBuffers = {}
+        for key, fboInfo in self._viewBuffers.items():
+            # initialize the FBO, check for completeness
+            if not gltools.createFramebuffer(fboInfo):
+                logging.error("Error in framebuffer activation")
+                # UNBIND THE FRAME BUFFER OBJECT THAT WE HAD CREATED
+                GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+                return False
 
-        w = int(self.size[0])
-        h = int(self.size[1])
+            # clear the buffers
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+            if self.allowStencil:
+                GL.glClear(GL.GL_STENCIL_BUFFER_BIT)
 
-        colorBuffer = gltools.TexImage2dInfo(
-            internalFormat=GL.GL_RGBA32F_ARB,
-            texParameters=(
-                (GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR),
-                (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)))
-
-        depthBuffer = gltools.RenderbufferInfo(
-            internalFormat=GL.GL_DEPTH24_STENCIL8)
-
-        frameBuffer = gltools.FramebufferInfo(
-            width=w, height=h,
-            imageAttachments={
-                GL.GL_COLOR_ATTACHMENT0: colorBuffer,
-                GL.GL_DEPTH_STENCIL_ATTACHMENT: depthBuffer})
-
-        # initialize the FBO, check for completeness
-        if not gltools.createFramebuffer(frameBuffer):
-            logging.error("Error in framebuffer activation")
-            # UNBIND THE FRAME BUFFER OBJECT THAT WE HAD CREATED
-            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
-            return False
-
-        print(frameBuffer.imageAttachments)
-
-        print(depthBuffer.id)
 
         GL.glDisable(GL.GL_TEXTURE_2D)
-
-        # clear the buffers
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
-        if self.allowStencil:
-            GL.glClear(GL.GL_STENCIL_BUFFER_BIT)
-
-        # add the new render target to the storage dictionary
-        self._viewBuffers['main'] = frameBuffer
 
         # We need to create these getters for backwards compatibility. They
         # retrieve the OpenGL name of whatever buffer is currently active.
