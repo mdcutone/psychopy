@@ -549,6 +549,7 @@ class TexImage2dInfo(object):
         'width',
         'height',
         'level',
+        'samples',
         'internalFormat',
         'pixelFormat',
         'dataType',
@@ -562,6 +563,7 @@ class TexImage2dInfo(object):
                  width=0,
                  height=0,
                  level=0,
+                 samples=1,
                  internalFormat=GL.GL_RGBA8,
                  pixelFormat=GL.GL_RGBA,
                  dataType=GL.GL_FLOAT,
@@ -577,28 +579,68 @@ class TexImage2dInfo(object):
         height : :obj:`int`
             Texture height in pixels.
         target : :obj:`int`
-            The target texture should only be either GL_TEXTURE_2D or
-            GL_TEXTURE_RECTANGLE.
+            The target texture should only be either GL_TEXTURE_2D,
+            GL_TEXTURE_RECTANGLE, or GL_TEXTURE_2D_MULTISAMPLE.
         level : :obj:`int`
             LOD number of the texture, should be 0 if GL_TEXTURE_RECTANGLE is
-            the target.
+            the target. Only applicable if 'target' is GL_TEXTURE_2D or
+            GL_TEXTURE_RECTANGLE.
+        samples : :obj:`int`
+            Number of samples per-pixel. This only applies when 'target' is
+            GL_TEXTURE_2D_MULTISAMPLE. If using any other 2D texture target,
+            'samples' should == 1.
         internalFormat : :obj:`int`
             Internal format for texture data (e.g. GL_RGBA8, GL_R11F_G11F_B10F).
         pixelFormat : :obj:`int`
-            Pixel data format (e.g. GL_RGBA, GL_DEPTH_STENCIL)
+            Pixel data format (e.g. GL_RGBA, GL_DEPTH_STENCIL). Only applicable
+            if 'target' is GL_TEXTURE_2D or GL_TEXTURE_RECTANGLE.
         dataType : :obj:`int`
             Data type for pixel data (e.g. GL_FLOAT, GL_UNSIGNED_BYTE).
         dataPtr : :obj:`ctypes` or :obj:`None`
             Ctypes pointer to image data. If None is specified, the texture will
-            be created but pixel data will be uninitialized.
+            be created but pixel data will be uninitialized. Only applicable
+            if 'target' is GL_TEXTURE_2D or GL_TEXTURE_RECTANGLE.
         unpackAlignment : :obj:`int`
-            Alignment requirements of each row in memory. Default is 4.
-        texParameters : :obj:`list` of :obj:`tuple` of :obj:`int`
-            Optional texture parameters specified as a list of tuples. These
-            values are passed to 'glTexParameteri'. Each tuple must contain a
-            parameter name and value. For example, texParameters=[
-            (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR), (GL.GL_TEXTURE_MAG_FILTER,
-            GL.GL_LINEAR)]
+            Alignment requirements of each row in memory. Default is 4. Only
+            applicable if 'target' is GL_TEXTURE_2D or GL_TEXTURE_RECTANGLE.
+        texParameters : :obj:`dict`
+            Optional texture parameters specified as a dictionary. These
+            values are passed to 'glTexParameteri'.
+
+        Examples
+        --------
+        Creating an empty texture::
+
+            import pyglet.gl as GL
+            textureDesc = createTexImage2D(
+                1024, 1024, internalFormat=GL.GL_RGBA8)
+
+        Loading an image from file into video memory::
+
+            from PIL import Image
+            import numpy as np
+            im = Image.open(imageFile)  # 8bpp!
+            im = im.transpose(Image.FLIP_TOP_BOTTOM)  # origin is at bottom
+            im = im.convert("RGBA")
+            pixelData = np.array(im).ctypes  # convert to ctypes!
+
+            # fill out a descriptor
+            width = pixelData.shape[1]
+            height = pixelData.shape[0]
+            textureDesc = gltools.TexImage2dInfo(
+                width,
+                height,
+                internalFormat=GL.GL_RGBA,
+                pixelFormat=GL.GL_RGBA,
+                dataType=GL.GL_UNSIGNED_BYTE,
+                data=texture_array.ctypes,
+                unpackAlignment=1,
+                texParameters={GL.GL_TEXTURE_MAG_FILTER: GL.GL_LINEAR,
+                               GL.GL_TEXTURE_MIN_FILTER: GL.GL_LINEAR})
+
+
+            createTexImage2D(textureDesc)  # create the texture
+            GL.glBindTexture(GL.GL_TEXTURE_2D, textureDesc.id)  # use it
 
         """
         self.id = name
@@ -606,6 +648,7 @@ class TexImage2dInfo(object):
         self.width = int(width)
         self.height = int(height)
         self.level = int(level)
+        self.samples = int(samples)
         self.internalFormat = int(internalFormat)
         self.pixelFormat = pixelFormat
         self.dataType = dataType
@@ -621,6 +664,9 @@ class TexImage2dInfo(object):
                     type(other).__name__))
 
         return self.id == other.id and self.target == other.target
+
+    def isMultisample(self):
+        return self.target == GL.GL_TEXTURE_2D_MULTISAMPLE
 
 
 def createTexImage2D(textureInfo):
@@ -638,33 +684,10 @@ def createTexImage2D(textureInfo):
 
     Examples
     --------
-    import pyglet.gl as GL  # using Pyglet for now
+    Creating a texture from a TexImage2dInfo object::
 
-    # empty texture
-    textureDesc = createTexImage2D(1024, 1024, internalFormat=GL.GL_RGBA8)
-
-    # load texture data from an image file using Pillow and NumPy
-    from PIL import Image
-    import numpy as np
-    im = Image.open(imageFile)  # 8bpp!
-    im = im.transpose(Image.FLIP_TOP_BOTTOM)  # OpenGL origin is at bottom
-    im = im.convert("RGBA")
-    pixelData = np.array(im).ctypes  # convert to ctypes!
-
-    width = pixelData.shape[1]
-    height = pixelData.shape[0]
-    textureDesc = gltools.createTexImage2D(
-        width,
-        height,
-        internalFormat=GL.GL_RGBA,
-        pixelFormat=GL.GL_RGBA,
-        dataType=GL.GL_UNSIGNED_BYTE,
-        data=texture_array.ctypes,
-        unpackAlignment=1,
-        texParameters=[(GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR),
-                       (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)])
-
-    GL.glBindTexture(GL.GL_TEXTURE_2D, textureDesc.id)
+        createTexImage2D(textureDesc)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, textureDesc.id)  # use it
 
     """
     width = int(textureInfo.width)
@@ -680,22 +703,40 @@ def createTexImage2D(textureInfo):
                              "must be 0.")
         GL.glEnable(GL.GL_TEXTURE_RECTANGLE)
 
-    GL.glGenTextures(1, ctypes.byref(textureInfo.id))
-    GL.glBindTexture(textureInfo.target, textureInfo.id)
-    GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, textureInfo.unpackAlignment)
-    GL.glTexImage2D(textureInfo.target,
-                    textureInfo.level,
-                    textureInfo.internalFormat,
-                    width, height, 0,
-                    textureInfo.pixelFormat,
-                    textureInfo.dataType,
-                    textureInfo.dataPtr)
+    if textureInfo.target in (GL.GL_TEXTURE_RECTANGLE, GL.GL_TEXTURE_2D):
+        GL.glGenTextures(1, ctypes.byref(textureInfo.id))
+        GL.glBindTexture(textureInfo.target, textureInfo.id)
+        GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, textureInfo.unpackAlignment)
+        GL.glTexImage2D(textureInfo.target,
+                        textureInfo.level,
+                        textureInfo.internalFormat,
+                        width, height, 0,
+                        textureInfo.pixelFormat,
+                        textureInfo.dataType,
+                        textureInfo.dataPtr)
+    elif textureInfo.target == GL.GL_TEXTURE_2D_MULTISAMPLE:
+        # determine if the 'samples' value is valid
+        maxSamples = getIntegerv(GL.GL_MAX_SAMPLES)
+        if (textureInfo.samples & (textureInfo.samples - 1)) != 0:
+            raise ValueError('Invalid number of samples, must be power-of-two.')
+        elif textureInfo.samples <= 0 or textureInfo.samples > maxSamples:
+            raise ValueError('Invalid number of samples, must be <{}.'.format(
+                maxSamples))
 
-    print(textureInfo.id)
+        colorTexId = GL.GLuint()
+        GL.glGenTextures(1, ctypes.byref(colorTexId))
+        GL.glBindTexture(textureInfo.target, colorTexId)
+        GL.glTexImage2DMultisample(
+            textureInfo.target,
+            textureInfo.samples,
+            textureInfo.internalFormat,
+            width, height, GL.GL_TRUE)
+    else:
+        raise ValueError("Unsupported texture target specified.")
 
     # apply texture parameters
     if textureInfo.texParameters:
-        for pname, param in textureInfo.texParameters:
+        for pname, param in textureInfo.texParameters.items():
             GL.glTexParameteri(textureInfo.target, pname, param)
 
     GL.glBindTexture(textureInfo.target, 0)
