@@ -1430,9 +1430,9 @@ class Window(object):
                 imageAttachments={
                     GL.GL_COLOR_ATTACHMENT0: gltools.TexImage2dInfo(
                         internalFormat=GL.GL_RGBA32F_ARB,
-                        texParameters=(
-                            (GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR),
-                            (GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR))),
+                        texParameters={
+                            GL.GL_TEXTURE_MAG_FILTER: GL.GL_LINEAR,
+                            GL.GL_TEXTURE_MIN_FILTER: GL.GL_LINEAR}),
                     GL.GL_DEPTH_STENCIL_ATTACHMENT: gltools.RenderbufferInfo(
                         internalFormat=GL.GL_DEPTH24_STENCIL8)
                 }
