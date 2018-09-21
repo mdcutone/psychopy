@@ -36,7 +36,8 @@ class FramebufferInfo(object):
         'width',
         'height',
         'samples',
-        'imageAttachments']
+        'imageAttachments',
+        'renderPass']
 
     def __init__(self,
                  name=GL.GLuint(0),
@@ -44,7 +45,8 @@ class FramebufferInfo(object):
                  width=0,
                  height=0,
                  samples=1,
-                 imageAttachments=None):
+                 imageAttachments=None,
+                 renderPass=None):
         """Constructor for FramebufferInfo. No framebuffer is created during the
         initialization of this class.
 
@@ -57,7 +59,7 @@ class FramebufferInfo(object):
         width and height : int
             Dimensions of the framebuffer in pixels. Dimensions are only
             informative to ensure attachments have appropriate dimensions. Both
-            values must be >0.
+            values must be >0 at initialization.
         samples : int
             Number of samples for multisample image attachments. This is only
             informative, allowing us to check if all attachments use the same
@@ -110,15 +112,14 @@ def createFramebuffer(fboInfo, configAttachments=True):
 
     Notes
     -----
-        - All buffers must have the same number of samples.
-        - The 'userData' field of the returned descriptor is a dictionary that
+        1. All buffers must have the same number of samples.
+        2. The 'userData' field of the returned descriptor is a dictionary that
           can be used to store arbitrary data associated with the FBO.
-        - Framebuffers need a single attachment to be complete.
+        3. Framebuffers need a single attachment to be complete.
 
     Examples
     --------
     Setting up a framebuffer with image attachments::
-
         # create some color and depth buffers, these will automatically adopt
         # the dimensions of the framebuffer
         colorTex = gltools.TexImage2dInfo()
@@ -175,6 +176,11 @@ def updateFramebuffer(fboInfo,
     -------
     bool
         Completeness status of the framebuffer after adding attachments.
+
+    Examples
+    --------
+    Adding attachments can be deferred to after framebuffer initialization::
+        gltools.updateFramebuffer(fbo, {GL.GL_COLOR_ATTACHMENT1: colorTex2})
 
     """
     # handle framebuffer bindings
@@ -519,17 +525,7 @@ def deleteRenderbuffer(rbInfo):
 # -----------------
 # Texture Functions
 # -----------------
-
-# 2D texture descriptor. You can 'wrap' existing texture IDs with TexImage2D to
-# use them with functions that require that type as input.
 #
-#   texId = getTextureIdFromAPI()
-#   texDesc = TexImage2D(texId, GL.GL_TEXTURE_2D, 1024, 1024)
-#   attachFramebufferImage(fbo, texDesc, GL.GL_COLOR_ATTACHMENT0)
-#   # examples of custom userData some function might access
-#   texDesc.userData['flags'] = ['left_eye', 'clear_before_use']
-#
-
 class TexImage2dInfo(object):
     """Framebuffer data descriptor. This class only stores information used to
     create and access framebuffers. There is no guarantee the data stored
@@ -666,10 +662,15 @@ class TexImage2dInfo(object):
     def isMultisample(self):
         return self.target == GL.GL_TEXTURE_2D_MULTISAMPLE
 
+    @property
+    def isInitialized(self):
+        return self.id.value > 0
+
 
 def createTexImage2D(textureInfo):
     """Create a 2D texture in video memory. This can only create a single 2D
-    texture with targets GL_TEXTURE_2D or GL_TEXTURE_RECTANGLE.
+    texture with targets GL_TEXTURE_2D, GL_TEXTURE_RECTANGLE or
+    GL_TEXTURE_2D_MULTISAMPLE.
 
     Parameters
     ----------
@@ -755,48 +756,51 @@ def deleteTexture(texture):
 # ---------------------------
 # Vertex Buffer Objects (VBO)
 # ---------------------------
+#
+class VertexBufferInfo(object):
+    """Single-storage array buffer data descriptor."""
+
+    __slots__ = [
+        'name',
+        'target',
+        'dataType',
+        'dataPtr',
+        'usage',
+        'vectorSize']
+
+    def __init__(self,
+                 name=GL.GLuint(0),
+                 target=GL.GL_ARRAY_BUFFER,
+                 dataType=GL.GL_FLOAT,
+                 dataPtr=None,
+                 usage=GL.GL_STATIC_DRAW,
+                 vectorSize=3):
+        self.name = name
+        self.target = target
+        self.dataType = dataType
+        self.dataPtr = dataPtr  # only valid if isInitialized > 0
+        self.usage = usage
+        self.vectorSize = vectorSize
+
+    @property
+    def isInitialized(self):
+        return self.name.value > 0
 
 
-VertexBufferObject = namedtuple(
-    'VertexBufferObject',
-    ['id',
-     'size',
-     'count',
-     'indices',
-     'usage',
-     'dtype',
-     'userData']
-)
-
-VertexArrayObject = namedtuple(
-    'VertexArrayObject',
-    ['id',
-     'indices',
-     'isIndexed',
-     'userData']
-)
-
-
-def createVBO(data, size=3, dtype=GL.GL_FLOAT, target=GL.GL_ARRAY_BUFFER):
+def createVertexBuffer(vboInfo, uploadArray=None):
     """Create a single-storage array buffer, often referred to as Vertex Buffer
     Object (VBO).
 
     Parameters
     ----------
-    data : :obj:`list` or :obj:`tuple` of :obj:`float` or :obj:`int`
-        Coordinates as a 1D array of floats (e.g. [X0, Y0, Z0, X1, Y1, Z1, ...])
-    size : :obj:`int`
-        Number of coordinates per-vertex, default is 3.
-    dtype : :obj:`int`
-        Data type OpenGL will interpret that data as, should be compatible with
-        the type of 'data'.
-    target : :obj:`int`
-        Target used when binding the buffer (e.g. GL_VERTEX_ARRAY)
-
-    Returns
-    -------
-    VertexBufferObject
-        A descriptor with vertex buffer information.
+    vboInfo : :obj:`VertexBufferInfo`
+        Vertex buffer data descriptor.
+    uploadArray : :obj:`list` of :obj:`float` or :obj:`int`, optional
+        Coordinates as a 1D array of values (e.g. [X0, Y0, X1, Y1, ...]) to
+        upload. The 'dataPtr' in the descriptor will be assigned a ctypes
+        pointer to the array. The value of 'dataPtr' will be overwritten if
+        uploadArray is not None. Values in the provided array will be re-cast to
+        something compatible with 'dataType'.
 
     Notes
     -----
@@ -821,59 +825,83 @@ def createVBO(data, size=3, dtype=GL.GL_FLOAT, target=GL.GL_ARRAY_BUFFER):
     GL.glFlush()
 
     """
-    # convert values to ctypes float array
-    if dtype == GL.GL_FLOAT:
-        useType = GL.GLfloat
-    elif dtype == GL.GL_UNSIGNED_INT:
-        useType = GL.GLuint
-    elif dtype == GL.GL_UNSIGNED_SHORT:
-        useType = GL.GLushort
+    if uploadArray is not None:
+        if vboInfo.dataType == GL.GL_FLOAT:
+            useType = GL.GLfloat
+        elif vboInfo.dataType == GL.GL_DOUBLE:
+            useType = GL.GLdouble
+        elif vboInfo.dataType == GL.GL_UNSIGNED_INT:
+            useType = GL.GLuint
+        elif vboInfo.dataType == GL.GL_UNSIGNED_SHORT:
+            useType = GL.GLushort
+        else:
+            raise ValueError(
+                "Invalid GL data type specified, must be GL_FLOAT, GL_DOUBLE, "
+                "GL_UNSIGNED_INT, or GL_UNSIGNED_SHORT.")
+        if isinstance(uploadArray, array.array):
+            addr, count = uploadArray.buffer_info()
+            vboInfo.dataPtr = ctypes.cast(
+                addr, ctypes.POINTER((useType * count)))[0]
+        else:
+            count = len(uploadArray)
+            vboInfo.dataPtr = (useType * count)(*uploadArray)
     else:
-        raise TypeError("Invalid type specified.")
+        if vboInfo.dataPtr is None:
+            raise ValueError("No data pointer in vertex buffer descriptor!")
 
-    if isinstance(data, array.array):
-        addr, count = data.buffer_info()
-        c_array = ctypes.cast(addr, ctypes.POINTER((useType * count)))[0]
-    else:
-        count = len(data)
-        c_array = (useType * count)(*data)
-
-    # create a vertex buffer ID
-    vboId = GL.GLuint()
-    GL.glGenBuffers(1, ctypes.byref(vboId))
-
-    nIndices = count
-    if target != GL.GL_ELEMENT_ARRAY_BUFFER:
-        nIndices = int(nIndices / size)
-
-    # new vertex descriptor
-    vboDesc = VertexBufferObject(vboId,
-                                 size,
-                                 count,
-                                 nIndices,
-                                 GL.GL_STATIC_DRAW,
-                                 dtype,
-                                 dict())
-
-    # bind and upload
-    GL.glBindBuffer(target, vboId)
-    GL.glBufferData(target,
-                    ctypes.sizeof(c_array),
-                    c_array,
-                    GL.GL_STATIC_DRAW)
-    GL.glBindBuffer(target, 0)
-
-    return vboDesc
+    GL.glGenBuffers(1, ctypes.byref(vboInfo.name))
+    GL.glBindBuffer(vboInfo.target, vboInfo.name)
+    GL.glBufferData(vboInfo.target,
+                    ctypes.sizeof(vboInfo.dataPtr),
+                    vboInfo.dataPtr,
+                    vboInfo.usage)
+    GL.glBindBuffer(vboInfo.target, 0)
 
 
-def createVAO(vertexBuffers, indexBuffer=None):
+class VertexArrayInfo(object):
+    """Single-storage array buffer data descriptor."""
+
+    __slots__ = [
+        'name',
+        'vertexBuffers',
+        'indexBuffer',
+        'indices',
+        'drawMode']
+
+    def __init__(self,
+                 name=GL.GLuint(0),
+                 vertexBuffers=None,
+                 indexBuffer=None,
+                 indices=0,
+                 drawMode=GL.GL_TRIANGLES):
+        self.name = name
+        self.vertexBuffers = dict() if vertexBuffers is None else vertexBuffers
+        self.indexBuffer = indexBuffer
+        self.indices = indices  # only valid if isInitialized == True
+        self.drawMode = drawMode
+
+        if self.indexBuffer is not None:
+            if self.indexBuffer.target != GL.GL_ELEMENT_ARRAY_BUFFER:
+                raise ValueError(
+                    "Index buffer target must be GL_ELEMENT_ARRAY_BUFFER.")
+
+    @property
+    def isIndexed(self):
+        return self.indexBuffer is not None
+
+    @property
+    def isInitialized(self):
+        return self.name.value > 0
+
+
+def createVertexArray(vaoInfo):
     """Create a Vertex Array Object (VAO) with specified Vertex Buffer Objects.
     VAOs store buffer binding states, reducing CPU overhead when drawing objects
     with vertex data stored in VBOs.
 
     Parameters
     ----------
-    vertexBuffers : :obj:`list` of :obj:`tuple`
+    vertexBuffers : :obj:`dict`
         Specify vertex attributes VBO descriptors apply to.
     indexBuffer : :obj:`list` of :obj:`int`, optional
         Index array of elements. If provided, an element array is created from
@@ -894,54 +922,55 @@ def createVAO(vertexBuffers, indexBuffer=None):
     drawVAO(vaoDesc, GL.GL_TRIANGLES)
 
     """
-    if not vertexBuffers:  # in case an empty list is passed
-        raise ValueError("No buffers specified.")
+    if not vaoInfo.vertexBuffers:  # in case an empty list is passed
+        raise ValueError("No buffers specified in VAO descriptor.")
 
     # create a vertex buffer ID
-    vaoId = GL.GLuint()
-    GL.glGenVertexArrays(1, ctypes.byref(vaoId))
-    GL.glBindVertexArray(vaoId)
+    GL.glGenVertexArrays(1, ctypes.byref(vaoInfo.name))
+    print(vaoInfo.name)
+    GL.glBindVertexArray(vaoInfo.name)
 
-    nIndices = 0
-    hasVertexArray = False
-    for attr, vbo in vertexBuffers:
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo.id)
+    for attr, vboInfo in vaoInfo.vertexBuffers.items():
+        GL.glBindBuffer(vboInfo.target, vboInfo.name)
         if attr == GL.GL_VERTEX_ARRAY:
-            GL.glVertexPointer(vbo.size, vbo.dtype, 0, None)
+            GL.glVertexPointer(vboInfo.vectorSize, vboInfo.dataType, 0, None)
             GL.glEnableClientState(GL.GL_VERTEX_ARRAY)
-            nIndices = int(vbo.indices / 3)
-            hasVertexArray = True
         elif attr == GL.GL_TEXTURE_COORD_ARRAY:
-            GL.glTexCoordPointer(vbo.size, vbo.dtype, 0, None)
+            GL.glTexCoordPointer(vboInfo.vectorSize, vboInfo.dataType, 0, None)
             GL.glEnableClientState(GL.GL_TEXTURE_COORD_ARRAY)
         elif attr == GL.GL_NORMAL_ARRAY:
-            GL.glNormalPointer(vbo.dtype, 0, None)
+            GL.glNormalPointer(vboInfo.dataType, 0, None)
             GL.glEnableClientState(GL.GL_NORMAL_ARRAY)
         elif attr == GL.GL_COLOR_ARRAY:
-            GL.glColorPointer(vbo.size, vbo.dtype, 0, None)
+            GL.glColorPointer(vboInfo.vectorSize, vboInfo.dataType, 0, None)
             GL.glEnableClientState(GL.GL_COLOR_ARRAY)
         elif isinstance(attr, int):  # generic attributes
             GL.glVertexAttribPointer(
-                attr, vbo.size, GL.GL_FLOAT, GL.GL_FALSE, 0, None)
+                attr, vboInfo.vectorSize, GL.GL_FLOAT, GL.GL_FALSE, 0, None)
             GL.glEnableVertexAttribArray(attr)
 
-    if not hasVertexArray:
-        # delete the VAO we created
-        GL.glBindVertexArray(0)
-        GL.glDeleteVertexArrays(1, vaoId)
-        raise RuntimeError("Failed to create VAO, no vertex data specified.")
+    # if not hasVertexArray:
+    #    # delete the VAO we created
+    #    GL.glBindVertexArray(0)
+    #    GL.glDeleteVertexArrays(1, vaoId)
+    #    raise RuntimeError("Failed to create VAO, no vertex data specified.")
 
     # bind the EBO if available
-    if indexBuffer is not None:
-        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, indexBuffer.id)
-        nIndices = indexBuffer.indices
+    if vaoInfo.isIndexed:
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, vaoInfo.indexBuffer.name)
+        vaoInfo.indices = \
+            ctypes.sizeof(vaoInfo.indexBuffer.dataPtr) / \
+            ctypes.sizeof(vaoInfo.indexBuffer.dataPtr._type_)
+    else:
+        vertexBuffer = vaoInfo.vertexBuffers[GL.GL_VERTEX_ARRAY]
+        vaoInfo.indices = \
+            ctypes.sizeof(vertexBuffer.dataPtr) / \
+            ctypes.sizeof(vertexBuffer.dataPtr._type_) / vertexBuffer.vectorSize
 
     GL.glBindVertexArray(0)
 
-    return VertexArrayObject(vaoId, nIndices, indexBuffer is not None, dict())
 
-
-def drawVAO(vao, mode=GL.GL_TRIANGLES, flush=False):
+def drawVertexArrays(vaoInfo, flush=False):
     """Draw a vertex array using glDrawArrays. This method does not require
     shaders.
 
@@ -967,13 +996,14 @@ def drawVAO(vao, mode=GL.GL_TRIANGLES, flush=False):
     drawVAO(vaoDesc, GL.GL_TRIANGLES)
 
     """
-    # draw the array
-    GL.glBindVertexArray(vao.id)
-
-    if vao.isIndexed:
-        GL.glDrawElements(mode, vao.indices, GL.GL_UNSIGNED_INT, None)
+    GL.glBindVertexArray(vaoInfo.name)
+    if vaoInfo.isIndexed:
+        GL.glDrawElements(vaoInfo.drawMode,
+                          int(vaoInfo.indices),
+                          vaoInfo.indexBuffer.dataType,
+                          None)
     else:
-        GL.glDrawArrays(mode, 0, vao.indices)
+        GL.glDrawArrays(vaoInfo.drawMode, 0, int(vaoInfo.indices))
 
     if flush:
         GL.glFlush()
@@ -982,7 +1012,7 @@ def drawVAO(vao, mode=GL.GL_TRIANGLES, flush=False):
     GL.glBindVertexArray(0)
 
 
-def deleteVBO(vbo):
+def deleteVertexBuffer(vbo):
     """Delete a Vertex Buffer Object (VBO).
 
     Returns
@@ -993,7 +1023,7 @@ def deleteVBO(vbo):
     GL.glDeleteBuffers(1, vbo.id)
 
 
-def deleteVAO(vao):
+def deleteVertexArray(vao):
     """Delete a Vertex Array Object (VAO). This does not delete array buffers
     bound to the VAO.
 
@@ -1009,11 +1039,42 @@ def deleteVAO(vao):
 # Material Helper Functions
 # -------------------------
 #
-# Materials affect the appearance of rendered faces. These helper functions and
+#  These helper functions and
 # datatypes simplify the creation of materials for rendering stimuli.
 #
 
-Material = namedtuple('Material', ['face', 'params', 'textures', 'userData'])
+class Material(object):
+    """Material descriptor class. Materials affect the appearance of rendered
+    faces in terms of color and shading.
+
+    """
+    def __init__(self, params=None, textures=None, face=GL.GL_FRONT_AND_BACK):
+        self.face = face
+        self.params = {
+            GL.GL_AMBIENT: (GL.GLfloat * 4)(0.2, 0.2, 0.2, 1.0),
+            GL.GL_DIFFUSE: (GL.GLfloat * 4)(0.8, 0.8, 0.8, 1.0),
+            GL.GL_SPECULAR: (GL.GLfloat * 4)(0.0, 0.0, 0.0, 1.0),
+            GL.GL_EMISSION: (GL.GLfloat * 4)(0.0, 0.0, 0.0, 1.0),
+            GL.GL_SHININESS: GL.GLfloat(0.0)
+        }
+        self.textures = {}
+
+        # convert any input parameters to ctypes
+        if params:
+            for param, value in params.items():
+                if hasattr(value, "__len__"):
+                    self.params[param] = (GL.GLfloat * len(value))(*value)
+                else:
+                    self.params[param] = GL.GLfloat(value)
+
+        # add texture descriptors
+        if textures:
+            maxTexUnits = getIntegerv(GL.GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS)
+            for unit, texInfo in textures:
+                if unit <= GL.GL_TEXTURE0 + (maxTexUnits - 1):
+                    self.textures[unit] = texInfo
+                else:
+                    raise ValueError("Invalid texture unit enum.")
 
 
 def createMaterial(params=(), textures=(), face=GL.GL_FRONT_AND_BACK):
@@ -1629,154 +1690,147 @@ def getOpenGLInfo():
 #
 # Usage:
 #
-#   useMaterial(metalMaterials.gold)
+#   useMaterial(metalMaterials['gold'])
 #   drawVAO(myObject)
 #   ...
 #
-mineralMaterials = namedtuple(
-    'mineralMaterials',
-    ['emerald', 'jade', 'obsidian', 'pearl', 'ruby', 'turquoise'])(
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.0215, 0.1745, 0.0215, 1.0)),
-         (GL.GL_DIFFUSE, (0.07568, 0.61424, 0.07568, 1.0)),
-         (GL.GL_SPECULAR, (0.633, 0.727811, 0.633, 1.0)),
-         (GL.GL_SHININESS, 0.6 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.135, 0.2225, 0.1575, 1.0)),
-         (GL.GL_DIFFUSE, (0.54, 0.89, 0.63, 1.0)),
-         (GL.GL_SPECULAR, (0.316228, 0.316228, 0.316228, 1.0)),
-         (GL.GL_SHININESS, 0.1 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.05375, 0.05, 0.06625, 1.0)),
-         (GL.GL_DIFFUSE, (0.18275, 0.17, 0.22525, 1.0)),
-         (GL.GL_SPECULAR, (0.332741, 0.328634, 0.346435, 1.0)),
-         (GL.GL_SHININESS, 0.3 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.25, 0.20725, 0.20725, 1.0)),
-         (GL.GL_DIFFUSE, (1, 0.829, 0.829, 1.0)),
-         (GL.GL_SPECULAR, (0.296648, 0.296648, 0.296648, 1.0)),
-         (GL.GL_SHININESS, 0.088 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.1745, 0.01175, 0.01175, 1.0)),
-         (GL.GL_DIFFUSE, (0.61424, 0.04136, 0.04136, 1.0)),
-         (GL.GL_SPECULAR, (0.727811, 0.626959, 0.626959, 1.0)),
-         (GL.GL_SHININESS, 0.6 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.1, 0.18725, 0.1745, 1.0)),
-         (GL.GL_DIFFUSE, (0.396, 0.74151, 0.69102, 1.0)),
-         (GL.GL_SPECULAR, (0.297254, 0.30829, 0.306678, 1.0)),
-         (GL.GL_SHININESS, 0.1 * 128.0)])
-)
+BasicMaterials = {
+    # minerals
+    'emerald': Material(
+        {GL.GL_AMBIENT: (0.0215, 0.1745, 0.0215, 1.0),
+         GL.GL_DIFFUSE: (0.07568, 0.61424, 0.07568, 1.0),
+         GL.GL_SPECULAR: (0.633, 0.727811, 0.633, 1.0),
+         GL.GL_SHININESS: 0.6 * 128.0}),
+    'jade': Material(
+        {GL.GL_AMBIENT: (0.135, 0.2225, 0.1575, 1.0),
+         GL.GL_DIFFUSE: (0.54, 0.89, 0.63, 1.0),
+         GL.GL_SPECULAR: (0.316228, 0.316228, 0.316228, 1.0),
+         GL.GL_SHININESS: 0.1 * 128.0}),
+    'obsidian': Material(
+        {GL.GL_AMBIENT: (0.05375, 0.05, 0.06625, 1.0),
+         GL.GL_DIFFUSE: (0.18275, 0.17, 0.22525, 1.0),
+         GL.GL_SPECULAR: (0.332741, 0.328634, 0.346435, 1.0),
+         GL.GL_SHININESS: 0.3 * 128.0}),
+    'pearl': Material(
+        {GL.GL_AMBIENT: (0.25, 0.20725, 0.20725, 1.0),
+         GL.GL_DIFFUSE: (1, 0.829, 0.829, 1.0),
+         GL.GL_SPECULAR: (0.296648, 0.296648, 0.296648, 1.0),
+         GL.GL_SHININESS: 0.088 * 128.0}),
+    'ruby': Material(
+        {GL.GL_AMBIENT: (0.1745, 0.01175, 0.01175, 1.0),
+         GL.GL_DIFFUSE: (0.61424, 0.04136, 0.04136, 1.0),
+         GL.GL_SPECULAR: (0.727811, 0.626959, 0.626959, 1.0),
+         GL.GL_SHININESS: 0.6 * 128.0}),
+    'turquoise': Material(
+        {GL.GL_AMBIENT: (0.1, 0.18725, 0.1745, 1.0),
+         GL.GL_DIFFUSE: (0.396, 0.74151, 0.69102, 1.0),
+         GL.GL_SPECULAR: (0.297254, 0.30829, 0.306678, 1.0),
+         GL.GL_SHININESS: 0.1 * 128.0}),
+    # metals
+    'brass': Material(
+        {GL.GL_AMBIENT, (0.329412, 0.223529, 0.027451, 1.0),
+         GL.GL_DIFFUSE, (0.780392, 0.568627, 0.113725, 1.0),
+         GL.GL_SPECULAR, (0.992157, 0.941176, 0.807843, 1.0),
+         GL.GL_SHININESS, 0.21794872 * 128.0}),
+    'bronze': Material(
+        {GL.GL_AMBIENT, (0.2125, 0.1275, 0.054, 1.0),
+         GL.GL_DIFFUSE, (0.714, 0.4284, 0.18144, 1.0),
+         GL.GL_SPECULAR, (0.393548, 0.271906, 0.166721, 1.0),
+         GL.GL_SHININESS, 0.2 * 128.0}),
+    'chrome' : Material(
+        {GL.GL_AMBIENT, (0.25, 0.25, 0.25, 1.0),
+         GL.GL_DIFFUSE, (0.4, 0.4, 0.4, 1.0),
+         GL.GL_SPECULAR, (0.774597, 0.774597, 0.774597, 1.0),
+         GL.GL_SHININESS, 0.6 * 128.0}),
+    'copper': Material(
+        {GL.GL_AMBIENT, (0.19125, 0.0735, 0.0225, 1.0),
+         GL.GL_DIFFUSE, (0.7038, 0.27048, 0.0828, 1.0),
+         GL.GL_SPECULAR, (0.256777, 0.137622, 0.086014, 1.0),
+         GL.GL_SHININESS, 0.1 * 128.0}),
+    'gold': Material(
+        {GL.GL_AMBIENT, (0.24725, 0.1995, 0.0745, 1.0),
+         GL.GL_DIFFUSE, (0.75164, 0.60648, 0.22648, 1.0),
+         GL.GL_SPECULAR, (0.628281, 0.555802, 0.366065, 1.0),
+         GL.GL_SHININESS, 0.4 * 128.0}),
+    'silver': Material(
+        {GL.GL_AMBIENT, (0.19225, 0.19225, 0.19225, 1.0),
+         GL.GL_DIFFUSE, (0.50754, 0.50754, 0.50754, 1.0),
+         GL.GL_SPECULAR, (0.508273, 0.508273, 0.508273, 1.0),
+         GL.GL_SHININESS, 0.4 * 128.0}),
+    # plastics
+    'black' : Material(
+        {GL.GL_AMBIENT, (0, 0, 0, 1.0),
+         GL.GL_DIFFUSE, (0.01, 0.01, 0.01, 1.0),
+         GL.GL_SPECULAR, (0.5, 0.5, 0.5, 1.0),
+         GL.GL_SHININESS, 0.25 * 128.0}),
+    'cyan': Material(
+        {GL.GL_AMBIENT, (0, 0.1, 0.06, 1.0),
+         GL.GL_DIFFUSE, (0.06, 0, 0.50980392, 1.0),
+         GL.GL_SPECULAR, (0.50196078, 0.50196078, 0.50196078, 1.0),
+         GL.GL_SHININESS, 0.25 * 128.0}),
+    'green': Material(
+        {GL.GL_AMBIENT, (0, 0, 0, 1.0),
+         GL.GL_DIFFUSE, (0.1, 0.35, 0.1, 1.0),
+         GL.GL_SPECULAR, (0.45, 0.55, 0.45, 1.0),
+         GL.GL_SHININESS, 0.25 * 128.0}),
+    'red': Material(
+        {GL.GL_AMBIENT, (0, 0, 0, 1.0),
+         GL.GL_DIFFUSE, (0.5, 0, 0, 1.0),
+         GL.GL_SPECULAR, (0.7, 0.6, 0.6, 1.0),
+         GL.GL_SHININESS, 0.25 * 128.0}),
+    'white': Material(
+        {GL.GL_AMBIENT, (0, 0, 0, 1.0),
+         GL.GL_DIFFUSE, (0.55, 0.55, 0.55, 1.0),
+         GL.GL_SPECULAR, (0.7, 0.7, 0.7, 1.0),
+         GL.GL_SHININESS, 0.25 * 128.0}),
+    'yellow': Material(
+        {GL.GL_AMBIENT, (0, 0, 0, 1.0),
+         GL.GL_DIFFUSE, (0.5, 0.5, 0, 1.0),
+         GL.GL_SPECULAR, (0.6, 0.6, 0.5, 1.0),
+         GL.GL_SHININESS, 0.25 * 128.0})
+    # rubber
+}
 
-metalMaterials = namedtuple(
-    'metalMaterials',
-    ['brass', 'bronze', 'chrome', 'copper', 'gold', 'silver'])(
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.329412, 0.223529, 0.027451, 1.0)),
-         (GL.GL_DIFFUSE, (0.780392, 0.568627, 0.113725, 1.0)),
-         (GL.GL_SPECULAR, (0.992157, 0.941176, 0.807843, 1.0)),
-         (GL.GL_SHININESS, 0.21794872 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.2125, 0.1275, 0.054, 1.0)),
-         (GL.GL_DIFFUSE, (0.714, 0.4284, 0.18144, 1.0)),
-         (GL.GL_SPECULAR, (0.393548, 0.271906, 0.166721, 1.0)),
-         (GL.GL_SHININESS, 0.2 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.25, 0.25, 0.25, 1.0)),
-         (GL.GL_DIFFUSE, (0.4, 0.4, 0.4, 1.0)),
-         (GL.GL_SPECULAR, (0.774597, 0.774597, 0.774597, 1.0)),
-         (GL.GL_SHININESS, 0.6 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.19125, 0.0735, 0.0225, 1.0)),
-         (GL.GL_DIFFUSE, (0.7038, 0.27048, 0.0828, 1.0)),
-         (GL.GL_SPECULAR, (0.256777, 0.137622, 0.086014, 1.0)),
-         (GL.GL_SHININESS, 0.1 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.24725, 0.1995, 0.0745, 1.0)),
-         (GL.GL_DIFFUSE, (0.75164, 0.60648, 0.22648, 1.0)),
-         (GL.GL_SPECULAR, (0.628281, 0.555802, 0.366065, 1.0)),
-         (GL.GL_SHININESS, 0.4 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.19225, 0.19225, 0.19225, 1.0)),
-         (GL.GL_DIFFUSE, (0.50754, 0.50754, 0.50754, 1.0)),
-         (GL.GL_SPECULAR, (0.508273, 0.508273, 0.508273, 1.0)),
-         (GL.GL_SHININESS, 0.4 * 128.0)])
-)
-
-plasticMaterials = namedtuple(
-    'plasticMaterials',
-    ['black', 'cyan', 'green', 'red', 'white', 'yellow'])(
-    createMaterial(
-        [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
-         (GL.GL_DIFFUSE, (0.01, 0.01, 0.01, 1.0)),
-         (GL.GL_SPECULAR, (0.5, 0.5, 0.5, 1.0)),
-         (GL.GL_SHININESS, 0.25 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0, 0.1, 0.06, 1.0)),
-         (GL.GL_DIFFUSE, (0.06, 0, 0.50980392, 1.0)),
-         (GL.GL_SPECULAR, (0.50196078, 0.50196078, 0.50196078, 1.0)),
-         (GL.GL_SHININESS, 0.25 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
-         (GL.GL_DIFFUSE, (0.1, 0.35, 0.1, 1.0)),
-         (GL.GL_SPECULAR, (0.45, 0.55, 0.45, 1.0)),
-         (GL.GL_SHININESS, 0.25 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
-         (GL.GL_DIFFUSE, (0.5, 0, 0, 1.0)),
-         (GL.GL_SPECULAR, (0.7, 0.6, 0.6, 1.0)),
-         (GL.GL_SHININESS, 0.25 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
-         (GL.GL_DIFFUSE, (0.55, 0.55, 0.55, 1.0)),
-         (GL.GL_SPECULAR, (0.7, 0.7, 0.7, 1.0)),
-         (GL.GL_SHININESS, 0.25 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
-         (GL.GL_DIFFUSE, (0.5, 0.5, 0, 1.0)),
-         (GL.GL_SPECULAR, (0.6, 0.6, 0.5, 1.0)),
-         (GL.GL_SHININESS, 0.25 * 128.0)])
-)
 
 rubberMaterials = namedtuple(
     'rubberMaterials',
     ['black', 'cyan', 'green', 'red', 'white', 'yellow'])(
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.02, 0.02, 0.02, 1.0)),
-         (GL.GL_DIFFUSE, (0.01, 0.01, 0.01, 1.0)),
-         (GL.GL_SPECULAR, (0.4, 0.4, 0.4, 1.0)),
-         (GL.GL_SHININESS, 0.078125 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0, 0.05, 0.05, 1.0)),
-         (GL.GL_DIFFUSE, (0.4, 0.5, 0.5, 1.0)),
-         (GL.GL_SPECULAR, (0.04, 0.7, 0.7, 1.0)),
-         (GL.GL_SHININESS, 0.078125 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0, 0.05, 0, 1.0)),
-         (GL.GL_DIFFUSE, (0.4, 0.5, 0.4, 1.0)),
-         (GL.GL_SPECULAR, (0.04, 0.7, 0.04, 1.0)),
-         (GL.GL_SHININESS, 0.078125 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.05, 0, 0, 1.0)),
-         (GL.GL_DIFFUSE, (0.5, 0.4, 0.4, 1.0)),
-         (GL.GL_SPECULAR, (0.7, 0.04, 0.04, 1.0)),
-         (GL.GL_SHININESS, 0.078125 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.05, 0.05, 0.05, 1.0)),
-         (GL.GL_DIFFUSE, (0.5, 0.5, 0.5, 1.0)),
-         (GL.GL_SPECULAR, (0.7, 0.7, 0.7, 1.0)),
-         (GL.GL_SHININESS, 0.078125 * 128.0)]),
-    createMaterial(
-        [(GL.GL_AMBIENT, (0.05, 0.05, 0, 1.0)),
-         (GL.GL_DIFFUSE, (0.5, 0.5, 0.4, 1.0)),
-         (GL.GL_SPECULAR, (0.7, 0.7, 0.04, 1.0)),
-         (GL.GL_SHININESS, 0.078125 * 128.0)])
+    Material(
+        {GL.GL_AMBIENT, (0.02, 0.02, 0.02, 1.0),
+         GL.GL_DIFFUSE, (0.01, 0.01, 0.01, 1.0),
+         GL.GL_SPECULAR, (0.4, 0.4, 0.4, 1.0),
+         GL.GL_SHININESS, 0.078125 * 128.0}),
+    Material(
+        {GL.GL_AMBIENT, (0, 0.05, 0.05, 1.0),
+         GL.GL_DIFFUSE, (0.4, 0.5, 0.5, 1.0),
+         GL.GL_SPECULAR, (0.04, 0.7, 0.7, 1.0),
+         GL.GL_SHININESS, 0.078125 * 128.0}),
+    Material(
+        {GL.GL_AMBIENT, (0, 0.05, 0, 1.0),
+         GL.GL_DIFFUSE, (0.4, 0.5, 0.4, 1.0),
+         GL.GL_SPECULAR, (0.04, 0.7, 0.04, 1.0),
+         GL.GL_SHININESS, 0.078125 * 128.0}),
+    Material(
+        {GL.GL_AMBIENT, (0.05, 0, 0, 1.0),
+         GL.GL_DIFFUSE, (0.5, 0.4, 0.4, 1.0),
+         GL.GL_SPECULAR, (0.7, 0.04, 0.04, 1.0),
+         GL.GL_SHININESS, 0.078125 * 128.0}),
+    Material(
+        {GL.GL_AMBIENT, (0.05, 0.05, 0.05, 1.0),
+         GL.GL_DIFFUSE, (0.5, 0.5, 0.5, 1.0),
+         GL.GL_SPECULAR, (0.7, 0.7, 0.7, 1.0),
+         GL.GL_SHININESS, 0.078125 * 128.0}),
+    Material(
+        {GL.GL_AMBIENT, (0.05, 0.05, 0, 1.0),
+         GL.GL_DIFFUSE, (0.5, 0.5, 0.4, 1.0),
+         GL.GL_SPECULAR, (0.7, 0.7, 0.04, 1.0),
+         GL.GL_SHININESS, 0.078125 * 128.0})
 )
 
 # default material according to the OpenGL spec.
-defaultMaterial = createMaterial(
-    [(GL.GL_AMBIENT, (0.2, 0.2, 0.2, 1.0)),
-     (GL.GL_DIFFUSE, (0.8, 0.8, 0.8, 1.0)),
-     (GL.GL_SPECULAR, (0.0, 0.0, 0.0, 1.0)),
-     (GL.GL_EMISSION, (0.0, 0.0, 0.0, 1.0)),
-     (GL.GL_SHININESS, 0)])
+defaultMaterial = Material(
+    [GL.GL_AMBIENT, (0.2, 0.2, 0.2, 1.0)),
+     GL.GL_DIFFUSE, (0.8, 0.8, 0.8, 1.0)),
+     GL.GL_SPECULAR, (0.0, 0.0, 0.0, 1.0)),
+     GL.GL_EMISSION, (0.0, 0.0, 0.0, 1.0)),
+     GL.GL_SHININESS, 0})
