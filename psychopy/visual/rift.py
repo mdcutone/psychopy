@@ -57,6 +57,7 @@ class Rift(window.Window):
             mirrorRes=None,
             legacyOpenGL=True,
             warnAppFrameDropped=True,
+            detectTimeoutMs=0,
             *args,
             **kwargs):
         """
@@ -147,13 +148,13 @@ class Rift(window.Window):
                                "time, exiting.")
 
         # check if the background service is running and an HMD is connected
-        detectResults = capi.ovr_Detect(10)
+        detectResults = capi.ovr_Detect(int(detectTimeoutMs))
 
-        if not detectResults.isOculusServiceRunning == capi.ovrTrue:
+        if capi.LIBOVR_FALSE(detectResults.isOculusServiceRunning):
             raise RuntimeError("HMD service is not available or started, " +
                                "exiting.")
 
-        if not detectResults.isHmdConnected == capi.ovrTrue:
+        if capi.LIBOVR_FALSE(detectResults.isHmdConnected):
             raise RuntimeError("Cannot find any connected HMD, check " +
                                "connections and try again.")
 
@@ -193,25 +194,30 @@ class Rift(window.Window):
             fovRight = self._hmdDesc.DefaultEyeFov[1]
 
             # get the maximum vertical and horizontal FOVs
-            fovMax = ovr.math.ovrFovPort.max(fovLeft, fovRight)
+            fovMax = capi.ovrFovPort()
+            fovMax.UpTan = max(fovLeft.UpTan, fovRight.UpTan)
+            fovMax.DownTan = max(fovLeft.DownTan, fovRight.DownTan)
+            fovMax.LeftTan = max(fovLeft.LeftTan, fovRight.LeftTan)
+            fovMax.RightTan = max(fovLeft.RightTan, fovRight.RightTan)
+
             combinedTanHorz = max(fovMax.LeftTan, fovMax.RightTan)
             combinedTanVert = max(fovMax.UpTan, fovMax.DownTan)
 
             fovBoth = ovr.math.ovrFovPort()
             fovBoth.RightTan = fovBoth.LeftTan = combinedTanHorz
             fovBoth.UpTan = fovBoth.DownTan = combinedTanVert
-            self._fov = (fovBoth, fovBoth)
+            self._fov = [fovBoth, fovBoth]
 
         elif fovType == 'recommended':
             # use the recommended FOVs, these have wider FOVs looking outward
             # due to off-center frustums.
-            self._fov = (self._hmdDesc.DefaultEyeFov[0],
-                         self._hmdDesc.DefaultEyeFov[1])
+            self._fov = [self._hmdDesc.DefaultEyeFov[0],
+                         self._hmdDesc.DefaultEyeFov[1]]
 
         elif fovType == 'max':
             # the maximum FOVs for the HMD supports
-            self._fov = (self._hmdDesc.MaxEyeFov[0],
-                         self._hmdDesc.MaxEyeFov[1])
+            self._fov = [self._hmdDesc.MaxEyeFov[0],
+                         self._hmdDesc.MaxEyeFov[1]]
 
         else:
             raise ValueError(
