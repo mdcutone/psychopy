@@ -12,30 +12,20 @@ Ontario, Canada
 # Distributed under the terms of the GNU General Public License (GPL).
 
 _HAS_PSYCHXR_ = True
-
-try:
-    import psychxr.ovr as ovr
-except ImportError:
-    _HAS_PSYCHXR_ = False
-
 from . import window
-
-# if we have PsychXR, do the rest of the importing
-if _HAS_PSYCHXR_:
-    import sys
-    import platform
-    import ctypes
-    import math
-    from psychopy import platform_specific, logging
-    import pyglet.gl as GL
-    from psychopy.tools.attributetools import setAttribute
-    import numpy as np
-
-    ovr.capi.debug_mode = True  # enable debug mode, not much overhead
+import sys
+import platform
+import ctypes
+import math
+from psychopy import platform_specific, logging
+import pyglet.gl as GL
+from psychopy.tools.attributetools import setAttribute
+import numpy as np
 
 reportNDroppedFrames = 5
 
 import psychopy.hardware.libovr.capi as capi
+
 
 class Rift(window.Window):
     """Class provides a display and peripheral interface for the Oculus Rift
@@ -57,10 +47,10 @@ class Rift(window.Window):
             mirrorRes=None,
             legacyOpenGL=True,
             warnAppFrameDropped=True,
-            detectTimeoutMs=0,
+            detectTimeout=0,
             *args,
             **kwargs):
-        """
+        """Constructor for the Rift class.
 
         Parameters
         ----------
@@ -118,7 +108,9 @@ class Rift(window.Window):
             However, frame drops can happen sporadically due to driver bugs and
             running background processes (such as Windows Update). Use the
             performance HUD to help diagnose the causes of frame drops.
-
+        detectTimeout : int, optional
+            Timeout in milliseconds for detecting the HMD and Oculus Runtime.
+            Default is 0.
         """
 
         #if not _HAS_PSYCHXR_:
@@ -148,7 +140,7 @@ class Rift(window.Window):
                                "time, exiting.")
 
         # check if the background service is running and an HMD is connected
-        detectResults = capi.ovr_Detect(int(detectTimeoutMs))
+        detectResults = capi.ovr_Detect(int(detectTimeout))
 
         if capi.LIBOVR_FALSE(detectResults.isOculusServiceRunning):
             raise RuntimeError("HMD service is not available or started, " +
@@ -203,36 +195,64 @@ class Rift(window.Window):
             combinedTanHorz = max(fovMax.LeftTan, fovMax.RightTan)
             combinedTanVert = max(fovMax.UpTan, fovMax.DownTan)
 
-            fovBoth = ovr.math.ovrFovPort()
+            fovBoth = capi.ovrFovPort()
             fovBoth.RightTan = fovBoth.LeftTan = combinedTanHorz
             fovBoth.UpTan = fovBoth.DownTan = combinedTanVert
             self._fov = [fovBoth, fovBoth]
 
-        elif fovType == 'recommended':
+        elif fovType == 'recommended' or fovType == 'asymmetric':
             # use the recommended FOVs, these have wider FOVs looking outward
             # due to off-center frustums.
-            self._fov = [self._hmdDesc.DefaultEyeFov[0],
-                         self._hmdDesc.DefaultEyeFov[1]]
+            self._fov = [
+                self._hmdDesc.DefaultEyeFov[0],
+                self._hmdDesc.DefaultEyeFov[1]
+            ]
 
         elif fovType == 'max':
             # the maximum FOVs for the HMD supports
-            self._fov = [self._hmdDesc.MaxEyeFov[0],
-                         self._hmdDesc.MaxEyeFov[1]]
+            self._fov = [
+                self._hmdDesc.MaxEyeFov[0],
+                self._hmdDesc.MaxEyeFov[1]
+            ]
 
         else:
             raise ValueError(
                 "Invalid FOV type '{}' specified.".format(fovType))
 
+        self._eyeLayer = capi.ovrLayerEyeFov()  # eye layer descriptor
+
         # configure the eye render descriptors to use the computed FOVs
-        for eye in range(ovr.capi.ovrEye_Count):
-            ovr.capi.configEyeRenderDesc(eye, self._fov[eye])
+        self._eyeRenderDesc = [
+            capi.ovr_GetRenderDesc(
+                self.__session,
+                capi.ovrEye_Left,
+                self._fov[capi.ovrEye_Left]),
+            capi.ovr_GetRenderDesc(
+                self.__session,
+                capi.ovrEye_Right,
+                self._fov[capi.ovrEye_Right])
+        ]
+        self._hmdToEyeViewPose = [
+            self._eyeRenderDesc[capi.ovrEye_Left].HmdToEyePose,
+            self._eyeRenderDesc[capi.ovrEye_Right].HmdToEyePose
+        ]
+
+        for eye in range(capi.ovrEye_Count):
+            self._eyeLayer.Fov[eye] = self._eyeRenderDesc[eye].Fov
 
         # Compute texture sizes for render buffers, these are reported by the
         # LibOVR SDK based on the FOV settings specified above.
-        texSizeLeft = ovr.capi.getFovTextureSize(
-            ovr.capi.ovrEye_Left, self._fov[0], self._texelsPerPixel)
-        texSizeRight = ovr.capi.getFovTextureSize(
-            ovr.capi.ovrEye_Right, self._fov[1], self._texelsPerPixel)
+        texSizeLeft = capi.ovr_GetFovTextureSize(
+            self.__session,
+            capi.ovrEye_Left,
+            self._fov[0],
+            self._texelsPerPixel)
+
+        texSizeRight = capi.ovr_GetFovTextureSize(
+            self.__session,
+            capi.ovrEye_Right,
+            self._fov[1],
+            self._texelsPerPixel)
 
         # we are using a shared texture, so we need to combine dimensions
         if not self._monoscopic:
@@ -253,7 +273,7 @@ class Rift(window.Window):
         # texture sizes. If we are using a power of two texture, we need to
         # centre the viewports on the textures.
         if not self._monoscopic:
-            self._viewports = [ovr.math.ovrRecti(), ovr.math.ovrRecti()]
+            self._viewports = [capi.ovrRecti(), capi.ovrRecti()]
 
             # left eye viewport
             self._viewports[0].x = 0
@@ -268,8 +288,8 @@ class Rift(window.Window):
             self._viewports[1].h = self._hmdBufferSize[1]
 
             # give the viewports to PsychXR to setup the render layer
-            for eye in range(ovr.capi.ovrEye_Count):
-                ovr.capi.setRenderViewport(eye, self._viewports[eye])
+            for eye in range(capi.ovrEye_Count):
+                capi.setRenderViewport(eye, self._viewports[eye])
 
             self.scrWidthPIX = int(self._hmdBufferSize[0] / 2)
 
@@ -277,12 +297,12 @@ class Rift(window.Window):
             # In mono mode, we use the same viewport for both eyes. Therefore,
             # the swap texture only needs to be half as wide. This save VRAM
             # and does not require buffer changes when rendering.
-            self._viewports = ovr.math.ovrRecti(
+            self._viewports = capi.ovrRecti(
                 0, 0, self._hmdBufferSize[0], self._hmdBufferSize[1])
 
             # pass the same viewport to both eye
-            for eye in range(ovr.capi.ovrEye_Count):
-                ovr.capi.setRenderViewport(eye, self._viewports)
+            for eye in range(capi.ovrEye_Count):
+                capi.setRenderViewport(eye, self._viewports)
 
             self.scrWidthPIX = int(self._hmdBufferSize[0])
 
@@ -312,11 +332,11 @@ class Rift(window.Window):
         # position. Projection matrices need only to be computed once.
         if not self._monoscopic:
             self._projectionMatrix = \
-                [ovr.math.ovrMatrix4f(), ovr.math.ovrMatrix4f()]
-            self._viewMatrix = [ovr.math.ovrMatrix4f(), ovr.math.ovrMatrix4f()]
+                [capi.ovrMatrix4f(), capi.ovrMatrix4f()]
+            self._viewMatrix = [capi.ovrMatrix4f(), capi.ovrMatrix4f()]
         else:
-            self._projectionMatrix = ovr.math.ovrMatrix4f()
-            self._viewMatrix = ovr.math.ovrMatrix4f()
+            self._projectionMatrix = capi.ovrMatrix4f()
+            self._viewMatrix = capi.ovrMatrix4f()
 
         self._updateProjectionMatrix()
 
@@ -505,10 +525,10 @@ class Rift(window.Window):
             raise ValueError("Invalid tracking origin type '{}', must be 'eye' "
                              "or 'floor'.")
 
-        ovr.capi.setTrackingOriginType(origin_type)
+        capi.setTrackingOriginType(origin_type)
 
         if recenter:
-            ovr.capi.recenterTrackingOrigin()
+            capi.recenterTrackingOrigin()
 
     def recenterTrackingOrigin(self):
         """Recenter the tracking origin.
@@ -518,7 +538,7 @@ class Rift(window.Window):
         None
 
         """
-        ovr.capi.recenterTrackingOrigin()
+        capi.recenterTrackingOrigin()
 
     @property
     def shouldQuit(self):
