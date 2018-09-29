@@ -35,6 +35,7 @@ if _HAS_PSYCHXR_:
 
 reportNDroppedFrames = 5
 
+import psychopy.hardware.libovr.capi as capi
 
 class Rift(window.Window):
     """Class provides a display and peripheral interface for the Oculus Rift
@@ -119,9 +120,12 @@ class Rift(window.Window):
 
         """
 
-        if not _HAS_PSYCHXR_:
-            raise ModuleNotFoundError(
-                "PsychXR must be installed to use the Rift class. Exiting.")
+        #if not _HAS_PSYCHXR_:
+        #    raise ModuleNotFoundError(
+        #        "PsychXR must be installed to use the Rift class. Exiting.")
+
+        self.__session = capi.ovrSession()  # session pointer
+        self.__luid = capi.ovrGraphicsLuid()  # graphics LUID
 
         self._closed = False
         self._legacyOpenGL = legacyOpenGL
@@ -141,31 +145,36 @@ class Rift(window.Window):
             raise RuntimeError("Rift class only supports Windows OS at this " +
                                "time, exiting.")
 
-        # check if we are using 64-bit Python
-        if platform.architecture()[0] != '64bit':  # sys.maxsize != 2**64
-            raise RuntimeError("Rift class only supports 64-bit Python, " +
-                               "exiting.")
-
         # check if the background service is running and an HMD is connected
-        if not ovr.capi.isOculusServiceRunning():
+        detectResults = capi.ovr_Detect(0)
+
+        if not detectResults.isOculusServiceRunning:
             raise RuntimeError("HMD service is not available or started, " +
                                "exiting.")
 
-        if not ovr.capi.isHmdConnected():
+        if not detectResults.isHmdConnected():
             raise RuntimeError("Cannot find any connected HMD, check " +
                                "connections and try again.")
 
         # create a VR session, do some initial configuration
-        ovr.capi.startSession()
+        initParams = capi.ovrInitParams()
+        initParams.Flags = capi.ovrInit_RequestVersion
+        initParams.RequestedMinorVersion = 25  # required version of LibOVR
+        if capi.OVR_FAILURE(capi.ovr_Initialize(initParams)):
+            raise RuntimeError("Failed to initialize LibOVR.")
+
+        # create a VR session for this class instance
+        if capi.OVR_FAILURE(capi.ovr_Create(self.__session, self.__luid)):
+            raise RuntimeError("Failed to create a new VR session.")
 
         # get HMD descriptor, contains information about the unit
-        self._hmdDesc = ovr.capi.getHmdDesc()
+        self._hmdDesc = capi.ovr_GetHmdDesc()
 
         # Get additional details about the user from their Oculus Home profile.
         # We don't need this information in most cases, but it might be useful
         # for setting up the VR environment.
-        self._playerHeightMeters = ovr.capi.getPlayerHeight()
-        self._playerEyeHeightMeters = ovr.capi.getEyeHeight()
+        #self._playerHeightMeters = ovr.capi.getPlayerHeight()
+        #self._playerEyeHeightMeters = ovr.capi.getEyeHeight()
 
         # update session status object
         self._sessionStatus = ovr.capi.getSessionStatus()
