@@ -124,8 +124,9 @@ class Rift(window.Window):
         #    raise ModuleNotFoundError(
         #        "PsychXR must be installed to use the Rift class. Exiting.")
 
-        self.__session = capi.ovrSession()  # session pointer
-        self.__luid = capi.ovrGraphicsLuid()  # graphics LUID
+        # VR session and LUID pointers
+        self.__session = capi.ovrSession()
+        self.__luid = capi.ovrGraphicsLuid()
 
         self._closed = False
         self._legacyOpenGL = legacyOpenGL
@@ -146,13 +147,13 @@ class Rift(window.Window):
                                "time, exiting.")
 
         # check if the background service is running and an HMD is connected
-        detectResults = capi.ovr_Detect(0)
+        detectResults = capi.ovr_Detect(10)
 
-        if not detectResults.isOculusServiceRunning:
+        if not detectResults.isOculusServiceRunning == capi.ovrTrue:
             raise RuntimeError("HMD service is not available or started, " +
                                "exiting.")
 
-        if not detectResults.isHmdConnected():
+        if not detectResults.isHmdConnected == capi.ovrTrue:
             raise RuntimeError("Cannot find any connected HMD, check " +
                                "connections and try again.")
 
@@ -160,6 +161,8 @@ class Rift(window.Window):
         initParams = capi.ovrInitParams()
         initParams.Flags = capi.ovrInit_RequestVersion
         initParams.RequestedMinorVersion = 25  # required version of LibOVR
+
+        # initialize the library
         if capi.OVR_FAILURE(capi.ovr_Initialize(initParams)):
             raise RuntimeError("Failed to initialize LibOVR.")
 
@@ -168,7 +171,7 @@ class Rift(window.Window):
             raise RuntimeError("Failed to create a new VR session.")
 
         # get HMD descriptor, contains information about the unit
-        self._hmdDesc = capi.ovr_GetHmdDesc()
+        self._hmdDesc = capi.ovr_GetHmdDesc(self.__session)
 
         # Get additional details about the user from their Oculus Home profile.
         # We don't need this information in most cases, but it might be useful
@@ -177,7 +180,8 @@ class Rift(window.Window):
         #self._playerEyeHeightMeters = ovr.capi.getEyeHeight()
 
         # update session status object
-        self._sessionStatus = ovr.capi.getSessionStatus()
+        self._sessionStatus = capi.ovrSessionStatus()
+        capi.ovr_GetSessionStatus(self.__session, self._sessionStatus)
 
         # configure the internal render descriptors based on the requested
         # viewing parameters.
@@ -522,7 +526,7 @@ class Rift(window.Window):
             HMD, otherwise False.
 
         """
-        return self._sessionStatus.ShouldQuit
+        return self._sessionStatus.ShouldQuit == capi.ovrTrue
 
     @property
     def isVisible(self):
@@ -534,7 +538,7 @@ class Rift(window.Window):
             True if app has focus and is visible in the HMD, otherwise False.
 
         """
-        return self._sessionStatus.IsVisible
+        return self._sessionStatus.IsVisible == capi.ovrTrue
 
     @property
     def isHmdMounted(self):
@@ -546,7 +550,7 @@ class Rift(window.Window):
             True if the HMD is being worn, otherwise False.
 
         """
-        return self._sessionStatus.IsHmdMounted
+        return self._sessionStatus.IsHmdMounted == capi.ovrTrue
 
     @property
     def isHmdPresent(self):
@@ -558,7 +562,7 @@ class Rift(window.Window):
             True if the HMD is present, otherwise False.
 
         """
-        return self._sessionStatus.IsHmdPresent
+        return self._sessionStatus.IsHmdPresent == capi.ovrTrue
 
     @property
     def shouldRecenter(self):
@@ -572,7 +576,7 @@ class Rift(window.Window):
             the origin, else False.
 
         """
-        return self._sessionStatus.ShouldRecenter
+        return self._sessionStatus.ShouldRecenter == capi.ovrTrue
 
     @property
     def displayLost(self):
@@ -583,7 +587,7 @@ class Rift(window.Window):
         bool
 
         """
-        return self._sessionStatus.DisplayLost
+        return self._sessionStatus.DisplayLost == capi.ovrTrue
 
     @property
     def hasInputFocus(self):
@@ -594,11 +598,11 @@ class Rift(window.Window):
         bool
 
         """
-        return self._sessionStatus.HasInputFocus
+        return self._sessionStatus.HasInputFocus == capi.ovrTrue
 
     @property
     def overlayPresent(self):
-        return self._sessionStatus.OverlayPresent
+        return self._sessionStatus.OverlayPresent == capi.ovrTrue
 
     def _setupFrameBuffer(self):
         """Override the default framebuffer init code in window.Window to use
