@@ -12,6 +12,7 @@ import numpy as np
 import os.path
 import pyglet.gl as GL
 import ctypes
+import math
 
 
 class TransformMixin(object):
@@ -19,7 +20,12 @@ class TransformMixin(object):
     objects in a scene.
 
     """
-    def __init__(self, *args, **kwargs):
+
+    def __init__(self,
+                 pos=(0., 0., 0.),
+                 ori=0.0,
+                 axis=(0., 1., 0.),
+                 *args, **kwargs):
         """Constructor for TransformMixin.
 
         Parameters
@@ -28,29 +34,38 @@ class TransformMixin(object):
         kwargs
 
         """
-        self._pos = np.zeros((3,), dtype=np.float32)  # position vector
-        self._ori = np.zeros((4,), dtype=np.float32)  # orientation quaternion
-        self._ori[3] = 1.0  # identity
+        # Try to be as consistent as possible with how other stimuli are
+        # positioned, advanced users might want to work with the quaternions
+        # and vectors directly.
+        #
+        self._pos = np.asarray(pos, dtype=np.float32)  # position vector
+        self._axis = np.asarray(axis, dtype=np.float32)  # rotation axis vector
+        self._ori = ori  # rotation angle
 
+        # orientations are stored as quaternions
+        self._rquat = np.zeros((4,), dtype=np.float32)
+        self._rquat[3] = 1.0
+
+        # model matrix used for transformations
         self._modelMatrix = np.zeros((4, 4), np.float32)
         np.fill_diagonal(self._modelMatrix, 1.0)
 
     @property
     def ori(self):
-        """Orientation of the stimulus as a quaternion."""
+        """Orientation of the stimulus in degrees."""
         return self._ori
 
     @ori.setter
     def ori(self, value):
         self.setOri(value)
 
-    def setOri(self, quat):
+    def setOri(self, degrees):
         """Set the orientation using the specified quaternion.
 
         Parameters
         ----------
-        quat : ndarray, list or tuple
-            Quaternion to define the orientation of the stimuli (x, y, z, w).
+        degrees : float
+            Angle of rotation in degrees.
 
         Returns
         -------
@@ -62,12 +77,18 @@ class TransformMixin(object):
         model matrix associated with attribute 'modelMatrix'.
 
         """
-        self._ori = np.asarray(quat, dtype=np.float32)
-        if self._ori.shape != (4,):
-            raise ValueError("ori must be quaternion with shape (4,)")
+        self._ori = float(degrees)
 
-        a = self._ori[3]
-        b, c, d = self._ori[:3]
+        # create the rotation quaternion
+        rad = math.radians(degrees)
+        self._rquat = np.zeros((4,), np.float32)
+        np.multiply(self._axis, np.sin(rad / 2.0), out=self._rquat[:3])
+        self._rquat[3] = math.cos(rad / 2.0)
+
+        # set the rotation part of the model matrix using the quaternion we just
+        # derived.
+        a = self._rquat[3]
+        b, c, d = self._rquat[:3]
 
         a2 = a * a
         b2 = b * b
@@ -89,6 +110,36 @@ class TransformMixin(object):
         self._modelMatrix[2, 2] = a2 - b2 - c2 + d2
         self._modelMatrix[3, 2] = 0.0
 
+    @property
+    def pos(self):
+        """Position of the object in the scene (3-vector)."""
+        return self._pos
+
+    @pos.setter
+    def pos(self, xyz):
+        self.setPos(xyz)
+
+    def getPos(self):
+        """Get the current position/translation of the object."""
+        return self._pos
+
+    def setPos(self, xyz):
+        """Set the position/translation of the object in the scene.
+
+        Parameters
+        ----------
+        pos : ndarray, list or tuple
+            Vector to translate by (x, y, z).
+
+        Returns
+        -------
+        None
+
+        """
+        self._pos = np.asarray(xyz, dtype=np.float32)
+        self._modelMatrix[:3, 3] = self._pos
+        self._modelMatrix[3, 3] = 1.0
+
     def rotateAngleAxis(self, angle, axis, clear=False):
         """Rotate this object about a specified axis. Rotations are cumulative
         unless clear=True.
@@ -109,57 +160,7 @@ class TransformMixin(object):
         states.
 
         """
-        axis = np.asarray(axis, dtype=np.float32)
-
-        q = np.zeros((4,), np.float32)
-        s = np.sin(angle / 2.0)
-        c = np.cos(angle / 2.0)
-        np.multiply(axis, s, out=q[:3])
-        q[3] = c
-
-        if clear:
-            self.setOri(q)  # update quaternion and we're done
-            return
-
-        self.setOri(TransformMixin.quatMultiply(self._ori, q))
-
-    @property
-    def pos(self):
-        """Position of the object in the scene (3-vector)."""
-        return self._pos
-
-    @pos.setter
-    def pos(self, value):
-        self.setPos(value)
-
-    def setPos(self, pos):
-        """Set the position/translation of the object in the scene.
-
-        Parameters
-        ----------
-        pos : ndarray, list or tuple
-            Vector to translate by (x, y, z).
-
-        Returns
-        -------
-        None
-
-        """
-        self._pos = np.asarray(pos, dtype=np.float32)
-        self._modelMatrix[:3, 3] = self._pos
-        self._modelMatrix[3, 3] = 1.0
-
-    def translate(self, v, clear=False):
-        """Apply translation. Multiple calls to translate are cumulative unless
-        clear=True.
-
-        """
-        if clear:  # inplace translation
-            self._pos += np.asarray(v, dtype=np.float32)
-            self._modelMatrix[:3, 3] = self._pos
-            self._modelMatrix[3, 3] = 1.0
-        else:
-            self.setPos(v)
+        pass
 
     @property
     def modelMatrix(self):
@@ -172,76 +173,21 @@ class TransformMixin(object):
         if self._modelMatrix.shape != (4, 4):
             raise ValueError("modelMatrix must be 4x4.")
 
-    def transform(self, obj):
-        """Transform another object's position and orientation.
-
-        Parameters
-        ----------
-        obj
-
-        Returns
-        -------
-
-        """
-        pass
-
-    @staticmethod
-    def quatMultiply(p, q):
-        """Multiply quaternions.
-
-        Parameters
-        ----------
-        q : ndarray, list or tuple of float
-            Quaternion to invert.
-
-        Returns
-        -------
-
-        """
-        # see https://github.com/datenwolf/linmath.h/blob/master/linmath.h for
-        # original implementation.
-        #
-        # multiply the new and previous quaternion to combine rotations
-        p = np.asarray(p, dtype=np.float32)
-        q = np.asarray(q, dtype=np.float32)
-
-        r = np.zeros((4,), np.float32)
-        r[3] = 0.0
-        r[:3] = np.cross(p[:3], q[:3])
-        r[:3] += p[:3] * q[3]
-        r[:3] += q[:3] * p[3]
-        r[3] = p[3] * q[3] - np.dot(p[:3], q[:3])
-
-        return r
-
-    @staticmethod
-    def quatInvert(q):
-        """Invert a quaternion.
-
-        Parameters
-        ----------
-        q : ndarray, list or tuple of float
-            Quaternion to invert.
-
-        Returns
-        -------
-
-        """
-        return np.asarray((-q[0], -q[1], -q[2], q[3]), dtype=np.float32)
-
 
 class SceneContext(object):
     """Class for managing the scene.
 
     """
+
     def __init__(self):
         pass
 
 
-class WavefrontObjStim(TransformMixin):
+class MeshStim(TransformMixin):
     """Class for loading and presenting 3D stimuli in the Wavefront OBJ format.
 
     """
+
     def __init__(self, win, objFile, loadMtl=True, *args, **kwargs):
         """Constructor for WavefrontObjStim.
 
@@ -284,7 +230,7 @@ class WavefrontObjStim(TransformMixin):
                 raise FileNotFoundError(
                     "Cannot find *.mtl file '{}'".format(mtlPath))
 
-        super(WavefrontObjStim, self).__init__(*args, **kwargs)
+        super(MeshStim, self).__init__(*args, **kwargs)
 
     @property
     def materials(self):
