@@ -85,30 +85,7 @@ class TransformMixin(object):
         np.multiply(self._axis, np.sin(rad / 2.0), out=self._rquat[:3])
         self._rquat[3] = math.cos(rad / 2.0)
 
-        # set the rotation part of the model matrix using the quaternion we just
-        # derived.
-        a = self._rquat[3]
-        b, c, d = self._rquat[:3]
-
-        a2 = a * a
-        b2 = b * b
-        c2 = c * c
-        d2 = d * d
-
-        self._modelMatrix[0, 0] = a2 + b2 - c2 - d2
-        self._modelMatrix[1, 0] = 2.0 * (b * c + a * d)
-        self._modelMatrix[2, 0] = 2.0 * (b * d - a * c)
-        self._modelMatrix[3, 0] = 0.0
-
-        self._modelMatrix[0, 1] = 2.0 * (b * c - a * d)
-        self._modelMatrix[1, 1] = a2 - b2 + c2 - d2
-        self._modelMatrix[2, 1] = 2.0 * (c * d + a * b)
-        self._modelMatrix[3, 1] = 0.0
-
-        self._modelMatrix[0, 2] = 2.0 * (b * d + a * c)
-        self._modelMatrix[1, 2] = 2.0 * (c * d - a * b)
-        self._modelMatrix[2, 2] = a2 - b2 - c2 + d2
-        self._modelMatrix[3, 2] = 0.0
+        self._updateRotationMatrix()
 
     @property
     def pos(self):
@@ -137,8 +114,7 @@ class TransformMixin(object):
 
         """
         self._pos = np.asarray(xyz, dtype=np.float32)
-        self._modelMatrix[:3, 3] = self._pos
-        self._modelMatrix[3, 3] = 1.0
+        self._updateTranslationMatrix()
 
     @property
     def axis(self):
@@ -168,6 +144,8 @@ class TransformMixin(object):
         if k > np.finfo(np.float32).eps:  # normalize
             self._axis /= k
 
+        self._updateRotationMatrix()
+
     @property
     def modelMatrix(self):
         return self._modelMatrix
@@ -178,6 +156,44 @@ class TransformMixin(object):
 
         if self._modelMatrix.shape != (4, 4):
             raise ValueError("modelMatrix must be 4x4.")
+
+    def _updateRotationMatrix(self):
+        """Update the rotation component of the model matrix. This is called
+        automatically when the rotation quaternion is updated.
+
+        """
+        # set the rotation part of the model matrix using the quaternion we just
+        # derived.
+        a = self._rquat[3]
+        b, c, d = self._rquat[:3]
+
+        a2 = a * a
+        b2 = b * b
+        c2 = c * c
+        d2 = d * d
+
+        self._modelMatrix[0, 0] = a2 + b2 - c2 - d2
+        self._modelMatrix[1, 0] = 2.0 * (b * c + a * d)
+        self._modelMatrix[2, 0] = 2.0 * (b * d - a * c)
+        self._modelMatrix[3, 0] = 0.0
+
+        self._modelMatrix[0, 1] = 2.0 * (b * c - a * d)
+        self._modelMatrix[1, 1] = a2 - b2 + c2 - d2
+        self._modelMatrix[2, 1] = 2.0 * (c * d + a * b)
+        self._modelMatrix[3, 1] = 0.0
+
+        self._modelMatrix[0, 2] = 2.0 * (b * d + a * c)
+        self._modelMatrix[1, 2] = 2.0 * (c * d - a * b)
+        self._modelMatrix[2, 2] = a2 - b2 - c2 + d2
+        self._modelMatrix[3, 2] = 0.0
+
+    def _updateTranslationMatrix(self):
+        """Update the translation component of the model matrix. This is called
+        automatically when the position vector is updated.
+
+        """
+        self._modelMatrix[:3, 3] = self._pos
+        self._modelMatrix[3, 3] = 1.0
 
 
 class SceneContext(object):
