@@ -140,27 +140,33 @@ class TransformMixin(object):
         self._modelMatrix[:3, 3] = self._pos
         self._modelMatrix[3, 3] = 1.0
 
-    def rotateAngleAxis(self, angle, axis, clear=False):
-        """Rotate this object about a specified axis. Rotations are cumulative
-        unless clear=True.
+    @property
+    def axis(self):
+        """Axis of rotation."""
+        return self._axis
+
+    @axis.setter
+    def axis(self, value):
+        self.setAxis(value)
+
+    def setAxis(self, axis):
+        """Set the axis of rotation.
 
         Parameters
         ----------
-        angle : float
-            Rotation angle in radians.
-        axis : ndarray, list or tuple of float
-            Axis of rotation vector.
-        clear : bool
-            Clear previous rotations. If False, the rotation will be cumulative.
+        axis : ndarray, list, or tuple of float
+            Axis of rotation defined as a vector (X, Y, Z). Axes will be
+            automatically normalized.
 
-        Notes
-        -----
-        Rotations are represented internally using quaternions. This avoids
-        issues such as gimbal lock and allows for interpolation between rotation
-        states.
+        Returns
+        -------
+        None
 
         """
-        pass
+        self._axis = np.asarray(axis, dtype=np.float32)
+        k = np.linalg.norm(axis)
+        if k > np.finfo(np.float32).eps:  # normalize
+            self._axis /= k
 
     @property
     def modelMatrix(self):
