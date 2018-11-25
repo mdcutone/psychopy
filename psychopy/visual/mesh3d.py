@@ -51,6 +51,35 @@ class TransformMixin(object):
         np.fill_diagonal(self._modelMatrix, 1.0)
 
     @property
+    def pos(self):
+        """Position of the object in the scene (3-vector)."""
+        return self._pos
+
+    @pos.setter
+    def pos(self, xyz):
+        self.setPos(xyz)
+
+    def getPos(self):
+        """Get the current position/translation of the object."""
+        return self._pos
+
+    def setPos(self, xyz):
+        """Set the position/translation of the object in the scene.
+
+        Parameters
+        ----------
+        pos : ndarray, list or tuple
+            Vector to translate by (x, y, z).
+
+        Returns
+        -------
+        None
+
+        """
+        self._pos = np.asarray(xyz, dtype=np.float32)
+        self._updateTranslationMatrix()
+
+    @property
     def ori(self):
         """Orientation of the stimulus in degrees."""
         return self._ori
@@ -88,35 +117,6 @@ class TransformMixin(object):
         self._updateRotationMatrix()
 
     @property
-    def pos(self):
-        """Position of the object in the scene (3-vector)."""
-        return self._pos
-
-    @pos.setter
-    def pos(self, xyz):
-        self.setPos(xyz)
-
-    def getPos(self):
-        """Get the current position/translation of the object."""
-        return self._pos
-
-    def setPos(self, xyz):
-        """Set the position/translation of the object in the scene.
-
-        Parameters
-        ----------
-        pos : ndarray, list or tuple
-            Vector to translate by (x, y, z).
-
-        Returns
-        -------
-        None
-
-        """
-        self._pos = np.asarray(xyz, dtype=np.float32)
-        self._updateTranslationMatrix()
-
-    @property
     def axis(self):
         """Axis of rotation."""
         return self._axis
@@ -148,6 +148,7 @@ class TransformMixin(object):
 
     @property
     def modelMatrix(self):
+        """Computed model matrix."""
         return self._modelMatrix
 
     @modelMatrix.setter
@@ -159,7 +160,7 @@ class TransformMixin(object):
 
     def _updateRotationMatrix(self):
         """Update the rotation component of the model matrix. This is called
-        automatically when the rotation quaternion is updated.
+        automatically when the orientation quaternion is updated.
 
         """
         # set the rotation part of the model matrix using the quaternion we just
