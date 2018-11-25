@@ -30,9 +30,14 @@ class TransformMixin(object):
 
         Parameters
         ----------
+        pos : ndarray, list or tuple of float
+            Position of model in world coordinates.
+        ori : float
+            Rotation about the axis in degrees.
+        axis : ndarray, list or tuple of float
+            Rotation axis.
         args
         kwargs
-
         """
         # Try to be as consistent as possible with how other stimuli are
         # positioned, advanced users might want to work with the quaternions
@@ -63,25 +68,31 @@ class TransformMixin(object):
         """Get the current position/translation of the object."""
         return self._pos
 
-    def setPos(self, xyz):
+    def setPos(self, pos):
         """Set the position/translation of the object in the scene.
 
         Parameters
         ----------
-        pos : ndarray, list or tuple
+        pos : ndarray, list or tuple of float
             Vector to translate by (x, y, z).
 
         Returns
         -------
         None
 
+        Notes
+        -----
+        Setting the position vector will update the translation component of
+        the model matrix.
+
         """
-        self._pos = np.asarray(xyz, dtype=np.float32)
-        self._updateTranslationMatrix()
+        self._pos[:] = pos[:]
+        self._modelMatrix[:3, 3] = self._pos[:]
+        self._modelMatrix[3, 3] = 1.0
 
     @property
     def ori(self):
-        """Orientation of the stimulus in degrees."""
+        """Orientation of the stimulus in degrees about axis."""
         return self._ori
 
     @ori.setter
@@ -107,7 +118,7 @@ class TransformMixin(object):
 
         """
         self._ori = float(degrees)
-        rad = math.radians(degrees)
+        rad = math.radians(self._ori)
         q = np.zeros((4,), np.float32)
         np.multiply(self._axis, np.sin(rad / 2.0), out=q[:3])
         q[3] = math.cos(rad / 2.0)
@@ -137,10 +148,10 @@ class TransformMixin(object):
         None
 
         """
-        self._axis = np.asarray(axis, dtype=np.float32)
-        k = np.linalg.norm(axis)
+        self._axis[:] = axis[:]
+        k = np.linalg.norm(self._axis)
         if k > np.finfo(np.float32).eps:  # normalize
-            self._axis /= k
+            self._axis[:] /= k
 
         rad = math.radians(self._ori)
         q = np.zeros((4,), np.float32)
@@ -151,6 +162,7 @@ class TransformMixin(object):
 
     @property
     def quat(self):
+        """Orientation quaternion."""
         return self._rquat
 
     @quat.setter
@@ -158,7 +170,8 @@ class TransformMixin(object):
         self.setQuaternion(value)
 
     def setQuaternion(self, quat):
-        """Set the orientation quaternion.
+        """Set the orientation quaternion. This is used to derive the rotation
+        components of the model matrix.
 
         Parameters
         ----------
@@ -183,7 +196,7 @@ class TransformMixin(object):
         quaternion.
 
         """
-        self._rquat[:] = np.asarray(quat, dtype=np.float32)
+        self._rquat[:] = quat[:]
         a = self._rquat[3]
         b, c, d = self._rquat[:3]
 
@@ -218,14 +231,6 @@ class TransformMixin(object):
 
         if self._modelMatrix.shape != (4, 4):
             raise ValueError("modelMatrix must be 4x4.")
-
-    def _updateTranslationMatrix(self):
-        """Update the translation component of the model matrix. This is called
-        automatically when the position vector is updated.
-
-        """
-        self._modelMatrix[:3, 3] = self._pos
-        self._modelMatrix[3, 3] = 1.0
 
 
 class SceneContext(object):
