@@ -107,14 +107,12 @@ class TransformMixin(object):
 
         """
         self._ori = float(degrees)
-
-        # create the rotation quaternion
         rad = math.radians(degrees)
-        self._rquat = np.zeros((4,), np.float32)
-        np.multiply(self._axis, np.sin(rad / 2.0), out=self._rquat[:3])
-        self._rquat[3] = math.cos(rad / 2.0)
+        q = np.zeros((4,), np.float32)
+        np.multiply(self._axis, np.sin(rad / 2.0), out=q[:3])
+        q[3] = math.cos(rad / 2.0)
 
-        self._updateRotationMatrix()
+        self.setQuaternion(q)
 
     @property
     def axis(self):
@@ -144,27 +142,48 @@ class TransformMixin(object):
         if k > np.finfo(np.float32).eps:  # normalize
             self._axis /= k
 
-        self._updateRotationMatrix()
+        rad = math.radians(self._ori)
+        q = np.zeros((4,), np.float32)
+        np.multiply(self._axis, np.sin(rad / 2.0), out=q[:3])
+        q[3] = math.cos(rad / 2.0)
+
+        self.setQuaternion(q)
 
     @property
-    def modelMatrix(self):
-        """Computed model matrix."""
-        return self._modelMatrix
+    def quat(self):
+        return self._rquat
 
-    @modelMatrix.setter
-    def modelMatrix(self, value):
-        self._modelMatrix = np.asarray(value, dtype=np.float32)
+    @quat.setter
+    def quat(self, value):
+        self.setQuaternion(value)
 
-        if self._modelMatrix.shape != (4, 4):
-            raise ValueError("modelMatrix must be 4x4.")
+    def setQuaternion(self, quat):
+        """Set the orientation quaternion.
 
-    def _updateRotationMatrix(self):
-        """Update the rotation component of the model matrix. This is called
-        automatically when the orientation quaternion is updated.
+        Parameters
+        ----------
+        quat : ndarray, list or tuple of float
+            Quaternion defining the orientation of the object as a length 4
+            vector. Where the first three values are the imaginary components
+            and the last one is real.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        The rotation component of the model matrix is computed upon setting the
+        quaternion.
+
+        Warnings
+        --------
+        Setting the quaternion directly invalidates the values of 'ori' and
+        'axis'. Setting any of those values will overwrite any custom
+        quaternion.
 
         """
-        # set the rotation part of the model matrix using the quaternion we just
-        # derived.
+        self._rquat[:] = np.asarray(quat, dtype=np.float32)
         a = self._rquat[3]
         b, c, d = self._rquat[:3]
 
@@ -187,6 +206,18 @@ class TransformMixin(object):
         self._modelMatrix[1, 2] = 2.0 * (c * d - a * b)
         self._modelMatrix[2, 2] = a2 - b2 - c2 + d2
         self._modelMatrix[3, 2] = 0.0
+
+    @property
+    def modelMatrix(self):
+        """Computed model matrix."""
+        return self._modelMatrix
+
+    @modelMatrix.setter
+    def modelMatrix(self, value):
+        self._modelMatrix = np.asarray(value, dtype=np.float32)
+
+        if self._modelMatrix.shape != (4, 4):
+            raise ValueError("modelMatrix must be 4x4.")
 
     def _updateTranslationMatrix(self):
         """Update the translation component of the model matrix. This is called
