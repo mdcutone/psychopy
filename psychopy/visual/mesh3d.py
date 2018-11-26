@@ -47,6 +47,7 @@ class TransformMixin(object):
             Rotation about the axis in degrees.
         axis : ndarray, list or tuple of float
             Rotation axis.
+
         """
         # Try to be as consistent as possible with how other stimuli are
         # positioned, advanced users might want to work with the quaternions
@@ -59,6 +60,15 @@ class TransformMixin(object):
         # orientations are stored as quaternions
         self._rquat = np.zeros((4,), dtype=float)
         self._rquat[3] = 1.0
+
+        # transformation matrices, these are composed to create the final model
+        # matrix
+        self._sclMatrix = np.zeros((4,), dtype=float)
+        np.fill_diagonal(self._sclMatrix, 1.0)
+        self._rotMatrix = np.zeros((4,), dtype=float)
+        np.fill_diagonal(self._rotMatrix, 1.0)
+        self._trnMatrix = np.zeros((4,), dtype=float)
+        np.fill_diagonal(self._trnMatrix, 1.0)
 
         # model matrix used for transformations
         self._modelMatrix = np.zeros((4, 4), dtype=np.float32, order='F')
@@ -95,6 +105,9 @@ class TransformMixin(object):
             the model matrix.
 
         """
+        self._trnMatrix.fill(0.0)
+        np.fill_diagonal(self._trnMatrix, 1.0)
+
         self._pos[:] = pos[:]
         self._modelMatrix[:3, 3] = self._pos[:]
         self._modelMatrix[3, 3] = 1.0
