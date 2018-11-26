@@ -7,6 +7,7 @@
 
 from __future__ import absolute_import, print_function
 from psychopy.tools import gltools
+from psychopy.core import getTime
 
 import numpy as np
 import os.path
@@ -46,8 +47,6 @@ class TransformMixin(object):
             Rotation about the axis in degrees.
         axis : ndarray, list or tuple of float
             Rotation axis.
-        args
-        kwargs
         """
         # Try to be as consistent as possible with how other stimuli are
         # positioned, advanced users might want to work with the quaternions
@@ -244,12 +243,17 @@ class TransformMixin(object):
 
     @property
     def dataPtr(self):
-        """Model matrix as ctypes pointer."""
+        """Model matrix as ctypes pointer.
+
+        """
         return self._modelMatrix.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
 
 class ObjStim(TransformMixin):
     """Class for loading and presenting 3D stimuli in the Wavefront OBJ format.
+
+    This class provides a simplified interface similar to 2D stimuli for
+    drawing and configuration.
 
     Only vertices, normals, texture coordinates, and faces defined in the OBJ
     file are used. Co-ordinates are loaded into vertex arrays for fast
@@ -262,7 +266,11 @@ class ObjStim(TransformMixin):
 
     """
 
-    def __init__(self, win, objFile, loadMtl=True, *args, **kwargs):
+    def __init__(self,
+                 win,
+                 objFile,
+                 loadMtl=True,
+                 *args, **kwargs):
         """Constructor for ObjStim.
 
         Parameters
@@ -273,7 +281,10 @@ class ObjStim(TransformMixin):
         objFile : str
             Path to the *.OBJ file.
         loadMtl : bool
-            Load the material library (if any) referenced by the *.OBJ file.
+            Load the material library (if any) referenced by the *.OBJ file. If
+            the file is referenced by a relative path, and 'objFile' was
+            specified as an absolute path. The absolute path to the *.OBJ file
+            will be joined to the relative path of the *.MTL file.
         pos : ndarray, list or tuple of float
             Position of the stimulus origin relative to the scene origin.
         ori : float
@@ -316,27 +327,46 @@ class ObjStim(TransformMixin):
     def materials(self):
         return self._mtllibInfo
 
-    def draw(self, win=None):
+    def _prepareObjDraw(self):
+        """Called before drawing objects to setup the environment.
+
         """
+        GL.glCullFace(GL.GL_BACK)
+        GL.glShadeModel(GL.GL_SMOOTH)
+        GL.glDepthMask(GL.GL_TRUE)
+        GL.glEnable(GL.GL_CULL_FACE)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glDisable(GL.GL_BLEND)
+        GL.glDepthFunc(GL.GL_LEQUAL)
+
+    def _finishedObjDraw(self):
+        """Called after drawing all objects.
+
+        """
+        GL.glDisable(GL.GL_CULL_FACE)
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        GL.glEnable(GL.GL_BLEND)
+        GL.glDepthMask(GL.GL_FALSE)
+
+    def draw(self, win=None):
+        """Render the object.
 
         Parameters
         ----------
-        win
+        win : :class:`~psychopy.visual.Window`
+            The :class:`~psychopy.visual.Window` object in which the stimulus
+            will be rendered to. The window must share a context with the
+            window specified when instantiating the object.
 
         Returns
         -------
+        None
 
         """
         if win is not None:
             win.backend.setCurrent()
 
-        GL.glDepthMask(GL.GL_TRUE)
-        GL.glEnable(GL.GL_CULL_FACE)
-        GL.glEnable(GL.GL_DEPTH_TEST)
-        GL.glDepthFunc(GL.GL_LEQUAL)
-        GL.glShadeModel(GL.GL_SMOOTH)
-        GL.glCullFace(GL.GL_BACK)
-        GL.glDisable(GL.GL_BLEND)
+        self._prepareObjDraw()
 
         GL.glPushMatrix()
         GL.glMultMatrixf(self.dataPtr)
@@ -349,7 +379,4 @@ class ObjStim(TransformMixin):
         # disable materials and lightsq
         gltools.useMaterial(None)
 
-        GL.glDisable(GL.GL_CULL_FACE)
-        GL.glDisable(GL.GL_DEPTH_TEST)
-        GL.glDepthFunc(GL.GL_LEQUAL)
-        GL.glDepthMask(GL.GL_FALSE)
+        self._finishedObjDraw()
