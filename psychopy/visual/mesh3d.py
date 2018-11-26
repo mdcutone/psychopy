@@ -19,6 +19,16 @@ class TransformMixin(object):
     """Mixin class for characterizing and manipulating the pose of 2- and 3-D
     objects in a scene.
 
+    Notes
+    -----
+        The orientation of the object is specified using an axis and angle,
+        where orientation is stored internally using a quaternion derived from
+        them. This quaternion is updated automatically when either 'ori' of
+        'axis' are changed. The quaternion can be specified directly if one
+        wishes, however the values of 'angle' and 'axis' will be invalid.
+        Regardless of how the orientation is set, the quaternion is used to
+        derive the rotation groups of the model matrix.
+
     """
 
     def __init__(self,
@@ -43,16 +53,16 @@ class TransformMixin(object):
         # positioned, advanced users might want to work with the quaternions
         # and vectors directly.
         #
-        self._pos = np.asarray(pos, dtype=np.float32)  # position vector
-        self._axis = np.asarray(axis, dtype=np.float32)  # rotation axis vector
+        self._pos = np.asarray(pos, dtype=float)  # position vector
+        self._axis = np.asarray(axis, dtype=float)  # rotation axis vector
         self._ori = ori  # rotation angle
 
         # orientations are stored as quaternions
-        self._rquat = np.zeros((4,), dtype=np.float32)
+        self._rquat = np.zeros((4,), dtype=float)
         self._rquat[3] = 1.0
 
         # model matrix used for transformations
-        self._modelMatrix = np.zeros((4, 4), np.float32)
+        self._modelMatrix = np.zeros((4, 4), dtype=np.float32, order='F')
         np.fill_diagonal(self._modelMatrix, 1.0)
 
     @property
@@ -82,8 +92,8 @@ class TransformMixin(object):
 
         Notes
         -----
-        Setting the position vector will update the translation component of
-        the model matrix.
+            Setting the position vector will update the translation component of
+            the model matrix.
 
         """
         self._pos[:] = pos[:]
@@ -113,13 +123,13 @@ class TransformMixin(object):
 
         Notes
         -----
-        Setting the orientation will update the orientation component of the
-        model matrix associated with attribute 'modelMatrix'.
+            Setting the orientation will update the orientation component of the
+            model matrix associated with attribute 'modelMatrix'.
 
         """
         self._ori = float(degrees)
         rad = math.radians(self._ori)
-        q = np.zeros((4,), np.float32)
+        q = np.zeros((4,), dtype=float)
         np.multiply(self._axis, np.sin(rad / 2.0), out=q[:3])
         q[3] = math.cos(rad / 2.0)
 
@@ -154,7 +164,7 @@ class TransformMixin(object):
             self._axis[:] /= k
 
         rad = math.radians(self._ori)
-        q = np.zeros((4,), np.float32)
+        q = np.zeros((4,), dtype=float)
         np.multiply(self._axis, np.sin(rad / 2.0), out=q[:3])
         q[3] = math.cos(rad / 2.0)
 
@@ -186,8 +196,8 @@ class TransformMixin(object):
 
         Notes
         -----
-        The rotation component of the model matrix is computed upon setting the
-        quaternion.
+            The rotation component of the model matrix is computed upon setting
+            the quaternion.
 
         Warnings
         --------
@@ -227,39 +237,49 @@ class TransformMixin(object):
 
     @modelMatrix.setter
     def modelMatrix(self, value):
-        self._modelMatrix = np.asarray(value, dtype=np.float32)
+        self._modelMatrix[:, :] = value[:, :]
 
         if self._modelMatrix.shape != (4, 4):
             raise ValueError("modelMatrix must be 4x4.")
 
-
-class SceneContext(object):
-    """Class for managing the scene.
-
-    """
-
-    def __init__(self):
-        pass
+    @property
+    def dataPtr(self):
+        """Model matrix as ctypes pointer."""
+        return self._modelMatrix.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
 
-class MeshStim(TransformMixin):
+class ObjStim(TransformMixin):
     """Class for loading and presenting 3D stimuli in the Wavefront OBJ format.
+
+    Only vertices, normals, texture coordinates, and faces defined in the OBJ
+    file are used. Co-ordinates are loaded into vertex arrays for fast
+    rendering.
+
+    Warnings
+    --------
+        Loading an *.OBJ file is a slow process, be sure to do this outside
+        of any time-critical routines!
 
     """
 
     def __init__(self, win, objFile, loadMtl=True, *args, **kwargs):
-        """Constructor for WavefrontObjStim.
+        """Constructor for ObjStim.
 
         Parameters
         ----------
-        win : Window
-            pass
+        win : :class:`~psychopy.visual.Window`
+            The :class:`~psychopy.visual.Window` object in which the stimulus
+            will be rendered by default. (required)
         objFile : str
             Path to the *.OBJ file.
         loadMtl : bool
             Load the material library (if any) referenced by the *.OBJ file.
-        args
-        kwargs
+        pos : ndarray, list or tuple of float
+            Position of the stimulus origin relative to the scene origin.
+        ori : float
+            Orientation of the stimulus about some axis in degrees (see 'axis').
+        axis : ndarray, list or tuple of float
+            Axis of rotation.
 
         """
         self.win = win
@@ -276,6 +296,7 @@ class MeshStim(TransformMixin):
         # load the *.MTL file if requested, otherwise it must be specified later
         # before rendering
         if loadMtl and self._objInfo.mtlFile is not None:
+            # path might be relative but not in CWD, try to resolve the path
             if os.path.isabs(self.objFile) and not os.path.isabs(
                     self._objInfo.mtlFile):
                 mtlPath = os.path.join(
@@ -289,7 +310,7 @@ class MeshStim(TransformMixin):
                 raise FileNotFoundError(
                     "Cannot find *.mtl file '{}'".format(mtlPath))
 
-        super(MeshStim, self).__init__(*args, **kwargs)
+        super(ObjStim, self).__init__(*args, **kwargs)
 
     @property
     def materials(self):
@@ -318,9 +339,7 @@ class MeshStim(TransformMixin):
         GL.glDisable(GL.GL_BLEND)
 
         GL.glPushMatrix()
-        modelMatrix = np.asfortranarray(self.modelMatrix).ctypes.data_as(
-            ctypes.POINTER(ctypes.c_float))
-        GL.glMultMatrixf(modelMatrix)
+        GL.glMultMatrixf(self.dataPtr)
         # draw the model
         for group, vao in self._objInfo.drawGroups.items():
             gltools.useMaterial(self._mtllibInfo[group])
