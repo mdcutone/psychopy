@@ -63,15 +63,12 @@ class TransformMixin(object):
 
         # transformation matrices, these are composed to create the final model
         # matrix
-        self._sclMatrix = np.zeros((4,), dtype=float)
-        np.fill_diagonal(self._sclMatrix, 1.0)
-        self._rotMatrix = np.zeros((4,), dtype=float)
-        np.fill_diagonal(self._rotMatrix, 1.0)
-        self._trnMatrix = np.zeros((4,), dtype=float)
-        np.fill_diagonal(self._trnMatrix, 1.0)
+        self._sclMatrix = self._identity()
+        self._rotMatrix = self._identity()
+        self._trnMatrix = self._identity()
 
         # model matrix used for transformations
-        self._modelMatrix = np.zeros((4, 4), dtype=np.float32, order='F')
+        self._modelMatrix = np.zeros((4, 4), dtype=float)
         np.fill_diagonal(self._modelMatrix, 1.0)
 
     @property
@@ -227,20 +224,26 @@ class TransformMixin(object):
         c2 = c * c
         d2 = d * d
 
-        self._modelMatrix[0, 0] = a2 + b2 - c2 - d2
-        self._modelMatrix[1, 0] = 2.0 * (b * c + a * d)
-        self._modelMatrix[2, 0] = 2.0 * (b * d - a * c)
-        self._modelMatrix[3, 0] = 0.0
+        self._rotMatrix = self._identity()
 
-        self._modelMatrix[0, 1] = 2.0 * (b * c - a * d)
-        self._modelMatrix[1, 1] = a2 - b2 + c2 - d2
-        self._modelMatrix[2, 1] = 2.0 * (c * d + a * b)
-        self._modelMatrix[3, 1] = 0.0
+        self._rotMatrix[0, 0] = a2 + b2 - c2 - d2
+        self._rotMatrix[1, 0] = 2.0 * (b * c + a * d)
+        self._rotMatrix[2, 0] = 2.0 * (b * d - a * c)
+        self._rotMatrix[3, 0] = 0.0
 
-        self._modelMatrix[0, 2] = 2.0 * (b * d + a * c)
-        self._modelMatrix[1, 2] = 2.0 * (c * d - a * b)
-        self._modelMatrix[2, 2] = a2 - b2 - c2 + d2
-        self._modelMatrix[3, 2] = 0.0
+        self._rotMatrix[0, 1] = 2.0 * (b * c - a * d)
+        self._rotMatrix[1, 1] = a2 - b2 + c2 - d2
+        self._rotMatrix[2, 1] = 2.0 * (c * d + a * b)
+        self._rotMatrix[3, 1] = 0.0
+
+        self._rotMatrix[0, 2] = 2.0 * (b * d + a * c)
+        self._rotMatrix[1, 2] = 2.0 * (c * d - a * b)
+        self._rotMatrix[2, 2] = a2 - b2 - c2 + d2
+        self._rotMatrix[3, 2] = 0.0
+
+        # compose the model matrix
+        np.matmul(self._rotMatrix, self._sclMatrix, self._modelMatrix)
+        np.matmul(self._modelMatrix, self._trnMatrix, self._modelMatrix)
 
     @property
     def modelMatrix(self):
@@ -260,6 +263,13 @@ class TransformMixin(object):
 
         """
         return self._modelMatrix.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+
+    def _identity(self):
+        """Create a 4x4 identity matrix. Used internally by TransformMixin."""
+        to_return = np.zeros((4, 4), dtype=float)
+        np.fill_diagonal(to_return, 1.0)
+
+        return to_return
 
 
 class ObjStim(TransformMixin):
