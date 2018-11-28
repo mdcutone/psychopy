@@ -76,7 +76,7 @@ class TransformMixin(object):
         self._pos = np.asarray(pos, dtype=float)  # position vector
         self._axis = np.asarray(axis, dtype=float)  # rotation axis vector
         self._ori = 0.0  # rotation angle
-        self._scale = 0.0
+        self._scale = 0.0  # scaling factor
 
         # compute initial matrices
         self.setScale(scale)
