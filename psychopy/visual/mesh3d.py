@@ -36,40 +36,56 @@ class TransformMixin(object):
                  pos=(0., 0., 0.),
                  ori=0.0,
                  axis=(0., 1., 0.),
+                 scale=1.0,
                  *args, **kwargs):
         """Constructor for TransformMixin.
 
         Parameters
         ----------
         pos : ndarray, list or tuple of float
-            Position of model in world coordinates.
+            Position of stimuli in world coordinates
         ori : float
             Rotation about the axis in degrees.
         axis : ndarray, list or tuple of float
             Rotation axis.
+        scale : float
+            Scaling factor for the stimuli.
 
         """
-        # Try to be as consistent as possible with how other stimuli are
-        # positioned, advanced users might want to work with the quaternions
-        # and vectors directly.
-        #
-        self._pos = np.asarray(pos, dtype=float)  # position vector
-        self._axis = np.asarray(axis, dtype=float)  # rotation axis vector
-        self._ori = ori  # rotation angle
-
         # orientations are stored as quaternions
         self._rquat = np.zeros((4,), dtype=float)
         self._rquat[3] = 1.0
 
         # transformation matrices, these are composed to create the final model
         # matrix
-        self._sclMatrix = self._identity()
-        self._rotMatrix = self._identity()
-        self._trnMatrix = self._identity()
+        self._S = np.zeros((4, 4), dtype=float)
+        np.fill_diagonal(self._S, 1.0)
+        self._R = np.zeros((4, 4), dtype=float)
+        np.fill_diagonal(self._R, 1.0)
+        self._T = np.zeros((4, 4), dtype=float)
+        np.fill_diagonal(self._T, 1.0)
 
         # model matrix used for transformations
-        self._modelMatrix = np.zeros((4, 4), dtype=float)
-        np.fill_diagonal(self._modelMatrix, 1.0)
+        self._M = np.zeros((4, 4), dtype=float)
+        np.fill_diagonal(self._M, 1.0)
+
+        # Try to be as consistent as possible with how other stimuli are
+        # positioned, advanced users might want to work with the quaternions
+        # and vectors directly.
+        #
+        self._pos = np.asarray(pos, dtype=float)  # position vector
+        self._axis = np.asarray(axis, dtype=float)  # rotation axis vector
+        self._ori = 0.0  # rotation angle
+        self._scale = 0.0
+
+        # compute initial matrices
+        self.setScale(scale)
+        self.setOri(ori)
+        self.setAxis(axis)
+        self.setPos(pos)
+
+        # flag that the model matrix needs updating
+        self._updateModelMatrix = True
 
     @property
     def pos(self):
@@ -102,12 +118,37 @@ class TransformMixin(object):
             the model matrix.
 
         """
-        self._trnMatrix.fill(0.0)
-        np.fill_diagonal(self._trnMatrix, 1.0)
-
         self._pos[:] = pos[:]
-        self._modelMatrix[:3, 3] = self._pos[:]
-        self._modelMatrix[3, 3] = 1.0
+        self._T.fill(0.0)
+        np.fill_diagonal(self._T, 1.0)
+        self._T[:3, 3] = self._pos[:]
+
+        self._updateModelMatrix = True
+
+    @property
+    def scale(self):
+        """Scaling (uniform) factor for the stimuli."""
+        return self.getScale()
+
+    @scale.setter
+    def scale(self, value):
+        self.setScale(value)
+
+    def getScale(self):
+        """Get the scaling factor for the stimuli."""
+        return self._scale
+
+    def setScale(self, factor):
+        """Set the scale factor for the stimuli."""
+        self._scale = float(factor)
+
+        self._S.fill(0.0)
+        self._S[0, 0] = self._scale
+        self._S[1, 1] = self._scale
+        self._S[2, 2] = self._scale
+        self._S[3, 3] = 1.0
+
+        self._updateModelMatrix = True
 
     @property
     def ori(self):
@@ -224,52 +265,63 @@ class TransformMixin(object):
         c2 = c * c
         d2 = d * d
 
-        self._rotMatrix = self._identity()
+        # no need to clear the matrix, all values are set
+        #
+        self._R[0, 0] = (a2 + b2 - c2 - d2)
+        self._R[1, 0] = 2.0 * (b * c + a * d)
+        self._R[2, 0] = 2.0 * (b * d - a * c)
+        self._R[3, 0] = 0.0
 
-        self._rotMatrix[0, 0] = a2 + b2 - c2 - d2
-        self._rotMatrix[1, 0] = 2.0 * (b * c + a * d)
-        self._rotMatrix[2, 0] = 2.0 * (b * d - a * c)
-        self._rotMatrix[3, 0] = 0.0
+        self._R[0, 1] = 2.0 * (b * c - a * d)
+        self._R[1, 1] = (a2 - b2 + c2 - d2)
+        self._R[2, 1] = 2.0 * (c * d + a * b)
+        self._R[3, 1] = 0.0
 
-        self._rotMatrix[0, 1] = 2.0 * (b * c - a * d)
-        self._rotMatrix[1, 1] = a2 - b2 + c2 - d2
-        self._rotMatrix[2, 1] = 2.0 * (c * d + a * b)
-        self._rotMatrix[3, 1] = 0.0
+        self._R[0, 2] = 2.0 * (b * d + a * c)
+        self._R[1, 2] = 2.0 * (c * d - a * b)
+        self._R[2, 2] = (a2 - b2 - c2 + d2)
+        self._R[3, 2] = 0.0
 
-        self._rotMatrix[0, 2] = 2.0 * (b * d + a * c)
-        self._rotMatrix[1, 2] = 2.0 * (c * d - a * b)
-        self._rotMatrix[2, 2] = a2 - b2 - c2 + d2
-        self._rotMatrix[3, 2] = 0.0
+        self._R[:3, 3] = 0.0
+        self._R[3, 3] = 1.0
 
-        # compose the model matrix
-        np.matmul(self._rotMatrix, self._sclMatrix, self._modelMatrix)
-        np.matmul(self._modelMatrix, self._trnMatrix, self._modelMatrix)
+        self._updateModelMatrix = True
 
     @property
     def modelMatrix(self):
         """Computed model matrix."""
-        return self._modelMatrix
+        return self.getModelMatrix()
 
     @modelMatrix.setter
     def modelMatrix(self, value):
-        self._modelMatrix[:, :] = value[:, :]
+        self._M[:, :] = value[:, :]
 
-        if self._modelMatrix.shape != (4, 4):
+        # prevent the model matrix from updating if set directly by the user
+        self._updateModelMatrix = False
+
+        if self._M.shape != (4, 4):
             raise ValueError("modelMatrix must be 4x4.")
+
+    def getModelMatrix(self):
+        """Get the current model matrix. The matrix is recomputed if any
+        related parameter was updated.
+
+        """
+        # compose the rotation, translation and scaling matrices into a
+        # model matrix
+        if self._updateModelMatrix:
+            np.matmul(self._S, self._R, self._M)
+            np.matmul(self._T, self._M, self._M)
+            self._updateModelMatrix = False
+
+        return np.asfortranarray(self._M, dtype=np.float32)
 
     @property
     def dataPtr(self):
         """Model matrix as ctypes pointer.
 
         """
-        return self._modelMatrix.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-
-    def _identity(self):
-        """Create a 4x4 identity matrix. Used internally by TransformMixin."""
-        to_return = np.zeros((4, 4), dtype=float)
-        np.fill_diagonal(to_return, 1.0)
-
-        return to_return
+        return self.modelMatrix.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
 
 class ObjStim(TransformMixin):
