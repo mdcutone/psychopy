@@ -345,6 +345,7 @@ class ObjStim(TransformMixin):
                  win,
                  objFile,
                  loadMtl=True,
+                 loadTextures=True,
                  *args, **kwargs):
         """Constructor for ObjStim.
 
@@ -359,7 +360,11 @@ class ObjStim(TransformMixin):
             Load the material library (if any) referenced by the *.OBJ file. If
             the file is referenced by a relative path, and 'objFile' was
             specified as an absolute path. The absolute path to the *.OBJ file
-            will be joined to the relative path of the *.MTL file.
+            will be joined to the relative path of the *.MTL file. If False,
+            you must specify your own material library.
+        loadTextures : bool
+            Load image textures referenced by materials in the *.MTL file. This
+            value is ignored if loadMtl=False.
         pos : ndarray, list or tuple of float
             Position of the stimulus origin relative to the scene origin.
         ori : float
