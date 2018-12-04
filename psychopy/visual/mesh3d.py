@@ -12,6 +12,7 @@ from psychopy.core import getTime
 import numpy as np
 import os.path
 import pyglet.gl as GL
+import pyglet.gl.glu as GLU
 import ctypes
 import math
 
@@ -322,6 +323,74 @@ class TransformMixin(object):
 
         """
         return self.modelMatrix.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+
+
+class SphereStim(TransformMixin):
+    """Class for rendering spheres. Spheres drawn using gluQuadrics.
+
+    """
+    def __init__(self,
+                 win,
+                 radius=0.5,
+                 slices=16,
+                 stacks=32,
+                 color=(0, 0, 0),
+                 *args, **kwargs):
+        """Constructor for SphereStim.
+
+        Parameters
+        ----------
+        win : :class:`~psychopy.visual.Window`
+            The :class:`~psychopy.visual.Window` object in which the stimulus
+            will be rendered by default. (required)
+        radius : float
+            Radius of the sphere in meters.
+        slices : int
+            Subdivisions about the z-axis.
+        stacks : int
+            Subdivisions along the z-axis.
+        color : ndarray, tuple or list of float
+            RGB color of the sphere.
+        args
+        kwargs
+
+        """
+        self.win = win
+
+        self.radius = radius
+        self.slices = slices
+        self.stacks = stacks
+
+        self._quadric = GLU.gluNewQuadric()
+        GLU.gluQuadricNormals(self._quadric, GL.GLU_SMOOTH)
+        GLU.gluQuadricOrientation(self._quadric, GL.GLU_OUTSIDE)
+
+        super(SphereStim, self).__init__(*args, **kwargs)
+
+    def draw(self, win=None):
+        if win is not None:
+            win.backend.setCurrent()
+
+        GL.glCullFace(GL.GL_BACK)
+        GL.glShadeModel(GL.GL_SMOOTH)
+        GL.glDepthMask(GL.GL_TRUE)
+        GL.glEnable(GL.GL_CULL_FACE)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glDisable(GL.GL_BLEND)
+        GL.glDepthFunc(GL.GL_LEQUAL)
+
+        GL.glPushMatrix()
+        #GL.glMultMatrixf(self.dataPtr)
+        #GL.glTranslatef(0.0, 0.0, -1.5)
+        GL.glMultMatrixf(self.dataPtr)
+        #GL.glColor3f(1.0, 1.0, 1.0)
+        GLU.gluSphere(self._quadric, self.radius, self.slices, self.stacks)
+        GL.glPopMatrix()
+
+        GL.glDisable(GL.GL_CULL_FACE)
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        GL.glEnable(GL.GL_BLEND)
+        GL.glDepthMask(GL.GL_FALSE)
 
 
 class ObjStim(TransformMixin):
