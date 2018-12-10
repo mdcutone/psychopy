@@ -88,6 +88,60 @@ class TransformMixin(object):
         # flag that the model matrix needs updating
         self._updateModelMatrix = True
 
+    def rotateAxisAngle(self, axis, angle, degrees=False, clear=True):
+        """Rotate the stimuli about a specified 'axis' by 'angle'.
+
+        Parameters
+        ----------
+        axis : tuple, list or ndarray of float
+            Axis of rotation (X, Y, Z). Should be normalized.
+        angle : float
+            Rotation angle in radians. Rotations are right-handed about the
+            specified axis.
+        degrees : bool
+            Convert 'angle' to degrees from radians.
+        clear : bool
+            Clear previous rotations. If False, the specified rotation adds to
+            the current orientation.
+
+        Returns
+        -------
+        None
+
+        """
+        rad = math.radians(float(angle)) if degrees else float(angle)
+        q = np.zeros((4,), dtype=float)
+        np.multiply(axis, np.sin(rad / 2.0), out=q[:3])
+        q[3] = math.cos(rad / 2.0)
+
+        # multiply the current quaternion, combining their orientations
+        if not clear:
+            self.multQuat(q)
+        else:
+            self.setQuaternion(q)
+
+    def multQuat(self, quat):
+        """Multiply the current orientation by a quaternion.
+
+        Parameters
+        ----------
+        quat : ndarray, list or tuple of float
+            Quaternion defining the orientation of the object as a length 4
+            vector. Where the first three values are the imaginary components
+            and the last one is real.
+
+        Returns
+        -------
+        None
+
+        """
+        p = np.zeros((4,), dtype=float)
+        p[:3] = np.cross(self._rquat[:3], quat[:3]) + \
+            self._rquat[:3] * quat[3] + quat[:3] * self._rquat[3]
+        p[3] = self._rquat[3] * quat[3] - self._rquat[:3].dot(quat[:3])
+
+        self.setQuaternion(p)
+
     @property
     def pos(self):
         """Position of the object in the scene (3-vector)."""
