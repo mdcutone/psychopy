@@ -148,9 +148,8 @@ class TransformMixin(object):
         Parameters
         ----------
         quat : ndarray, list or tuple of float
-            Quaternion defining the orientation of the object as a length 4
-            vector. Where the first three values are the imaginary components
-            and the last one is real.
+            Orientation quaternion in form [x, y, z, w] where w is real and
+            x, y, z are imaginary components.
 
         Returns
         -------
@@ -377,6 +376,66 @@ class SphereStim(TransformMixin):
         GL.glDisable(GL.GL_DEPTH_TEST)
         GL.glEnable(GL.GL_BLEND)
         GL.glDepthMask(GL.GL_FALSE)
+
+
+def slerp(q0, q1, t):
+    """Spherical linear interpolation (SLERP) between two quaternions.
+
+    Interpolation occurs along the shortest arc between the initial and final
+    quaternion.
+
+    Parameters
+    ----------
+    q0 : tuple, list or ndarray of float
+        Initial quaternion in form [x, y, z, w] where w is real and x, y, z
+        are imaginary components.
+    q1 : tuple, list or ndarray of float
+        Final quaternion in form [x, y, z, w] where w is real and x, y, z
+        are imaginary components.
+    t : float
+        Interpolation factor [0, 1].
+
+    Returns
+    -------
+    ndarray
+        Quaternion [x, y, z, w] at 't'.
+
+    """
+    # Implementation based on code found here:
+    #  https://en.wikipedia.org/wiki/Slerp
+    #
+    q0 = np.asarray(q0, dtype=float)
+    norm = np.linalg.norm(q0)
+    if norm != 0.0:
+        q0 /= norm
+
+    q1 = np.asarray(q1, dtype=float)
+    norm = np.linalg.norm(q1)
+    if norm != 0.0:
+        q1 /= norm
+
+    dot = np.dot(q0, q1)
+    if dot < 0.0:
+        q1 = -q1
+        dot = -dot
+
+    # small angle, use linear interpolation instead and return
+    if dot > 0.9995:
+        interp = q0 + t * (q1 - q0)
+        norm = np.linalg.norm(interp)
+        if norm != 0.0:
+            interp /= norm
+
+        return interp
+
+    theta0 = math.acos(dot)
+    theta = theta0 * t
+    sinTheta = math.sin(theta)
+    sinTheta0 = math.sin(theta0)
+    s0 = math.cos(theta) - dot * sinTheta / sinTheta0
+    s1 = sinTheta / sinTheta0
+
+    return (q0 * s0) + (q1 * s1)
 
 
 class ObjStim(TransformMixin):
