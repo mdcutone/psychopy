@@ -21,6 +21,11 @@ class TransformMixin(object):
     """Mixin class for characterizing and manipulating the pose of 2- and 3-D
     objects in a scene.
 
+    Poses are defined by a quaternion and vector for orientation and position,
+    respectively. These components can be set directly or computed using various
+    class methods. Ultimately, these transformation components are used to
+    create a 4x4 model matrix.
+
     Notes
     -----
         The orientation of the object is specified using an axis and angle,
@@ -35,8 +40,7 @@ class TransformMixin(object):
 
     def __init__(self,
                  pos=(0., 0., 0.),
-                 ori=0.0,
-                 axis=(0., 1., 0.),
+                 ori=(0., 0., 0., 1.),
                  scale=1.0,
                  *args, **kwargs):
         """Constructor for TransformMixin.
@@ -44,18 +48,17 @@ class TransformMixin(object):
         Parameters
         ----------
         pos : ndarray, list or tuple of float
-            Position of stimuli in world coordinates
-        ori : float
-            Rotation about the axis in degrees.
-        axis : ndarray, list or tuple of float
-            Rotation axis.
+            Position of stimuli in world coordinates.
+        ori : ndarray, list or tuple of float
+            Orientation quaternion in form [x, y, z, w] where w is real and
+            x, y, z are imaginary components.
         scale : float
-            Scaling factor for the stimuli.
+            Scaling factor for the stimuli, applied to the computed model
+            matrix. Does not affect 'pos' or 'ori'.
 
         """
         # orientations are stored as quaternions
-        self._rquat = np.zeros((4,), dtype=float)
-        self._rquat[3] = 1.0
+        self._rquat = np.asarray(ori, dtype=float)
 
         # transformation matrices, these are composed to create the final model
         # matrix
@@ -75,72 +78,15 @@ class TransformMixin(object):
         # and vectors directly.
         #
         self._pos = np.asarray(pos, dtype=float)  # position vector
-        self._axis = np.asarray(axis, dtype=float)  # rotation axis vector
         self._ori = 0.0  # rotation angle
         self._scale = 0.0  # scaling factor
 
         # compute initial matrices
         self.setScale(scale)
-        self.setOri(ori)
-        self.setAxis(axis)
         self.setPos(pos)
 
         # flag that the model matrix needs updating
         self._updateModelMatrix = True
-
-    def rotateAxisAngle(self, axis, angle, degrees=False, clear=True):
-        """Rotate the stimuli about a specified 'axis' by 'angle'.
-
-        Parameters
-        ----------
-        axis : tuple, list or ndarray of float
-            Axis of rotation (X, Y, Z). Should be normalized.
-        angle : float
-            Rotation angle in radians. Rotations are right-handed about the
-            specified axis.
-        degrees : bool
-            Convert 'angle' to degrees from radians.
-        clear : bool
-            Clear previous rotations. If False, the specified rotation adds to
-            the current orientation.
-
-        Returns
-        -------
-        None
-
-        """
-        rad = math.radians(float(angle)) if degrees else float(angle)
-        q = np.zeros((4,), dtype=float)
-        np.multiply(axis, np.sin(rad / 2.0), out=q[:3])
-        q[3] = math.cos(rad / 2.0)
-
-        # multiply the current quaternion, combining their orientations
-        if not clear:
-            self.multQuat(q)
-        else:
-            self.setQuaternion(q)
-
-    def multQuat(self, quat):
-        """Multiply the current orientation by a quaternion.
-
-        Parameters
-        ----------
-        quat : ndarray, list or tuple of float
-            Quaternion defining the orientation of the object as a length 4
-            vector. Where the first three values are the imaginary components
-            and the last one is real.
-
-        Returns
-        -------
-        None
-
-        """
-        p = np.zeros((4,), dtype=float)
-        p[:3] = np.cross(self._rquat[:3], quat[:3]) + \
-            self._rquat[:3] * quat[3] + quat[:3] * self._rquat[3]
-        p[3] = self._rquat[3] * quat[3] - self._rquat[:3].dot(quat[:3])
-
-        self.setQuaternion(p)
 
     @property
     def pos(self):
@@ -181,31 +127,6 @@ class TransformMixin(object):
         self._updateModelMatrix = True
 
     @property
-    def scale(self):
-        """Scaling (uniform) factor for the stimuli."""
-        return self.getScale()
-
-    @scale.setter
-    def scale(self, value):
-        self.setScale(value)
-
-    def getScale(self):
-        """Get the scaling factor for the stimuli."""
-        return self._scale
-
-    def setScale(self, factor):
-        """Set the scale factor for the stimuli."""
-        self._scale = float(factor)
-
-        self._S.fill(0.0)
-        self._S[0, 0] = self._scale
-        self._S[1, 1] = self._scale
-        self._S[2, 2] = self._scale
-        self._S[3, 3] = 1.0
-
-        self._updateModelMatrix = True
-
-    @property
     def ori(self):
         """Orientation of the stimulus in degrees about axis."""
         return self._ori
@@ -214,79 +135,9 @@ class TransformMixin(object):
     def ori(self, value):
         self.setOri(value)
 
-    def setOri(self, degrees):
-        """Set the orientation using the specified quaternion.
-
-        Parameters
-        ----------
-        degrees : float
-            Angle of rotation in degrees.
-
-        Returns
-        -------
-        None
-
-        Notes
-        -----
-            Setting the orientation will update the orientation component of the
-            model matrix associated with attribute 'modelMatrix'.
-
-        """
-        self._ori = float(degrees)
-        rad = math.radians(self._ori)
-        q = np.zeros((4,), dtype=float)
-        np.multiply(self._axis, np.sin(rad / 2.0), out=q[:3])
-        q[3] = math.cos(rad / 2.0)
-
-        self.setQuaternion(q)
-
-    @property
-    def axis(self):
-        """Axis of rotation."""
-        return self._axis
-
-    @axis.setter
-    def axis(self, value):
-        self.setAxis(value)
-
-    def setAxis(self, axis):
-        """Set the axis of rotation.
-
-        Parameters
-        ----------
-        axis : ndarray, list, or tuple of float
-            Axis of rotation defined as a vector (X, Y, Z). Axes will be
-            automatically normalized.
-
-        Returns
-        -------
-        None
-
-        """
-        self._axis[:] = axis[:]
-        k = np.linalg.norm(self._axis)
-        if k > np.finfo(np.float32).eps:  # normalize
-            self._axis[:] /= k
-
-        rad = math.radians(self._ori)
-        q = np.zeros((4,), dtype=float)
-        np.multiply(self._axis, np.sin(rad / 2.0), out=q[:3])
-        q[3] = math.cos(rad / 2.0)
-
-        self.setQuaternion(q)
-
-    @property
-    def quat(self):
-        """Orientation quaternion."""
-        return self._rquat
-
-    @quat.setter
-    def quat(self, value):
-        self.setQuaternion(value)
-
-    def setQuaternion(self, quat):
-        """Set the orientation quaternion. This is used to derive the rotation
-        components of the model matrix.
+    def setOri(self, quat):
+        """Set the orientation using the specified quaternion. This is used to
+        derive the rotation groups of the model matrix.
 
         Parameters
         ----------
@@ -303,12 +154,6 @@ class TransformMixin(object):
         -----
             The rotation component of the model matrix is computed upon setting
             the quaternion.
-
-        Warnings
-        --------
-        Setting the quaternion directly invalidates the values of 'ori' and
-        'axis'. Setting any of those values will overwrite any custom
-        quaternion.
 
         """
         self._rquat[:] = quat[:]
@@ -342,6 +187,84 @@ class TransformMixin(object):
 
         self._updateModelMatrix = True
 
+    def rotateAxisAngle(self, axis, angle, degrees=False, clear=True):
+        """Rotate the stimuli about a specified 'axis' by 'angle'.
+
+        Parameters
+        ----------
+        axis : tuple, list or ndarray of float
+            Axis of rotation (X, Y, Z). Should be normalized.
+        angle : float
+            Rotation angle in radians. Rotations are right-handed about the
+            specified axis.
+        degrees : bool
+            Convert 'angle' to degrees from radians.
+        clear : bool
+            Clear previous rotations. If False, the specified rotation adds to
+            the current orientation.
+
+        Returns
+        -------
+        None
+
+        """
+        rad = math.radians(float(angle)) if degrees else float(angle)
+        q = np.zeros((4,), dtype=float)
+        np.multiply(axis, np.sin(rad / 2.0), out=q[:3])
+        q[3] = math.cos(rad / 2.0)
+
+        # multiply the current quaternion, combining their orientations
+        if not clear:
+            self.multQuat(q)
+        else:
+            self.setOri(q)
+
+    def multQuat(self, quat):
+        """Multiply the current orientation by a quaternion, combining their
+        orientations.
+
+        Parameters
+        ----------
+        quat : ndarray, list or tuple of float
+            Quaternion defining the orientation of the object as a length 4
+            vector. Where the first three values are the imaginary components
+            and the last one is real.
+
+        Returns
+        -------
+        None
+
+        """
+        p = np.zeros((4,), dtype=float)
+        p[:3] = np.cross(self._rquat[:3], quat[:3]) + \
+            self._rquat[:3] * quat[3] + quat[:3] * self._rquat[3]
+        p[3] = self._rquat[3] * quat[3] - self._rquat[:3].dot(quat[:3])
+
+    @property
+    def scale(self):
+        """Scaling (uniform) factor for the stimuli."""
+        return self.getScale()
+
+    @scale.setter
+    def scale(self, value):
+        self.setScale(value)
+
+    def getScale(self):
+        """Get the scaling factor for the stimuli."""
+        return self._scale
+
+    def setScale(self, factor):
+        """Set the scale factor for the stimuli."""
+        self._scale = float(factor)
+
+        self._S.fill(0.0)
+        self._S[0, 0] = self._scale
+        self._S[1, 1] = self._scale
+        self._S[2, 2] = self._scale
+        self._S[3, 3] = 1.0
+
+        self._updateModelMatrix = True
+
     @property
     def modelMatrix(self):
         """Computed model matrix."""
@@ -369,7 +292,7 @@ class TransformMixin(object):
             np.matmul(self._T, self._M, self._M)
             self._updateModelMatrix = False
 
-        return np.asfortranarray(self._M, dtype=np.float32)
+        return np.asarray(self._M, dtype=np.float32)
 
     @property
     def dataPtr(self):
