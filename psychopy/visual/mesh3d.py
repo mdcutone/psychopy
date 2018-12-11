@@ -24,7 +24,8 @@ class TransformMixin(object):
     Poses are defined by a quaternion and vector for orientation and position,
     respectively. These components can be set directly or computed using various
     class methods. Ultimately, these transformation components are used to
-    create a 4x4 model matrix.
+    create a 4x4 model matrix which transforms the object to world/scene
+    coordinates.
 
     Notes
     -----
@@ -57,9 +58,6 @@ class TransformMixin(object):
             matrix. Does not affect 'pos' or 'ori'.
 
         """
-        # orientations are stored as quaternions
-        self._rquat = np.asarray(ori, dtype=float)
-
         # transformation matrices, these are composed to create the final model
         # matrix
         self._S = np.zeros((4, 4), dtype=float)
@@ -73,16 +71,13 @@ class TransformMixin(object):
         self._M = np.zeros((4, 4), dtype=float)
         np.fill_diagonal(self._M, 1.0)
 
-        # Try to be as consistent as possible with how other stimuli are
-        # positioned, advanced users might want to work with the quaternions
-        # and vectors directly.
-        #
         self._pos = np.asarray(pos, dtype=float)  # position vector
-        self._ori = 0.0  # rotation angle
+        self._ori = np.asarray(ori, dtype=float)  # rotation quaternion
         self._scale = 0.0  # scaling factor
 
         # compute initial matrices
         self.setScale(scale)
+        self.setOri(ori)
         self.setPos(pos)
 
         # flag that the model matrix needs updating
@@ -135,6 +130,17 @@ class TransformMixin(object):
     def ori(self, value):
         self.setOri(value)
 
+    def getOri(self):
+        """Get the current orientation quaternion.
+
+        Returns
+        -------
+        ndarrray
+            Quaternion as [x, y, z, w].
+
+        """
+        return self._ori
+
     def setOri(self, quat):
         """Set the orientation using the specified quaternion. This is used to
         derive the rotation groups of the model matrix.
@@ -156,9 +162,9 @@ class TransformMixin(object):
             the quaternion.
 
         """
-        self._rquat[:] = quat[:]
-        a = self._rquat[3]
-        b, c, d = self._rquat[:3]
+        self._ori[:] = quat[:]
+        a = self._ori[3]
+        b, c, d = self._ori[:3]
 
         a2 = a * a
         b2 = b * b
@@ -210,14 +216,15 @@ class TransformMixin(object):
         """
         rad = math.radians(float(angle)) if degrees else float(angle)
         q = np.zeros((4,), dtype=float)
+        axis = np.asarray(axis, dtype=float)
         np.multiply(axis, np.sin(rad / 2.0), out=q[:3])
         q[3] = math.cos(rad / 2.0)
 
         # multiply the current quaternion, combining their orientations
-        if not clear:
-            self.multQuat(q)
-        else:
+        if clear:
             self.setOri(q)
+        else:
+            self.multQuat(q)
 
     def multQuat(self, quat):
         """Multiply the current orientation by a quaternion, combining their
@@ -236,9 +243,11 @@ class TransformMixin(object):
 
         """
         p = np.zeros((4,), dtype=float)
-        p[:3] = np.cross(self._rquat[:3], quat[:3]) + \
-            self._rquat[:3] * quat[3] + quat[:3] * self._rquat[3]
-        p[3] = self._rquat[3] * quat[3] - self._rquat[:3].dot(quat[:3])
+        p[:3] = np.cross(self._ori[:3], quat[:3]) + \
+            self._ori[:3] * quat[3] + quat[:3] * self._ori[3]
+        p[3] = self._ori[3] * quat[3] - self._ori[:3].dot(quat[:3])
+
+        self.setOri(p)
 
     @property
     def scale(self):
@@ -292,7 +301,7 @@ class TransformMixin(object):
             np.matmul(self._T, self._M, self._M)
             self._updateModelMatrix = False
 
-        return np.asarray(self._M, dtype=np.float32)
+        return np.asfortranarray(self._M, dtype=np.float32)
 
     @property
     def dataPtr(self):
