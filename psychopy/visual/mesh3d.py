@@ -18,27 +18,14 @@ import math
 
 
 class TransformMixin(object):
-    """Mixin class for characterizing and manipulating the pose of 2- and 3-D
-    objects in a scene.
+    """Mixin class for characterizing the pose of 2- and 3-D objects in a scene.
 
     Poses are defined by a quaternion and vector for orientation and position,
     respectively. These components can be set directly or computed using various
-    class methods. Ultimately, these transformation components are used to
-    create a 4x4 model matrix which transforms the object to world/scene
-    coordinates.
-
-    Notes
-    -----
-        The orientation of the object is specified using an axis and angle,
-        where orientation is stored internally using a quaternion derived from
-        them. This quaternion is updated automatically when either 'ori' of
-        'axis' are changed. The quaternion can be specified directly if one
-        wishes, however the values of 'angle' and 'axis' will be invalid.
-        Regardless of how the orientation is set, the quaternion is used to
-        derive the rotation groups of the model matrix.
+    class methods. Ultimately, these components are used to create a 4x4 model
+    matrix which transforms the object in world/scene coordinates.
 
     """
-
     def __init__(self,
                  pos=(0., 0., 0.),
                  ori=(0., 0., 0., 1.),
@@ -192,6 +179,22 @@ class TransformMixin(object):
 
         self._updateModelMatrix = True
 
+    def getPosOri(self):
+        """Get both the position and orientation.
+        """
+        return self.getPos(), self.getOri()
+
+    def setPosOri(self, pos, ori):
+        """Set both the position and orientation.
+
+        This is convenient for cases where you are working with libraries that
+        return data this way. Avoiding needing to call 'setPos' and 'setOri'
+        separately in your routine.
+
+        """
+        self.setPos(pos)
+        self.setOri(ori)
+
     def rotateAxisAngle(self, axis, angle, degrees=False, clear=True):
         """Rotate the stimuli about a specified 'axis' by 'angle'.
 
@@ -266,9 +269,7 @@ class TransformMixin(object):
         self._scale = float(factor)
 
         self._S.fill(0.0)
-        self._S[0, 0] = self._scale
-        self._S[1, 1] = self._scale
-        self._S[2, 2] = self._scale
+        self._S[0, 0] = self._S[1, 1] = self._S[2, 2] = self._scale
         self._S[3, 3] = 1.0
 
         self._updateModelMatrix = True
@@ -300,7 +301,7 @@ class TransformMixin(object):
             np.matmul(self._T, self._M, self._M)
             self._updateModelMatrix = False
 
-        return np.asfortranarray(self._M, dtype=np.float32)
+        return np.asarray(self._M, dtype=np.float32)
 
     @property
     def dataPtr(self):
