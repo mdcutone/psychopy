@@ -7,7 +7,6 @@
 
 from __future__ import absolute_import, print_function
 from psychopy.tools import gltools
-from psychopy.core import getTime
 
 import numpy as np
 import os.path
@@ -18,12 +17,14 @@ import math
 
 
 class TransformMixin(object):
-    """Mixin class for characterizing the pose of 2- and 3-D objects in a scene.
+    """Mixin class for characterizing the pose of 2- and 3-D stimuli in a scene.
 
     Poses are defined by a quaternion and vector for orientation and position,
     respectively. These components can be set directly or computed using various
     class methods. Ultimately, these components are used to create a 4x4 model
-    matrix which transforms the object in world/scene coordinates.
+    matrix which transforms the object in world/scene coordinates. All
+    transformations assume a right-handed coordinate system (-Z is forward, +X
+    is right, and +Y is up).
 
     """
     def __init__(self,
@@ -179,6 +180,16 @@ class TransformMixin(object):
 
         self._updateModelMatrix = True
 
+    @property
+    def posOri(self):
+        """Position and orientation components."""
+        return self.getPos(), self.getOri()
+
+    @posOri.setter
+    def posOri(self, value):
+        self.setPos(value[0])
+        self.setOri(value[1])
+
     def getPosOri(self):
         """Get both the position and orientation.
         """
@@ -276,7 +287,7 @@ class TransformMixin(object):
 
     @property
     def modelMatrix(self):
-        """Computed model matrix."""
+        """Computed 4x4 model matrix (row-order)."""
         return self.getModelMatrix()
 
     @modelMatrix.setter
@@ -289,9 +300,29 @@ class TransformMixin(object):
         if self._M.shape != (4, 4):
             raise ValueError("modelMatrix must be 4x4.")
 
-    def getModelMatrix(self):
+    def getModelMatrix(self, flatten=False, pointer=False):
         """Get the current model matrix. The matrix is recomputed if any
         related parameter was updated.
+
+        Parameters
+        ----------
+        flatten : bool
+            If True the returned model matrix is transposed and reshaped to 1-D,
+            suitable for OpenGL functions like glMultMatrixf.
+        pointer : bool
+            Return a C-types pointer instead of an array. Some OpenGL interfaces
+            may require a pointer for arrays.
+
+        Returns
+        -------
+        ndarray of floats or ctypes.POINTER
+            Returns a model matrix. If flatten is True, a 1-D array of 16 matrix
+            values will be returned. If pointer is True, the function will
+            return a pointer to the array data instead of an ndarray.
+
+        Notes
+        -----
+            The returned array has a 32-bit floating point data type.
 
         """
         # compose the rotation, translation and scaling matrices into a
@@ -301,14 +332,17 @@ class TransformMixin(object):
             np.matmul(self._T, self._M, self._M)
             self._updateModelMatrix = False
 
-        return np.asarray(self._M, dtype=np.float32)
+        # suitable for OpenGL functions like glMultMatrix
+        if flatten:
+            to_return = np.asarray(self._M, dtype=np.float32).T.flatten()
+        else:
+            to_return = np.asarray(self._M, dtype=np.float32)
 
-    @property
-    def dataPtr(self):
-        """Model matrix as ctypes pointer.
+        # Return as a ctypes pointer to the first element of the array.
+        if pointer:
+            return to_return.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
-        """
-        return self.modelMatrix.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        return to_return
 
 
 class SphereStim(TransformMixin):
@@ -368,7 +402,7 @@ class SphereStim(TransformMixin):
         GL.glPushMatrix()
         #GL.glMultMatrixf(self.dataPtr)
         #GL.glTranslatef(0.0, 0.0, -1.5)
-        GL.glMultMatrixf(self.dataPtr)
+        GL.glMultMatrixf(self.getModelMatrix(True))
         #GL.glColor3f(1.0, 1.0, 1.0)
         GLU.gluSphere(self._quadric, self.radius, self.slices, self.stacks)
         GL.glPopMatrix()
@@ -564,7 +598,7 @@ class ObjStim(TransformMixin):
         self._prepareObjDraw()
 
         GL.glPushMatrix()
-        GL.glMultMatrixf(self.dataPtr)
+        GL.glMultMatrixf(self.getModelMatrix(True, True))
         # draw the model
         for group, vao in self._objInfo.drawGroups.items():
             gltools.useMaterial(self._mtllibInfo[group])
