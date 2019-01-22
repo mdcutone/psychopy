@@ -19,18 +19,19 @@ import math
 class TransformMixin(object):
     """Mixin class for characterizing the pose of 2- and 3-D stimuli in a scene.
 
-    Poses are defined by a quaternion and vector for orientation and position,
-    respectively. These components can be set directly or computed using various
-    class methods. Ultimately, these components are used to create a 4x4 model
-    matrix which transforms the object in world/scene coordinates. All
-    transformations assume a right-handed coordinate system (-Z is forward, +X
-    is right, and +Y is up).
+    Often the configuration of an object is represented as a position vector and
+    orientation quaternion. This mix-in class provides an interface for using
+    that data for stimuli presentation, particularly for 3D rendering. The
+    interface is minimal covering common use cases, it is expected that position
+    and orientation data are computed elsewhere. All transformations assume a
+    right-handed coordinate system.
 
     """
     def __init__(self,
                  pos=(0., 0., 0.),
                  ori=(0., 0., 0., 1.),
                  scale=1.0,
+                 autoUpdate=True,
                  *args, **kwargs):
         """Constructor for TransformMixin.
 
@@ -44,6 +45,11 @@ class TransformMixin(object):
         scale : float
             Scaling factor for the stimuli, applied to the computed model
             matrix. Does not affect 'pos' or 'ori'.
+        autoUpdate : bool
+            Automatically compute the model matrix. If False, you must call
+            update() to generate a new modelMatrix from any changed parameters.
+            If you set 'modelMatrix' directly, autoUpdate will automatically
+            change to False, as to prevent over-writing it.
 
         """
         # transformation matrices, these are composed to create the final model
@@ -68,8 +74,14 @@ class TransformMixin(object):
         self.setOri(ori)
         self.setPos(pos)
 
-        # flag that the model matrix needs updating
+        # flag that the model matrix, or its components needs updating
         self._updateModelMatrix = True
+        self._updateScaleMatrix = True
+        self._updateRotationMatrix = True
+        self._updateTranslationMatrix = True
+
+        # automatically update the matrix?
+        self._autoUpdate = autoUpdate
 
     @property
     def pos(self):
@@ -103,11 +115,8 @@ class TransformMixin(object):
 
         """
         self._pos[:] = pos[:]
-        self._T.fill(0.0)
-        np.fill_diagonal(self._T, 1.0)
-        self._T[:3, 3] = self._pos[:]
 
-        self._updateModelMatrix = True
+        self._updateModelMatrix = self._updateTranslationMatrix = True
 
     @property
     def ori(self):
@@ -150,35 +159,8 @@ class TransformMixin(object):
 
         """
         self._ori[:] = quat[:]
-        a = self._ori[3]
-        b, c, d = self._ori[:3]
 
-        a2 = a * a
-        b2 = b * b
-        c2 = c * c
-        d2 = d * d
-
-        # no need to clear the matrix, all values are set
-        #
-        self._R[0, 0] = (a2 + b2 - c2 - d2)
-        self._R[1, 0] = 2.0 * (b * c + a * d)
-        self._R[2, 0] = 2.0 * (b * d - a * c)
-        self._R[3, 0] = 0.0
-
-        self._R[0, 1] = 2.0 * (b * c - a * d)
-        self._R[1, 1] = (a2 - b2 + c2 - d2)
-        self._R[2, 1] = 2.0 * (c * d + a * b)
-        self._R[3, 1] = 0.0
-
-        self._R[0, 2] = 2.0 * (b * d + a * c)
-        self._R[1, 2] = 2.0 * (c * d - a * b)
-        self._R[2, 2] = (a2 - b2 - c2 + d2)
-        self._R[3, 2] = 0.0
-
-        self._R[:3, 3] = 0.0
-        self._R[3, 3] = 1.0
-
-        self._updateModelMatrix = True
+        self._updateModelMatrix = self._updateRotationMatrix = True
 
     @property
     def posOri(self):
@@ -206,8 +188,9 @@ class TransformMixin(object):
         self.setPos(pos)
         self.setOri(ori)
 
-    def rotateAxisAngle(self, axis, angle, degrees=False, clear=True):
-        """Rotate the stimuli about a specified 'axis' by 'angle'.
+    def oriFromAxisAngle(self, axis, angle, degrees=False, clear=True):
+        """Specify or accumulate the rotation of the stimuli about a specified
+        'axis' by 'angle'.
 
         Parameters
         ----------
@@ -262,6 +245,31 @@ class TransformMixin(object):
 
         self.setOri(p)
 
+    def transform(self, point):
+        """Transform a point (x, y, z) in the reference frame of this object to
+        scene/world coordinates.
+
+        Parameters
+        ----------
+        point : ndarray, list or tuple of float
+            Point (x, y, z) to transform.
+
+        Returns
+        -------
+        ndarray
+            Transformed point (x, y, z).
+
+        """
+        pointIn = np.zeros((3,), dtype=np.float32)
+        pointIn[:] = point  # must be length 3
+
+        # rotate the ponit using the quaternion @ ori
+        u = np.cross(self._ori[:3], point) * 2.0
+        pointRotated = pointIn + self._ori[3] * u + np.cross(self._ori[:3], u)
+
+        # now translate it by the pose's translation
+        return pointRotated + self._pos
+
     @property
     def scale(self):
         """Scaling (uniform) factor for the stimuli."""
@@ -279,11 +287,82 @@ class TransformMixin(object):
         """Set the scale factor for the stimuli."""
         self._scale = float(factor)
 
-        self._S.fill(0.0)
-        self._S[0, 0] = self._S[1, 1] = self._S[2, 2] = self._scale
-        self._S[3, 3] = 1.0
+        self._updateModelMatrix = self._updateScaleMatrix = True
 
-        self._updateModelMatrix = True
+    @property
+    def autoUpdate(self):
+        """Automatically compute the model matrix."""
+        return self._autoUpdate
+
+    @autoUpdate.setter
+    def autoUpdate(self, value):
+        self._autoUpdate = value
+
+    def update(self):
+        """Update 'modelMatrix' with current values of 'ori', 'pos', and
+        'scale'.
+
+        This is called automatically when 'modelMatrix' is accessed, or if
+        'getModelMatrix' is called and 'autoUpdate' is True. This function does
+        nothing if no changes were made to any attributes since the last call,
+        as the previous matrix still reflects those parameters.
+
+        """
+        if not self._updateModelMatrix:
+            return  # nop
+
+        # translation matrix
+        if self._updateTranslationMatrix:
+            self._T.fill(0.0)
+            np.fill_diagonal(self._T, 1.0)
+            self._T[:3, 3] = self._pos[:]
+
+            self._updateTranslationMatrix = False
+
+        # rotation matrix
+        if self._updateRotationMatrix:
+            a = self._ori[3]
+            b, c, d = self._ori[:3]
+
+            a2 = a * a
+            b2 = b * b
+            c2 = c * c
+            d2 = d * d
+
+            # no need to clear the matrix, all values are set
+            #
+            self._R[0, 0] = a2 + b2 - c2 - d2
+            self._R[1, 0] = 2.0 * (b * c + a * d)
+            self._R[2, 0] = 2.0 * (b * d - a * c)
+            self._R[3, 0] = 0.0
+
+            self._R[0, 1] = 2.0 * (b * c - a * d)
+            self._R[1, 1] = a2 - b2 + c2 - d2
+            self._R[2, 1] = 2.0 * (c * d + a * b)
+            self._R[3, 1] = 0.0
+
+            self._R[0, 2] = 2.0 * (b * d + a * c)
+            self._R[1, 2] = 2.0 * (c * d - a * b)
+            self._R[2, 2] = a2 - b2 - c2 + d2
+            self._R[3, 2] = 0.0
+
+            self._R[:3, 3] = 0.0
+            self._R[3, 3] = 1.0
+
+            self._updateRotationMatrix = False
+
+        # scaling matrix
+        if self._updateScaleMatrix:
+            self._S.fill(0.0)
+            self._S[0, 0] = self._S[1, 1] = self._S[2, 2] = self._scale
+            self._S[3, 3] = 1.0
+
+            self._updateScaleMatrix = False
+
+        np.matmul(self._S, self._R, self._M)
+        np.matmul(self._T, self._M, self._M)
+
+        self._updateModelMatrix = False
 
     @property
     def modelMatrix(self):
@@ -295,10 +374,21 @@ class TransformMixin(object):
         self._M[:, :] = value[:, :]
 
         # prevent the model matrix from updating if set directly by the user
-        self._updateModelMatrix = False
+        self._autoUpdate = False
 
         if self._M.shape != (4, 4):
             raise ValueError("modelMatrix must be 4x4.")
+
+    @property
+    def modelMatrix1d(self):
+        """Flattened model matrix (read-only)."""
+        return np.asarray(self._M, dtype=np.float32).T.flatten()
+
+    @property
+    def modelMatrixPointer(self):
+        """Pointer to model matrix data (read-only)."""
+        to_return = np.asarray(self._M, dtype=np.float32).T.flatten()
+        return to_return.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
     def getModelMatrix(self, flatten=False, pointer=False):
         """Get the current model matrix. The matrix is recomputed if any
@@ -328,9 +418,7 @@ class TransformMixin(object):
         # compose the rotation, translation and scaling matrices into a
         # model matrix
         if self._updateModelMatrix:
-            np.matmul(self._S, self._R, self._M)
-            np.matmul(self._T, self._M, self._M)
-            self._updateModelMatrix = False
+            self.update()
 
         # suitable for OpenGL functions like glMultMatrix
         if flatten:
@@ -402,7 +490,7 @@ class SphereStim(TransformMixin):
         GL.glPushMatrix()
         #GL.glMultMatrixf(self.dataPtr)
         #GL.glTranslatef(0.0, 0.0, -1.5)
-        GL.glMultMatrixf(self.getModelMatrix(True))
+        GL.glMultMatrixf(self.getModelMatrix(True, True))
         #GL.glColor3f(1.0, 1.0, 1.0)
         GLU.gluSphere(self._quadric, self.radius, self.slices, self.stacks)
         GL.glPopMatrix()
