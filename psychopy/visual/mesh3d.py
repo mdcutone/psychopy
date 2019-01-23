@@ -7,6 +7,7 @@
 
 from __future__ import absolute_import, print_function
 from psychopy.tools import gltools
+from psychopy.visual import shaders
 
 import numpy as np
 import os.path
@@ -663,6 +664,7 @@ class ObjStim(TransformMixin):
                  objFile,
                  loadMtl=True,
                  loadTextures=True,
+                 useShaders=True,
                  *args, **kwargs):
         """Constructor for ObjStim.
 
@@ -718,6 +720,8 @@ class ObjStim(TransformMixin):
                 raise FileNotFoundError(
                     "Cannot find *.mtl file '{}'".format(mtlPath))
 
+        self.useShaders = useShaders
+
         super(ObjStim, self).__init__(*args, **kwargs)
 
     @property
@@ -735,6 +739,10 @@ class ObjStim(TransformMixin):
         GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glDisable(GL.GL_BLEND)
         GL.glDepthFunc(GL.GL_LEQUAL)
+        global _progObjFrag
+
+        GL.glEnable(GL.GL_TEXTURE_2D)
+        GL.glActiveTexture(GL.GL_TEXTURE0)
 
     def _finishedObjDraw(self):
         """Called after drawing all objects.
@@ -744,6 +752,7 @@ class ObjStim(TransformMixin):
         GL.glDisable(GL.GL_DEPTH_TEST)
         GL.glEnable(GL.GL_BLEND)
         GL.glDepthMask(GL.GL_FALSE)
+
 
     def draw(self, win=None):
         """Render the object.
@@ -771,6 +780,7 @@ class ObjStim(TransformMixin):
         for group, vao in self._objInfo.drawGroups.items():
             gltools.useMaterial(self._mtllibInfo[group])
             gltools.drawVAO(vao)
+
         GL.glPopMatrix()
 
         # disable materials and lightsq
