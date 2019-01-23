@@ -20,11 +20,19 @@ class TransformMixin(object):
     """Mixin class for characterizing the pose of 2- and 3-D stimuli in a scene.
 
     Often the configuration of an object is represented as a position vector and
-    orientation quaternion. This mix-in class provides an interface for using
-    that data for stimuli presentation, particularly for 3D rendering. The
-    interface is minimal covering common use cases, it is expected that position
-    and orientation data are computed elsewhere. All transformations assume a
-    right-handed coordinate system.
+    orientation quaternion. This mix-in class provides an interface to readily
+    use that data for stimuli rendering and presentation.
+
+    It is expected that position and orientation data are usually computed
+    elsewhere (e.g. motion trackers, a physics engine, 3D math library, and
+    so on) so their is no reason to provide comprehensive support to derive
+    those values here. However, there are basic routines included to cover most
+    use cases. Ultimately, position and orientation components are converted to
+    a 4x4 matrix which defines the transformation for points between model- and
+    world-space coordinate systems.
+
+    All transformations assume a right-handed coordinate system [+X is right, +Y
+    is up, and -Z is forward].
 
     """
     def __init__(self,
@@ -32,6 +40,7 @@ class TransformMixin(object):
                  ori=(0., 0., 0., 1.),
                  scale=1.0,
                  autoUpdate=True,
+                 normalizeOri=True,
                  *args, **kwargs):
         """Constructor for TransformMixin.
 
@@ -50,29 +59,28 @@ class TransformMixin(object):
             update() to generate a new modelMatrix from any changed parameters.
             If you set 'modelMatrix' directly, autoUpdate will automatically
             change to False, as to prevent over-writing it.
+        normalizeOri : bool
+            Normalize quaternions passed to methods and attributes. You can
+            switch this off if you are normalizing them elsewhere to avoid
+            redundancy.
 
         """
         # transformation matrices, these are composed to create the final model
         # matrix
-        self._S = np.zeros((4, 4), dtype=float)
-        np.fill_diagonal(self._S, 1.0)
-        self._R = np.zeros((4, 4), dtype=float)
-        np.fill_diagonal(self._R, 1.0)
-        self._T = np.zeros((4, 4), dtype=float)
-        np.fill_diagonal(self._T, 1.0)
+        self._S = np.identity(4, dtype=float)
+        self._R = np.identity(4, dtype=float)
+        self._T = np.identity(4, dtype=float)
 
         # model matrix used for transformations
-        self._M = np.zeros((4, 4), dtype=float)
-        np.fill_diagonal(self._M, 1.0)
+        self._M = np.identity(4, dtype=float)
 
         self._pos = np.asarray(pos, dtype=float)  # position vector
         self._ori = np.asarray(ori, dtype=float)  # rotation quaternion
         self._scale = 0.0  # scaling factor
 
-        # compute initial matrices
-        self.setScale(scale)
-        self.setOri(ori)
-        self.setPos(pos)
+        # automatically update the matrix?
+        self._autoUpdate = autoUpdate
+        self._normalizeOri = normalizeOri
 
         # flag that the model matrix, or its components needs updating
         self._updateModelMatrix = True
@@ -80,8 +88,10 @@ class TransformMixin(object):
         self._updateRotationMatrix = True
         self._updateTranslationMatrix = True
 
-        # automatically update the matrix?
-        self._autoUpdate = autoUpdate
+        # compute initial matrices
+        self.setScale(scale)
+        self.setOri(ori)
+        self.setPos(pos)
 
     @property
     def pos(self):
@@ -91,6 +101,15 @@ class TransformMixin(object):
     @pos.setter
     def pos(self, xyz):
         self.setPos(xyz)
+
+    @property
+    def translation(self):
+        """Same as 'pos'."""
+        return self._pos
+
+    @translation.setter
+    def translation(self, value):
+        self.setPos(value)
 
     def getPos(self):
         """Get the current position/translation of the object."""
@@ -117,6 +136,15 @@ class TransformMixin(object):
         self._pos[:] = pos[:]
 
         self._updateModelMatrix = self._updateTranslationMatrix = True
+
+    @property
+    def rotation(self):
+        """Same as 'ori'."""
+        return self._ori
+
+    @rotation.setter
+    def rotation(self, value):
+        self.setOri(value)
 
     @property
     def ori(self):
@@ -154,17 +182,24 @@ class TransformMixin(object):
 
         Notes
         -----
-            The rotation component of the model matrix is computed upon setting
-            the quaternion.
+            The specified quaternion is normalized.
 
         """
         self._ori[:] = quat[:]
+
+        # normalize
+        if self._normalizeOri:
+            norm = np.linalg.norm(self._ori)
+            if not np.isclose(norm, 0.0):
+                self._ori /= norm
 
         self._updateModelMatrix = self._updateRotationMatrix = True
 
     @property
     def posOri(self):
-        """Position and orientation components."""
+        """Position and orientation components.
+
+        """
         return self.getPos(), self.getOri()
 
     @posOri.setter
@@ -184,11 +219,23 @@ class TransformMixin(object):
         return data this way. Avoiding needing to call 'setPos' and 'setOri'
         separately in your routine.
 
+        Examples
+        --------
+
+        Setting the position and orientation of a PyBullet collision mesh::
+
+            pos, ori = pybullet.getBasePositionAndOrientation(shapeId)
+            myModel.setPosOri(pos, ori)
+
+        Above is the same as::
+
+            myModel.posOri = pybullet.getBasePositionAndOrientation(shapeId)
+
         """
         self.setPos(pos)
         self.setOri(ori)
 
-    def oriFromAxisAngle(self, axis, angle, degrees=False, clear=True):
+    def oriFromAxisAngle(self, axis, angle, deg2rad=False, clear=True):
         """Specify or accumulate the rotation of the stimuli about a specified
         'axis' by 'angle'.
 
@@ -199,7 +246,7 @@ class TransformMixin(object):
         angle : float
             Rotation angle in radians. Rotations are right-handed about the
             specified axis.
-        degrees : bool
+        deg2rad : bool
             Convert 'angle' to degrees from radians.
         clear : bool
             Clear previous rotations. If False, the specified rotation adds to
@@ -210,7 +257,7 @@ class TransformMixin(object):
         None
 
         """
-        rad = math.radians(float(angle)) if degrees else float(angle)
+        rad = math.radians(float(angle)) if not deg2rad else float(angle)
         q = np.zeros((4,), dtype=float)
         axis = np.asarray(axis, dtype=float)
         np.multiply(axis, np.sin(rad / 2.0), out=q[:3])
@@ -239,6 +286,15 @@ class TransformMixin(object):
 
         """
         p = np.zeros((4,), dtype=float)
+
+        # normalize
+        quat = np.asarray(quat, dtype=float)
+
+        if self._normalizeOri:
+            norm = np.linalg.norm(quat)
+            if norm != 0.0:
+                quat /= norm
+
         p[:3] = np.cross(self._ori[:3], quat[:3]) + \
             self._ori[:3] * quat[3] + quat[:3] * self._ori[3]
         p[3] = self._ori[3] * quat[3] - self._ori[:3].dot(quat[:3])
@@ -263,12 +319,37 @@ class TransformMixin(object):
         pointIn = np.zeros((3,), dtype=np.float32)
         pointIn[:] = point  # must be length 3
 
-        # rotate the ponit using the quaternion @ ori
-        u = np.cross(self._ori[:3], point) * 2.0
-        pointRotated = pointIn + self._ori[3] * u + np.cross(self._ori[:3], u)
+        # scale the point's values uniformly
+        pointIn *= self._scale
+
+        # rotate the point using the quaternion @ ori
+        u = np.cross(self._ori[:3], pointIn) * 2.0
+        toReturn = pointIn + self._ori[3] * u + np.cross(self._ori[:3], u)
+        toReturn += self._pos
 
         # now translate it by the pose's translation
-        return pointRotated + self._pos
+        return toReturn
+
+    def rotate(self, oriQuat):
+        """Rotate a quaternion by the rotation stored in this pose."""
+        oriQuat = np.asarray(oriQuat, dtype=float)
+
+        # normalize
+        if self._normalizeOri:
+            norm = np.linalg.norm(oriQuat)
+            if norm != 0.0:
+                oriQuat /= norm
+
+        toReturn = np.zeros((4,), dtype=float)
+        toReturn[:3] = np.cross(self._ori[:3], oriQuat[:3]) + \
+            self._ori[:3] * oriQuat[3] + oriQuat[:3] * self._ori[3]
+        toReturn[3] = self._ori[3] * oriQuat[3] - self._ori[:3].dot(oriQuat[:3])
+
+        return toReturn
+
+    def translate(self, pos):
+        """Translate a point by the translation stored in this pose."""
+        return np.asarray(pos, dtype=float) + self._pos
 
     @property
     def scale(self):
@@ -417,8 +498,7 @@ class TransformMixin(object):
         """
         # compose the rotation, translation and scaling matrices into a
         # model matrix
-        if self._updateModelMatrix:
-            self.update()
+        self.update()
 
         # suitable for OpenGL functions like glMultMatrix
         if flatten:
