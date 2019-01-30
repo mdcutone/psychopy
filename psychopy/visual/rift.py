@@ -353,6 +353,25 @@ class Rift(window.Window):
         ovr.perfHudMode(mode)
 
     @property
+    def eyeToNoseDistance(self):
+        """Eye to nose distance."""
+        return ovr.getEyeToNoseDist()
+
+    def setIAS(self, dist):
+        """Set the inter-axial separation in meters.
+
+        Warning
+        -------
+
+        Setting the IAS will overwrite the default values reported by the Oculus
+        Rift API.
+
+        """
+        halfIAS = dist / 2.0
+        self.hmdToEyePoses = [ovr.LibOVRPose((-halfIAS, 0.0, 0.0)),
+                              ovr.LibOVRPose((halfIAS, 0.0, 0.0))]
+
+    @property
     def productName(self):
         """Get the HMD's product name.
 
@@ -623,7 +642,7 @@ class Rift(window.Window):
 
     @property
     def shouldRecenter(self):
-        """Check if the user requested the origin be recentered through the
+        """Check if the user requested the origin be re-centered through the
         headset's interface.
 
         Returns
@@ -981,11 +1000,7 @@ class Rift(window.Window):
         # Store the current head pose from tracking state.
         self.headPose = self._trackedPoses["Head"].thePose
 
-        # Calculate eye poses, this needs to be called every frame, do this
-        # after calling 'wait_to_begin_frame' to minimize the motion-to-photon
-        # latency. This is called regardless if we are using the eye poses
-        # returned by the function.
-
+        # Calculate eye poses, this needs to be called every frame.
         # apply additional transformations to eye poses
         if not self._monoscopic:
             for eye in range(ovr.LIBOVR_EYE_COUNT):
@@ -1109,7 +1124,7 @@ class Rift(window.Window):
 
             # Call end_frame and increment the frame index, no more rendering to
             # HMD's view texture at this point.
-            ovr.endFrame(self._frameIndex)
+            result = ovr.endFrame(self._frameIndex)
             self._frameIndex += 1
 
         # Set to None so the 'size' attribute returns the on-screen window
