@@ -262,11 +262,6 @@ class Rift(window.Window):
 
         self._updateProjectionMatrix()
 
-        # buffer flags
-        self._bufferFlags = {'left': ovr.LIBOVR_EYE_LEFT,
-                             'right': ovr.LIBOVR_EYE_RIGHT,
-                             'mono': ovr.LIBOVR_EYE_LEFT}
-
         # if the GLFW backend is being used, disable v-sync since the HMD runs
         # at a different frequency.
         kwargs['swapInterval'] = 0
@@ -475,6 +470,10 @@ class Rift(window.Window):
         """
         ovr.recenterTrackingOrigin()
 
+    def specifyTrackingOrigin(self):
+        """Specify a tracking origin."""
+        pass
+
     def updateTrackedObjectPoses(self, absTime):
         """Update the tracking state."""
         # Get the current tracking state structure, estimated poses for the
@@ -492,6 +491,7 @@ class Rift(window.Window):
 
         Notes
         -----
+
         The horizontal (x-axis) separation of the eye poses are determined by
         the configured lens spacing (slider adjustment). This spacing is
         supposed to correspond to the actual inter-ocular distance (IOD) of the
@@ -557,9 +557,9 @@ class Rift(window.Window):
 
     @property
     def eyePoses(self):
-        """Eye poses used when rendering.
+        """Eye poses to use when rendering.
 
-        Calling 'calcEyePoses()' updates these values.
+        Setting 'headPose' updates these values.
 
         """
         return ovr.getEyeRenderPoses()
