@@ -169,22 +169,25 @@ class Rift(window.Window):
         # update session status object
         self._sessionStatus = ovr.getSessionStatus()
 
+        # get HMD information
+        self._hmdInfo = ovr.getHmdInfo()
+
         # configure the internal render descriptors based on the requested
         # viewing parameters.
         if fovType == 'symmetric' or self._monoscopic:
             # Use symmetric FOVs for cases where off-center frustums are not
             # desired. This is required for monoscopic rendering to permit
             # comfortable binocular fusion.
-            eyeFovs = ovr.getSymmetricEyeFOVs()
+            eyeFovs = self._hmdInfo.symmetricEyeFOVs
             logging.info('Using symmetric eye FOVs.')
         elif fovType == 'recommended' or fovType == 'default':
             # use the recommended FOVs, these have wider FOVs looking outward
             # due to off-center frustums.
-            eyeFovs = ovr.getDefaultEyeFOVs()
+            eyeFovs = self._hmdInfo.defaultEyeFOVs
             logging.info('Using default/recommended eye FOVs.')
         elif fovType == 'max':
             # the maximum FOVs for the HMD supports
-            eyeFovs = ovr.getMaxEyeFOVs()
+            eyeFovs = self._hmdInfo.maxEyeFOVs
             logging.info('Using maximum eye FOVs.')
         else:
             raise ValueError(
@@ -194,11 +197,8 @@ class Rift(window.Window):
         for eye in range(ovr.LIBOVR_EYE_COUNT):
             ovr.setEyeRenderFOV(eye, eyeFovs[eye])
 
-        # enable head locked mode
-        ovr.headLocked(headLocked)
-
-        # enable high quality mode
-        ovr.highQuality(highQuality)
+        ovr.headLocked(headLocked)  # enable head locked mode
+        ovr.highQuality(highQuality)  # enable high quality mode
 
         # Compute texture sizes for render buffers, these are reported by the
         # LibOVR SDK based on the FOV settings specified above.
