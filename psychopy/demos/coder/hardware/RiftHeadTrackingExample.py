@@ -36,13 +36,13 @@ while not stopApp:
         # Quaternion type with method "getYawPitchRoll".
         #
         yaw, pitch, roll = [math.degrees(i) for i in
-                            hmd.headPose.rotation.getYawPitchRoll()]
+                            hmd._headPose.rotation.getYawPitchRoll()]
         # print(yaw, pitch, roll)
 
         # You can get the position of the HMD in the scene as follows,
-        x = hmd.headPose.translation.x
-        y = hmd.headPose.translation.y
-        z = hmd.headPose.translation.z
+        x = hmd._headPose.translation.x
+        y = hmd._headPose.translation.y
+        z = hmd._headPose.translation.z
         # print(x, y, z)
 
         # use OpenGL rendering commands here...
