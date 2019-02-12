@@ -851,17 +851,24 @@ def makeXYZ2RGB(red_xy,
     The routines here are based on methods found at:
         http://www.ryanjuckett.com/programming/rgb-color-space-conversion/
 
-    :param red_xy: tuple, list or ndarray
+    Parameters
+    ----------
+
+    red_xy : tuple, list or ndarray
         Chromaticity coordinate (CIE-xy) of the 'red' gun.
-    :param green_xy: tuple, list or ndarray
+    green_xy : tuple, list or ndarray
         Chromaticity coordinate (CIE-xy) of the 'green' gun.
-    :param blue_xy: tuple, list or ndarray
+    blue_xy : tuple, list or ndarray
         Chromaticity coordinate (CIE-xy) of the 'blue' gun.
-    :param whtp_xy: tuple, list or ndarray
+    whtp_xy : tuple, list or ndarray
         Chromaticity coordinate (CIE-xy) of the white point, default is D65.
-    :param reverse:
+    reverse : bool
         Return the inverse transform XYZ -> sRGB
-    :return: 3x3 conversion matrix
+
+    Returns
+    -------
+    ndarray
+        3x3 conversion matrix
 
     """
     # convert CIE-xy chromaticity coordinates to xyY and put them into a matrix

@@ -59,3 +59,7 @@ You might also want to fetch the :class:`~psychopy.monitors.Photometer` class fo
 :func:`makeLMS2RGB`
 ------------------------------------
 .. autofunction:: psychopy.monitors.makeLMS2RGB
+
+:func:`makeXYZ2RGB`
+------------------------------------
+.. autofunction:: psychopy.monitors.makeXYZ2RGB
