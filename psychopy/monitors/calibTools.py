@@ -835,10 +835,10 @@ def makeLMS2RGB(nm, powerRGB):
 
     return cones_to_rgb
 
-def makeXYZ2RGB(red_xy,
-                green_xy,
-                blue_xy,
-                whitePoint_xy=(0.3127, 0.329),
+def makeXYZ2RGB(redXY,
+                greenXY,
+                blueXY,
+                whitePointXY=(0.3127, 0.329),
                 reverse=False):
     """Create a linear sRGB conversion matrix.
 
@@ -854,13 +854,13 @@ def makeXYZ2RGB(red_xy,
     Parameters
     ----------
 
-    red_xy : tuple, list or ndarray
+    redXY : tuple, list or ndarray
         Chromaticity coordinate (CIE-xy) of the 'red' gun.
-    green_xy : tuple, list or ndarray
+    greenXY : tuple, list or ndarray
         Chromaticity coordinate (CIE-xy) of the 'green' gun.
-    blue_xy : tuple, list or ndarray
+    blueXY : tuple, list or ndarray
         Chromaticity coordinate (CIE-xy) of the 'blue' gun.
-    whtp_xy : tuple, list or ndarray
+    whitePointXY : tuple, list or ndarray
         Chromaticity coordinate (CIE-xy) of the white point, default is D65.
     reverse : bool
         Return the inverse transform XYZ -> sRGB
@@ -873,23 +873,23 @@ def makeXYZ2RGB(red_xy,
     """
     # convert CIE-xy chromaticity coordinates to xyY and put them into a matrix
     mat_xyY_primaries = np.asmatrix((
-        (red_xy[0], red_xy[1], 1.0 - red_xy[0] - red_xy[1]),
-        (green_xy[0], green_xy[1], 1.0 - green_xy[0] - green_xy[1]),
-        (blue_xy[0], blue_xy[1], 1.0 - blue_xy[0] - blue_xy[1])
+        (redXY[0], redXY[1], 1.0 - redXY[0] - redXY[1]),
+        (greenXY[0], greenXY[1], 1.0 - greenXY[0] - greenXY[1]),
+        (blueXY[0], blueXY[1], 1.0 - blueXY[0] - blueXY[1])
     )).T
     # convert white point to CIE-XYZ
-    whtp_XYZ = np.asmatrix(
-        np.dot(1.0 / whitePoint_xy[1],
+    whtpXYZ = np.asmatrix(
+        np.dot(1.0 / whitePointXY[1],
             np.asarray((
-                whitePoint_xy[0],
-                whitePoint_xy[1],
-                1.0 - whitePoint_xy[0] - whitePoint_xy[1])
+                whitePointXY[0],
+                whitePointXY[1],
+                1.0 - whitePointXY[0] - whitePointXY[1])
             )
         )
     ).T
     # compute the final matrix (sRGB -> XYZ)
     to_return = mat_xyY_primaries * np.diag(
-        (np.linalg.inv(mat_xyY_primaries) * whtp_XYZ).A1)
+        (np.linalg.inv(mat_xyY_primaries) * whtpXYZ).A1)
 
     if not reverse:  # for XYZ -> sRGB conversion matrix (we usually want this!)
         return np.linalg.inv(to_return)
