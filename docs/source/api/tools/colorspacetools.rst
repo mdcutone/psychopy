@@ -8,8 +8,8 @@
     
 .. autosummary:: 
 
-    cieLab2rgb
-    cieLCh2rgb
+    cielab2rgb
+    cielch2rgb
     dkl2rgb
     dklCart2rgb
     rgb2dklCart
@@ -23,8 +23,8 @@
 Function details
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: cieLab2rgb
-.. autofunction:: cieLCh2rgb
+.. autofunction:: cielab2rgb
+.. autofunction:: cielch2rgb
 .. autofunction:: dkl2rgb
 .. autofunction:: dklCart2rgb
 .. autofunction:: rgb2dklCart

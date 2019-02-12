@@ -125,7 +125,7 @@ def rec709TF(rgb, **kwargs):
     return to_return
 
 
-def cieLab2rgb(lab,
+def cielab2rgb(lab,
                whiteXYZ=None,
                conversionMatrix=None,
                transferFunc=None,
@@ -246,7 +246,7 @@ def cieLab2rgb(lab,
     return rgb_out * 2.0 - 1.0
 
 
-def cieLCh2rgb(lch,
+def cielch2rgb(lch,
                whiteXYZ=None,
                conversionMatrix=None,
                transferFunc=None,
