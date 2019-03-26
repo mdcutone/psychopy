@@ -36,6 +36,7 @@ RIFT_CONTROLLER_TYPES = {
     'LeftTouch': ovr.LIBOVR_CONTROLLER_TYPE_LTOUCH,
     'RightTouch': ovr.LIBOVR_CONTROLLER_TYPE_RTOUCH
 }
+
 RIFT_BUTTON_TYPES = {
     "A": ovr.LIBOVR_BUTTON_A,
     "B": ovr.LIBOVR_BUTTON_B,
@@ -369,7 +370,14 @@ class Rift(window.Window):
         setAttribute(self, 'size', value, log=log)
 
     def perfHudMode(self, mode='Off'):
-        """Set the performance HUD mode."""
+        """Set the performance HUD mode.
+
+        Parameters
+        ----------
+        mode : str
+            HUD mode to use.
+
+        """
         ovr.perfHudMode(mode)
         logging.info('Performance HUD mode set to "{}".'.format(mode))
 
@@ -497,7 +505,7 @@ class Rift(window.Window):
 
     @property
     def pixelsPerTanAngleAtCenter(self):
-        """Horizontal and vertical per tangent angle at the center of the
+        """Horizontal and vertical per tangent angle (=1) at the center of the
         display.
 
         """
@@ -505,12 +513,37 @@ class Rift(window.Window):
             ovr.getPixelsPerTanAngleAtCenter(ovr.LIBOVR_EYE_RIGHT)]
 
     @property
+    def pixelsPerDegreeAtCenter(self):
+        """Approximate pixels-per-degree at the display center for each eye.
+
+        """
+        return [ovr.getPixelsPerDegree(ovr.LIBOVR_EYE_LEFT),
+            ovr.getPixelsPerDegree(ovr.LIBOVR_EYE_RIGHT)]
+
+    @property
     def trackerCount(self):
         """Number of attached trackers."""
         return ovr.getTrackerCount()
 
     def getTrackerInfo(self, trackerIdx):
-        """Get tracker information."""
+        """Get tracker information.
+
+        Parameters
+        ----------
+        trackerIdx : int
+            Tracker index, ranging from 0 to `trackerCount`.
+
+        Returns
+        -------
+        LibOVRTrackerInfo
+            Object containing tracker information.
+
+        Raises
+        ------
+        IndexError
+            Raised when `trackerIdx` out of range.
+
+        """
         if 0 <= trackerIdx < ovr.getTrackerCount():
             return ovr.getTrackerInfo(trackerIdx)
         else:
@@ -531,11 +564,27 @@ class Rift(window.Window):
         ovr.recenterTrackingOrigin()
 
     def specifyTrackingOrigin(self, pose):
-        """Specify a tracking origin."""
+        """Specify a tracking origin.
+
+        Parameters
+        ----------
+        pose : LibOVRPose
+            Tracking origin pose.
+
+        """
         ovr.specifyTrackingOrigin(pose)
 
     def specifyTrackingOriginPosOri(self, pos=(0., 0., 0.), ori=(0., 0., 0., 1.)):
-        """Specify a tracking origin."""
+        """Specify a tracking origin using a pose and orientation.
+
+        Parameters
+        ----------
+        pos : tuple or list of float, or ndarray
+            Position coordinate of origin (x, y, z).
+        ori : tuple or list of float, or ndarray
+            Quaternion specifying orientation (x, y, z, w).
+
+        """
         ovr.specifyTrackingOrigin(ovr.LibOVRPose(pos, ori))
 
     def clearShouldRecenterFlag(self):
@@ -544,7 +593,9 @@ class Rift(window.Window):
 
     @property
     def calbratedOrigin(self):
-        """The calibrated origin."""
+        """Calibrated origin from the last tracking state.
+
+        """
         return self._trackingState.calibratedOrigin
 
     def getDevicePose(self, deviceName, absTime, latencyMarker=False):
@@ -570,6 +621,7 @@ class Rift(window.Window):
         deviceStatus, devicePose = ovr.getDevicePoses(
             [RIFT_TRACKED_DEVICE_TYPES[deviceName]], absTime, latencyMarker)
 
+        # check if tracking was lost
         if deviceStatus == ovr.LIBOVR_ERROR_LOST_TRACKING:
             return None
 
@@ -580,8 +632,21 @@ class Rift(window.Window):
 
         Get the poses of all tracked devices (e.g. HMD and touch controllers) at
         'absTime'. New poses will appear at 'trackedHeadPose' and
-        'trackedHandPoses'. You must pass these values to 'headPose' and
-        'handPoses' prior drawing the frame.
+        'trackedHandPoses'.
+
+        If `autoUpdatePoses=True`, this is called automatically after flip is
+        called.
+
+        Parameters
+        ----------
+        absTime : float
+            Absolute time the updated tracking state refers to. Usually passed
+            the value of `getPredictedDisplayTime`.
+
+        See Also
+        --------
+        getPredictedDisplayTime
+            Time at mid-frame for the current frame index.
 
         Examples
         --------
@@ -655,18 +720,6 @@ class Rift(window.Window):
         'updateTrackingState'. The poses should be referenced to the time
         passed to that function.
 
-        Returns
-        -------
-        `tuple` of `LibOVRPose`
-            Left and right tracked hand poses.
-
-        Examples
-        --------
-
-        Get the left and right hand poses::
-
-            leftHand, rightHand = hmd.trackedHandPoses
-
         """
         return self._trackingState.handPoses
 
@@ -678,9 +731,9 @@ class Rift(window.Window):
 
         Parameters
         ----------
-        headPose : LibOVRPose or None
-            Head pose to use. If None, the pose specified by 'trackedHeadPose'
-            will be used.
+        headPose : LibOVRPose, optional
+            Head pose to use. If None specified, the most recent tracked head
+            pose is used.
 
         """
         if not self._allowHmdRendering:
@@ -1062,6 +1115,10 @@ class Rift(window.Window):
         -------
         float
             Absolute frame mid-point time for the given frame index in seconds.
+
+        See Also
+        --------
+
 
         """
         return ovr.getPredictedDisplayTime(self._frameIndex)
@@ -1479,7 +1536,7 @@ class Rift(window.Window):
 
         Parameters
         ----------
-        clearDepth : boolean
+        clearDepth : bool
             Clear the depth buffer prior after configuring the view parameters.
 
         """
@@ -1603,7 +1660,8 @@ class Rift(window.Window):
             raise (
                 "Invalid controller value '{}' specified.".format(controller))
 
-        return ovr.getIndexTriggerValues(controller, deadzone)
+        return ovr.getIndexTriggerValues(RIFT_CONTROLLER_TYPES[controller],
+                                         deadzone)
 
     def getHandTriggerValues(self, controller='Xbox', deadzone=False):
         """Get the values of the hand triggers representing the amount they
@@ -1621,13 +1679,13 @@ class Rift(window.Window):
         tuple
             Left and right index trigger values.
 
-
         """
         if controller not in ('Xbox', 'Touch', 'LeftTouch', 'RightTouch'):
             raise (
                 "Invalid controller value '{}' specified.".format(controller))
 
-        return ovr.getHandTriggerValues(controller, deadzone)
+        return ovr.getHandTriggerValues(RIFT_CONTROLLER_TYPES[controller],
+                                        deadzone)
 
     def getButtons(self, buttons, controller='Xbox', stateMode='continuous'):
         """Returns True if any of the buttons in 'buttons' are held down. All
@@ -1657,8 +1715,13 @@ class Rift(window.Window):
         Examples
         --------
 
-        # check if the 'Enter' button on the Oculus remote was released
-        isPressed = hmd.getButtons(['Enter'], 'Remote', 'falling')
+        Check if the 'Enter' button on the Oculus remote was released::
+
+            isPressed = hmd.getButtons(['Enter'], 'Remote', 'falling')
+
+        Check if the 'A' button was pressed on the touch controller::
+
+            isPressed = hmd.getButtons(['A'], 'Touch', 'pressed')
 
         """
         if isinstance(buttons, str):  # single value
