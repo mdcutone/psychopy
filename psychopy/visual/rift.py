@@ -667,14 +667,19 @@ class Rift(window.Window):
             hmd.calcEyePoses(myHeadPose)
 
             for buffer in ['left', 'right']:
+                hmd.setBuffer(buffer)
+                hmd.setRiftView()
                 # draw stuff ...
 
-        Edit the tracked head pose, then use it::
+        Edit the tracked head pose, then use it (must specify
+        `headLocked`=True when creating the window to do this)::
 
             myHeadPose = Rift.createPose((0., 0., 0.))
             hmd.calcEyePoses(myHeadPose)
 
             for buffer in ['left', 'right']:
+                hmd.setBuffer(buffer)
+                hmd.setRiftView()
                 # draw stuff ...
 
         """
@@ -739,8 +744,8 @@ class Rift(window.Window):
     def calcEyePoses(self, headPose=None):
         """Calculate eye poses.
 
-        Only effective if 'autoUpdatePoses=True'. Must be called once per frame
-        prior to calling setRiftView() or drawing anything.
+        Only effective if `autoUpdatePoses`=True. Must be called once per frame
+        prior to calling :func:`setRiftView` or drawing anything.
 
         Parameters
         ----------
@@ -1014,7 +1019,8 @@ class Rift(window.Window):
 
     def _prepareMonoFrame(self, clear=True):
         """Prepare a frame for monoscopic rendering. This is called
-        automatically after 'startHmdFrame' if monoscopic rendering is enabled.
+        automatically after :func:`_startHmdFrame` if monoscopic rendering is
+        enabled.
 
         """
         # bind the framebuffer, if MSAA is enabled binding the texture is
@@ -1469,7 +1475,7 @@ class Rift(window.Window):
     def multiplyViewMatrixGL(self):
         """Multiply the local eye pose transformation matrix obtained from the
         SDK using glMultMatrixf(). The matrix used depends on the current eye
-        buffer set by 'setBuffer()'.
+        buffer set by :func:`setBuffer`.
 
         Returns
         -------
@@ -1495,7 +1501,7 @@ class Rift(window.Window):
     def multiplyProjectionMatrixGL(self):
         """Multiply the current projection matrix obtained from the SDK using
         glMultMatrixf(). The matrix used depends on the current eye buffer set
-        by 'setBuffer()'.
+        by :func:`setBuffer`.
 
         """
         if not self._legacyOpenGL:
