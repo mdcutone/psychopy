@@ -68,6 +68,7 @@ RIFT_TRACKED_DEVICE_TYPES = {
     "Object3": ovr.LIBOVR_TRACKED_DEVICE_TYPE_OBJECT3
 }
 
+
 class LibOVRError(Exception):
     """Exception for LibOVR errors."""
     pass
@@ -205,7 +206,8 @@ class Rift(window.Window):
             raise LibOVRError(msg)
 
         # update session status object
-        self._sessionStatus = ovr.getSessionStatus()
+        _, status = ovr.getSessionStatus()
+        self._sessionStatus = status
 
         # get HMD information
         self._hmdInfo = ovr.getHmdInfo()
@@ -323,7 +325,10 @@ class Rift(window.Window):
         self._allowHmdRendering = False
 
         # VR pose data, updated every frame
-        self._trackingState = ovr.LibOVRTrackingState()
+        self._headPoseState = (ovr.LibOVRPoseState(), 0)
+        self._leftHandPoseState = (ovr.LibOVRPoseState(), 0)
+        self._rightHandPoseState = (ovr.LibOVRPoseState(), 0)
+        self._calibratedOrigin = ovr.LibOVRPose()
 
         # set the tracking origin type
         self.trackingOriginType = trackingOriginType
@@ -557,7 +562,10 @@ class Rift(window.Window):
 
     @trackingOriginType.setter
     def trackingOriginType(self, value):
-        ovr.setTrackingOriginType(value)
+        trackingOriginTypes = {
+            'floor': ovr.LIBOVR_TRACKING_ORIGIN_FLOOR_LEVEL,
+            'eye': ovr.LIBOVR_TRACKING_ORIGIN_EYE_LEVEL}
+        ovr.setTrackingOriginType(trackingOriginTypes[value])
 
     def recenterTrackingOrigin(self):
         """Recenter the tracking origin using the current head position."""
@@ -596,7 +604,7 @@ class Rift(window.Window):
         """Calibrated origin from the last tracking state.
 
         """
-        return self._trackingState.calibratedOrigin
+        return self._calibratedOrigin
 
     def getDevicePose(self, deviceName, absTime, latencyMarker=False):
         """Get the pose of a tracked device.
@@ -673,7 +681,12 @@ class Rift(window.Window):
         # Get the current tracking state structure, estimated poses for the
         # head and hands are stored here. The latency marker for computing
         # motion-to-photon latency is set when this function is called.
-        self._trackingState = ovr.getTrackingState(absTime)
+        ts, calibratedOrigin = ovr.getTrackingState(absTime)
+
+        self._headPoseState = ts[ovr.LIBOVR_TRACKED_DEVICE_TYPE_HMD]
+        self._leftHandPoseState = ts[ovr.LIBOVR_TRACKED_DEVICE_TYPE_LTOUCH]
+        self._rightHandPoseState = ts[ovr.LIBOVR_TRACKED_DEVICE_TYPE_RTOUCH]
+        self._calibratedOrigin = calibratedOrigin
 
     @property
     def hmdToEyePoses(self):
@@ -709,7 +722,7 @@ class Rift(window.Window):
         passed to that function.
 
         """
-        return self._trackingState.headPose
+        return self._headPoseState[0].pose
 
     @property
     def trackedHandPoses(self):
@@ -721,7 +734,7 @@ class Rift(window.Window):
         passed to that function.
 
         """
-        return self._trackingState.handPoses
+        return self._leftHandPoseState[0].pose, self._rightHandPoseState[0].pose
 
     def calcEyePoses(self, headPose=None):
         """Calculate eye poses.
@@ -739,8 +752,7 @@ class Rift(window.Window):
         if not self._allowHmdRendering:
             return
 
-        ovr.calcEyePoses(
-            self.trackedHeadPose.pose if headPose is None else headPose)
+        ovr.calcEyePoses(self.trackedHeadPose if headPose is None else headPose)
 
         # Calculate eye poses, this needs to be called every frame.
         # apply additional transformations to eye poses
@@ -750,7 +762,7 @@ class Rift(window.Window):
                 ovr.getEyeViewMatrix(eye, matrix)
         else:
             # view matrix derived from head position when in monoscopic mode
-            self._viewMatrix = self.trackedHeadPose.pose.getTransformMatrix()
+            self._viewMatrix = self.trackedHeadPose.getTransformMatrix()
 
         self._startHmdFrame()
 
@@ -774,7 +786,7 @@ class Rift(window.Window):
                 ovr.getEyeViewMatrix(eye, matrix)
         else:
             # view matrix derived from head position when in monoscopic mode
-            self._viewMatrix = self.trackedHeadPose.pose.getTransformMatrix()
+            self._viewMatrix = self.trackedHeadPose.getTransformMatrix()
 
     @property
     def shouldQuit(self):
@@ -1217,7 +1229,8 @@ class Rift(window.Window):
             self._allowHmdRendering = True
 
         # update session status
-        self._sessionStatus = ovr.getSessionStatus()
+        result, status = ovr.getSessionStatus()
+        self._sessionStatus = status
 
         # Wait for the buffer to be freed by the compositor, this is like
         # waiting for v-sync.
@@ -1235,7 +1248,6 @@ class Rift(window.Window):
             # motion-to-photon latency is set when this function is called.
             self.updateTrackingState(absTime)
             self.calcEyePoses()
-            self._startHmdFrame()
 
     def _startHmdFrame(self):
         """Prepare to render an HMD frame. This must be called every frame
