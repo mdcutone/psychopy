@@ -327,9 +327,8 @@ class Rift(window.Window):
             self._projectionMatrix = np.identity(4, dtype=np.float32)
             self._viewMatrix = np.identity(4, dtype=np.float32)
 
-        # if the GLFW backend is being used, disable v-sync since the HMD runs
-        # at a different frequency.
-        kwargs['swapInterval'] = 0
+        # disable v-sync since the HMD runs at a different frequency
+        kwargs['waitBlanking'] = False
 
         # force checkTiming off and quad-buffer stereo
         kwargs["checkTiming"] = False
@@ -399,7 +398,7 @@ class Rift(window.Window):
 
         """
         result = ovr.setInt(ovr.LIBOVR_PERF_HUD_MODE, RIFT_PERF_HUD_MODES[mode])
-        logging.info('Performance HUD mode set to "{}".'.format(mode))
+        logging.info("Performance HUD mode set to '{}'.".format(mode))
 
     def hidePerfHud(self):
         """Hide the performance HUD."""
@@ -427,8 +426,8 @@ class Rift(window.Window):
 
         Generate your own eye poses::
 
-            leftEyePose = Rift.createPose((-self.eyeToNoseDistance, 0., 0.))
-            rightEyePose = Rift.createPose((self.eyeToNoseDistance, 0., 0.))
+            leftEyePose = createPose((-self.eyeToNoseDistance, 0., 0.))
+            rightEyePose = createPose((self.eyeToNoseDistance, 0., 0.))
             self.hmdToEyePoses = [leftEyePose, rightEyePose]
 
         Get the inter-axial separation (IAS) reported by LibOVR::
@@ -488,13 +487,6 @@ class Rift(window.Window):
         """
         return self._hmdInfo.hid
 
-    # @property
-    # def versionString(self):
-    #     """LibOVRRT version as a string (`str`).
-    #
-    #     """
-    #     pass
-
     @property
     def firmwareVersion(self):
         """Get the firmware version of the active HMD (`int`, `int`).
@@ -523,7 +515,32 @@ class Rift(window.Window):
 
         """
         return [ovr.getPixelsPerTanAngleAtCenter(ovr.LIBOVR_EYE_LEFT),
-            ovr.getPixelsPerTanAngleAtCenter(ovr.LIBOVR_EYE_RIGHT)]
+                ovr.getPixelsPerTanAngleAtCenter(ovr.LIBOVR_EYE_RIGHT)]
+
+    def tanAngleToNDC(self, horzTan, vertTan):
+        """Convert tan angles to the normalized device coordinates for the
+        current buffer.
+
+        Parameters
+        ----------
+        horzTan : float
+            Horizontal tan angle.
+        vertTan : float
+            Vertical tan angle.
+
+        Returns
+        -------
+        tuple of float
+            Normalized device coordinates X, Y. Coordinates range between -1.0
+            and 1.0. Returns `None` if an invalid buffer is selected.
+
+        """
+        if self.buffer == 'left':
+            return ovr.getTanAngleToRenderTargetNDC(
+                ovr.LIBOVR_EYE_LEFT, (horzTan, vertTan))
+        elif self.buffer == 'right':
+            return ovr.getTanAngleToRenderTargetNDC(
+                ovr.LIBOVR_EYE_LEFT, (horzTan, vertTan))
 
     @property
     def trackerCount(self):
@@ -725,6 +742,31 @@ class Rift(window.Window):
             ovr.setHmdToEyePose(eye, pose)
 
     @property
+    def headPosTracked(self):
+        """`True` if the head position (translation) was tracked.
+
+        This usually returns `False` when the HMD leaves the space covered by
+        the sensors. Value reflects the state at the last
+        :py:class:`~Rift.updateTrackingState` call.
+
+        """
+        status = self._headPoseState[1]
+        return ovr.LIBOVR_STATUS_POSITION_TRACKED == (
+                status & ovr.LIBOVR_STATUS_POSITION_TRACKED)
+
+    @property
+    def headOriTracked(self):
+        """`True` if the head orientation was tracked.
+
+        Value reflects the state at the last
+        :py:class:`~Rift.updateTrackingState` call.
+
+        """
+        status = self._headPoseState[1]
+        return ovr.LIBOVR_STATUS_ORIENTATION_TRACKED == (
+                status & ovr.LIBOVR_STATUS_ORIENTATION_TRACKED)
+
+    @property
     def trackedHeadPose(self):
         """Tracked head pose reported by LibOVR (`LibOVRPose`).
 
@@ -762,13 +804,14 @@ class Rift(window.Window):
     def calcEyePoses(self, headPose=None):
         """Calculate eye poses.
 
-        Only effective if `autoUpdatePoses`=True. Must be called once per frame
-        prior to calling :func:`setRiftView` or drawing anything.
+        Only effective if ``autoUpdatePoses=True``. Must be called once per
+        frame prior to calling :py:class:`~Rift.setRiftView` or drawing
+        anything.
 
         Parameters
         ----------
         headPose : LibOVRPose, optional
-            Head pose to use. If None specified, the most recent tracked head
+            Head pose to use. If `None` specified, the most recent tracked head
             pose is used.
 
         """
@@ -1121,11 +1164,12 @@ class Rift(window.Window):
 
         if buffer == 'left':
             viewPort = ovr.getEyeRenderViewport(ovr.LIBOVR_EYE_LEFT)
+            GL.glViewport(*viewPort)
+            GL.glScissor(*viewPort)
         elif buffer == 'right':
             viewPort = ovr.getEyeRenderViewport(ovr.LIBOVR_EYE_RIGHT)
-
-        GL.glViewport(*viewPort)
-        GL.glScissor(*viewPort)
+            GL.glViewport(*viewPort)
+            GL.glScissor(*viewPort)
 
         if clear:
             self.setColor(self.color)  # clear the texture to the window color
