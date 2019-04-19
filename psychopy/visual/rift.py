@@ -34,7 +34,11 @@ RIFT_CONTROLLER_TYPES = {
     'Remote': ovr.LIBOVR_CONTROLLER_TYPE_REMOTE,
     'Touch': ovr.LIBOVR_CONTROLLER_TYPE_TOUCH,
     'LeftTouch': ovr.LIBOVR_CONTROLLER_TYPE_LTOUCH,
-    'RightTouch': ovr.LIBOVR_CONTROLLER_TYPE_RTOUCH
+    'RightTouch': ovr.LIBOVR_CONTROLLER_TYPE_RTOUCH,
+    "Object0": ovr.LIBOVR_CONTROLLER_TYPE_OBJECT0,
+    "Object1": ovr.LIBOVR_CONTROLLER_TYPE_OBJECT1,
+    "Object2": ovr.LIBOVR_CONTROLLER_TYPE_OBJECT2,
+    "Object3": ovr.LIBOVR_CONTROLLER_TYPE_OBJECT3
 }
 
 RIFT_BUTTON_TYPES = {
@@ -68,10 +72,19 @@ RIFT_TRACKED_DEVICE_TYPES = {
     "Object3": ovr.LIBOVR_TRACKED_DEVICE_TYPE_OBJECT3
 }
 
+RIFT_TRACKING_ORIGIN_TYPE = {
+    "floor": ovr.LIBOVR_TRACKING_ORIGIN_FLOOR_LEVEL,
+    "eye": ovr.LIBOVR_TRACKING_ORIGIN_EYE_LEVEL
+}
+
 RIFT_PERF_HUD_MODES = {
     'PerfSummary': ovr.LIBOVR_PERF_HUD_PERF_SUMMARY,
     'Off': ovr.LIBOVR_PERF_HUD_OFF}
 
+RIFT_BOUNDARY_TYPE = {
+    'PlayArea': ovr.LIBOVR_BOUNDARY_PLAY_AREA,
+    'Outer': ovr.LIBOVR_BOUNDARY_OUTER
+}
 
 class LibOVRError(Exception):
     """Exception for LibOVR errors."""
@@ -338,8 +351,6 @@ class Rift(window.Window):
         self.trackingOriginType = trackingOriginType
 
         # performance information
-        #self._perfStatsLastFrame = None
-        #self._perfStatsThisFrame = ovr.getFrameStats()
         self.nDroppedFrames = 0
         self.controllerPollTimes = {}
 
@@ -431,32 +442,24 @@ class Rift(window.Window):
 
         return eyeToNoseDist
 
-    def setIAS(self, dist):
-        """Set the inter-axial separation (IAS).
+    @property
+    def interAxialSeparation(self):
+        """Inter-axial separation in meters (`float`).
 
-        Parameters
-        ----------
-        dist : float
-            Inter-axial separation in meters.
-
-        Warning
-        -------
-
-        Setting the IAS will overwrite the default values reported by the Oculus
-        Rift API.
-
-        Examples
-        --------
-
-        Set the IAS::
-
-            hmd.setIAS(0.065)  # 65 millimeters
+        Value is applied to the poses in :py:class:`~Rift.hmdToEyePoses`.
 
         """
-        halfIAS = dist / 2.0
-        self.hmdToEyePoses = [ovr.LibOVRPose((halfIAS, 0.0, 0.0)),
-                              ovr.LibOVRPose((-halfIAS, 0.0, 0.0))]
-        logging.info('Inter-axial separation set to {} meters.'.format(dist))
+        if self.hmdToEyePoses is not None:
+            return -self.hmdToEyePoses[0].pos[0] + self.hmdToEyePoses[1].pos[0]
+
+    @interAxialSeparation.setter
+    def interAxialSeparation(self, value):
+        if self.hmdToEyePoses is not None:
+            halfIAS = value / 2.0
+            self.hmdToEyePoses = [ovr.LibOVRPose((halfIAS, 0.0, 0.0)),
+                                  ovr.LibOVRPose((-halfIAS, 0.0, 0.0))]
+            logging.info(
+                'Inter-axial separation set to {} meters.'.format(value))
 
     @property
     def productName(self):
@@ -533,7 +536,7 @@ class Rift(window.Window):
         Parameters
         ----------
         trackerIdx : int
-            Tracker index, ranging from 0 to `trackerCount`.
+            Tracker index, ranging from 0 to :py:class:`~Rift.trackerCount`.
 
         Returns
         -------
@@ -554,15 +557,23 @@ class Rift(window.Window):
 
     @property
     def trackingOriginType(self):
-        """Current tracking origin type (`str`)."""
-        return ovr.getTrackingOriginType()
+        """Current tracking origin type (`str`).
+
+        Valid tracking origin types are 'floor' and 'eye'.
+
+        """
+        originType = ovr.getTrackingOriginType()
+
+        if originType == ovr.LIBOVR_TRACKING_ORIGIN_FLOOR_LEVEL:
+            return 'floor'
+        elif originType == ovr.LIBOVR_TRACKING_ORIGIN_EYE_LEVEL:
+            return 'eye'
+        else:
+            raise ValueError("LibOVR returned unknown tracking origin type.")
 
     @trackingOriginType.setter
     def trackingOriginType(self, value):
-        trackingOriginTypes = {
-            'floor': ovr.LIBOVR_TRACKING_ORIGIN_FLOOR_LEVEL,
-            'eye': ovr.LIBOVR_TRACKING_ORIGIN_EYE_LEVEL}
-        ovr.setTrackingOriginType(trackingOriginTypes[value])
+        ovr.setTrackingOriginType(RIFT_TRACKING_ORIGIN_TYPE[value])
 
     def recenterTrackingOrigin(self):
         """Recenter the tracking origin using the current head position."""
@@ -596,13 +607,6 @@ class Rift(window.Window):
         """Clear the 'shouldRecenter' status flag at the API level."""
         ovr.clearShouldRecenterFlag()
 
-    @property
-    def calbratedOrigin(self):
-        """Calibrated origin from the last tracking state.
-
-        """
-        return self._calibratedOrigin
-
     def getDevicePose(self, deviceName, absTime, latencyMarker=False):
         """Get the pose of a tracked device.
 
@@ -620,7 +624,7 @@ class Rift(window.Window):
         Returns
         -------
         `LibOVRPoseState` or `None`
-            Pose state object. None if device tracking was lost.
+            Pose state object. `None` if device tracking was lost.
 
         """
         deviceStatus, devicePose = ovr.getDevicePoses(
@@ -636,17 +640,18 @@ class Rift(window.Window):
         """Update tracked object poses.
 
         Get the poses of all tracked devices (e.g. HMD and touch controllers) at
-        'absTime'. New poses will appear at 'trackedHeadPose' and
-        'trackedHandPoses'.
+        `bsTime`. New poses will appear at :py:class:`~Rift.trackedHeadPose` and
+        :py:class:`~Rift.trackedHandPoses` representing the configuration of
+        the head and hands at `absTime`.
 
-        If `autoUpdatePoses=True`, this is called automatically after flip is
-        called.
+        If ``autoUpdatePoses=True``, this is called automatically after
+        :py:class:`~Rift.flip` is called.
 
         Parameters
         ----------
         absTime : float
             Absolute time the updated tracking state refers to. Usually passed
-            the value of `getPredictedDisplayTime`.
+            the value of :py:class:`~Rift.predictedDisplayTime`.
 
         See Also
         --------
@@ -703,9 +708,13 @@ class Rift(window.Window):
         supposed to correspond to the actual inter-ocular distance (IOD) of the
         user. You can get the IOD used for rendering by adding up the absolute
         values of the x-components of the eye poses, or by multiplying the value
-        of 'eyeToNoseDist' by two. Furthermore, the IOD values can be altered,
-        prior to calling 'calcEyePoses', to override the values specified by
+        of `eyeToNoseDist` by two. Furthermore, the IOD values can be altered,
+        prior to calling `calcEyePoses`, to override the values specified by
         LibOVR.
+
+        Note that the poses describe view space translations, not the relative
+        position of the eye's in world-space. So the left eye should have a
+        positive X value and the right negative.
 
         """
         return [ovr.getHmdToEyePose(i) for i in range(ovr.LIBOVR_EYE_COUNT)]
@@ -720,8 +729,11 @@ class Rift(window.Window):
         """Tracked head pose reported by LibOVR (`LibOVRPose`).
 
         Gives the tracked pose of the head (HMD) from the last call to
-        'updateTrackingState'. The poses should be referenced to the time
-        passed to that function.
+        :py:class:`~Rift.updateTrackingState`. The poses should be referenced to
+        the time passed to that function.
+
+        More detailed pose state information, such as motion derivatives, can
+        be accessed through the ``_headPoseState`` private attribute.
 
         """
         return self._headPoseState[0].pose
@@ -732,11 +744,20 @@ class Rift(window.Window):
         `LibOVRPose`).
 
         Gives the tracked pose of the head (HMD) from the last call to
-        'updateTrackingState'. The poses should be referenced to the time
-        passed to that function.
+        :py:class:`~Rift.updateTrackingState`. The poses should be referenced to
+        the time passed to that function.
 
         """
         return self._leftHandPoseState[0].pose, self._rightHandPoseState[0].pose
+
+    @property
+    def calibrtedOrigin(self):
+        """Get the calibrated tracking origin (`LibOVRPose`).
+
+        The pose reflects the last :py:class:`~Rift.updateTrackingState` call.
+
+        """
+        return self._calibratedOrigin
 
     def calcEyePoses(self, headPose=None):
         """Calculate eye poses.
@@ -1192,41 +1213,51 @@ class Rift(window.Window):
             Dimensions of the boundary meters [x, y, z].
 
         """
-        if boundaryType not in ("PlayArea", "Outer"):
-            raise (
-                "Invalid boundary type '{}' specified.".format(boundaryType))
-        result, dims = ovr.getBoundaryDimensions(boundaryType)
+        result, dims = ovr.getBoundaryDimensions(
+            RIFT_BOUNDARY_TYPE[boundaryType])
 
         return dims
 
-    def pollControllers(self):
-        """Update all connected controller states. This should be called at
-        least once per frame.
+    @property
+    def connectedControllers(self):
+        """Connected controller types (`list` of `str`)"""
+        controllers = ovr.getConnectedControllerTypes()
+        ctrlKeys = {val: key for key, val in RIFT_CONTROLLER_TYPES.items()}
 
-        Returns
-        -------
-        None
+        return [ctrlKeys[ctrl] for ctrl in controllers]
+
+    def updateInputState(self, controllers=None):
+        """Update all connected controller states.
+
+        Parameters
+        ----------
+        controllers : tuple or list of str, optional
+            List of controllers to poll. If None, all available controllers will
+            be polled.
+
+        Examples
+        --------
+
+        Poll the state of specific controllers by name::
+
+            controllers = ['XBox', 'Touch']
+            updateInputState(controllers)
 
         """
-        for i in ovr.getConnectedControllerTypes():
+        if controllers is None:
+            toPoll = ovr.getConnectedControllerTypes()
+        elif isinstance(controllers, (list, tuple,)):
+            toPoll = [RIFT_CONTROLLER_TYPES[ctrl] for ctrl in controllers]
+        else:
+            raise TypeError("Argument 'controllers' must be iterable type.")
+
+        for i in toPoll:
             result, t_sec = ovr.updateInputState(i)
             self.controllerPollTimes[i] = t_sec
 
-    def updateInputState(self, controller):
-        """Update the input state of a given controller.
-
-        Returns
-        -------
-        float
-            Absolute time in seconds the device was polled.
-
-        """
-        result, t_sec = ovr.updateInputState(controller)
-        self.controllerPollTimes[controller] = t_sec
-        return t_sec
-
     def _waitToBeginHmdFrame(self):
-        """Wait until the HMD surfaces are available for rendering."""
+        """Wait until the HMD surfaces are available for rendering.
+        """
         # First time this function is called, make True.
         if not self._allowHmdRendering:
             self._allowHmdRendering = True
@@ -1240,7 +1271,7 @@ class Rift(window.Window):
         result = ovr.waitToBeginFrame(self._frameIndex)
         #if result == ovr.LIBOVR_SUCCESS_NOT_VISIBLE:
         #    pass
-        self.pollControllers()  # poll controller states
+        self.updateInputState()  # poll controller states
 
         # update the tracking state
         if self.autoUpdatePoses:
@@ -1260,10 +1291,6 @@ class Rift(window.Window):
         continuing. The current frame texture from the swap chain are pulled
         from the SDK and made available for binding.
 
-        Returns
-        -------
-        None
-
         """
         # begin frame
         ovr.beginFrame(self._frameIndex)
@@ -1280,10 +1307,11 @@ class Rift(window.Window):
             self._prepareMonoFrame()
 
     def _startOfFlip(self):
-        """Custom _startOfFlip for HMD rendering. This finalizes the HMD texture
-        before diverting drawing operations back to the on-screen window. This
-        allows 'flip()' to swap the on-screen and HMD buffers when called. This
-        function always returns True.
+        """Custom :py:class:`~Rift._startOfFlip` for HMD rendering. This
+        finalizes the HMD texture before diverting drawing operations back to
+        the on-screen window. This allows :py:class:`~Rift.flip` to swap the
+        on-screen and HMD buffers when called. This function always returns
+        `True`.
 
         Returns
         -------
@@ -1337,7 +1365,7 @@ class Rift(window.Window):
 
         Parameters
         ----------
-        clearBuffer : boolean
+        clearBuffer : bool
             Clear the frame after flipping.
 
         Returns
@@ -1349,9 +1377,10 @@ class Rift(window.Window):
 
         Notes
         -----
-        The HMD compositor and application are asynchronous, therefore there is
-        no guarantee that the timestamp returned by 'flip' corresponds to the
-        exact vertical retrace time of the HMD.
+
+        * The HMD compositor and application are asynchronous, therefore there is
+          no guarantee that the timestamp returned by 'flip' corresponds to the
+          exact vertical retrace time of the HMD.
 
         """
         # NOTE: Most of this code is shared with the regular Window's flip
@@ -1471,7 +1500,7 @@ class Rift(window.Window):
 
     def multiplyViewMatrixGL(self):
         """Multiply the local eye pose transformation matrix obtained from the
-        SDK using glMultMatrixf(). The matrix used depends on the current eye
+        SDK using ``glMultMatrixf``. The matrix used depends on the current eye
         buffer set by :func:`setBuffer`.
 
         Returns
@@ -1497,7 +1526,7 @@ class Rift(window.Window):
 
     def multiplyProjectionMatrixGL(self):
         """Multiply the current projection matrix obtained from the SDK using
-        glMultMatrixf(). The matrix used depends on the current eye buffer set
+        ``glMultMatrixf``. The matrix used depends on the current eye buffer set
         by :func:`setBuffer`.
 
         """
@@ -1522,7 +1551,7 @@ class Rift(window.Window):
         from the HMD and applies them.
 
         Note: This only has an effect if using Rift in legacy immediate mode
-        OpenGL mode by setting `~Rift.legacyOpenGL`=True.
+        OpenGL.
 
         Parameters
         ----------
@@ -1547,7 +1576,7 @@ class Rift(window.Window):
         2D stimuli after a stereo projection change.
 
         Note: This only has an effect if using Rift in legacy immediate mode
-        OpenGL mode by setting ~Rift.legacy_opengl=True.
+        OpenGL.
 
         Parameters
         ----------
@@ -1568,11 +1597,6 @@ class Rift(window.Window):
     def _updateProjectionMatrix(self):
         """Update or re-calculate projection matrices based on the current
         render descriptor configuration.
-
-        Returns
-        -------
-        None
-
         """
         if not self._monoscopic:
             ovr.getEyeProjectionMatrix(
@@ -1592,140 +1616,125 @@ class Rift(window.Window):
                 self._farClip,
                 self._projectionMatrix)
 
-    def controllerConnected(self, controller='Xbox'):
-        """Check if a given device is connected to the Haptics engine.
-
-        Parameters
-        ----------
-        controller : str
-            Name of the controller to check if connected.
-
-        Returns
-        -------
-        bool
-            True if specified controller connected, else False.
-
-        """
-        return RIFT_CONTROLLER_TYPES[controller] in ovr.getConnectedControllerTypes()
-
-    def getConnectedControllers(self):
-        """Get a list of connected input devices (controllers) managed by the
-        LibOVR runtime. Valid names are 'xbox', 'remote', 'left_touch',
-        'right_touch' and 'touch'.
-
-        Returns
-        -------
-        list
-            List of connected controller names.
-
-        """
-        return ovr.getConnectedControllerTypes()
-
     def getThumbstickValues(self, controller='Xbox', deadzone=False):
-        """Get a list of tuples containing the displacement values (with
-        deadzone) for each thumbstick on a specified controller.
-
-        Axis displacements are represented in each tuple by a floats ranging
-        from -1.0 (full left/down) to 1.0 (full right/up). The SDK library
-        pre-filters stick input to apply a dead-zone where 0.0 will be returned
-        if the sticks return a displacement within -0.2746 to 0.2746. Index 0 of
-        the returned tuple contains the X,Y displacement values of the left
-        thumbstick, and the right thumbstick values at index 1.
-
-        Possible values for 'controller' are 'xbox' and 'touch'; the only
-        devices with thumbsticks the SDK manages.
+        """Get controller thumbstick values.
 
         Parameters
         ----------
         controller : str
-            Name of the controller to get thumbstick values.
+            Name of the controller to get thumbstick values. Possible values for
+            `controller` are 'Xbox', 'Touch', 'RTouch', 'LTouch', 'Object0',
+            'Object1', 'Object2', and 'Object3'; the only devices with
+            thumbsticks the SDK manages. For additional controllers, use
+            PsychPy's built-in event or hardware support.
         deadzone : bool
-            Apply the deadzone to thumbstick values.
+            Apply the deadzone to thumbstick values. This pre-filters stick
+            input to apply a dead-zone where 0.0 will be returned if the sticks
+            return a displacement within -0.2746 to 0.2746.
 
         Returns
         -------
         tuple
-            Left and right, X and Y thumbstick values.
+            Left and right, X and Y thumbstick values. Axis displacements are
+            represented in each tuple by a floats ranging from -1.0
+            (full left/down) to 1.0 (full right/up). The returned values
+            reflect the controller state since the last
+            :py:class:`~Rift.updateInputState` or :py:class:`~Rift.flip` call.
 
         """
-        if controller not in ('Xbox', 'Touch', 'LeftTouch', 'RightTouch'):
-            raise (
-                "Invalid controller value '{}' specified.".format(controller))
-
         return ovr.getThumbstickValues(controller, deadzone)
 
     def getIndexTriggerValues(self, controller='Xbox', deadzone=False):
-        """Get the values of the index triggers representing the amount they
-        are being displaced.
+        """Get the values of the index triggers.
 
         Parameters
         ----------
         controller : str
-            Name of the controller to get index trigger values.
+            Name of the controller to get index trigger values. Possible values
+            for `controller` are 'Xbox', 'Touch', 'RTouch', 'LTouch', 'Object0',
+            'Object1', 'Object2', and 'Object3'; the only devices with index
+            triggers the SDK manages. For additional controllers, use PsychPy's
+            built-in event or hardware support.
         deadzone : bool
-            Apply the deadzone to index trigger values.
+            Apply the deadzone to index trigger values. This pre-filters stick
+            input to apply a dead-zone where 0.0 will be returned if the trigger
+            returns a displacement within 0.2746.
 
         Returns
         -------
-        tuple
-            Left and right index trigger values.
+        tuple of float
+            Left and right index trigger values. Displacements are represented
+            as `tuple` of two float representing the left anr right displacement
+            values, which range from 0.0 to 1.0. The returned values reflect the
+            controller state since the last :py:class:`~Rift.updateInputState`
+            or :py:class:`~Rift.flip` call.
 
         """
-        if controller not in ('Xbox', 'Touch', 'LeftTouch', 'RightTouch'):
-            raise (
-                "Invalid controller value '{}' specified.".format(controller))
-
         return ovr.getIndexTriggerValues(RIFT_CONTROLLER_TYPES[controller],
                                          deadzone)
 
-    def getHandTriggerValues(self, controller='Xbox', deadzone=False):
-        """Get the values of the hand triggers representing the amount they
-        are being displaced.
+    def getHandTriggerValues(self, controller='Touch', deadzone=False):
+        """Get the values of the hand triggers.
 
         Parameters
         ----------
         controller : str
-            Name of the controller to get hand trigger values.
+            Name of the controller to get hand trigger values. Possible values
+            for `controller` are 'Touch', 'RTouch', 'LTouch', 'Object0',
+            'Object1', 'Object2', and 'Object3'; the only devices with hand
+            triggers the SDK manages. For additional controllers, use PsychPy's
+            built-in event or hardware support.
         deadzone : bool
-            Apply the deadzone to hand trigger values.
+            Apply the deadzone to hand trigger values. This pre-filters stick
+            input to apply a dead-zone where 0.0 will be returned if the trigger
+            returns a displacement within 0.2746.
 
         Returns
         -------
         tuple
-            Left and right index trigger values.
+            Left and right hand trigger values. Displacements are represented
+            as `tuple` of two float representing the left anr right displacement
+            values, which range from 0.0 to 1.0. The returned values reflect the
+            controller state since the last :py:class:`~Rift.updateInputState`
+            or :py:class:`~Rift.flip` call.
 
         """
-        if controller not in ('Xbox', 'Touch', 'LeftTouch', 'RightTouch'):
-            raise (
-                "Invalid controller value '{}' specified.".format(controller))
-
         return ovr.getHandTriggerValues(RIFT_CONTROLLER_TYPES[controller],
                                         deadzone)
 
-    def getButtons(self, buttons, controller='Xbox', stateMode='continuous'):
-        """Returns True if any of the buttons in 'buttons' are held down. All
-        buttons are ORed together and tested. Edge triggering can be enabled by
-        specifying either 'rising' or 'falling' to stateMode. When enabled,
-        True is returned only when a button's state changes. If 'buttons' is
-        empty, will return True when no buttons are pressed.
+    def getButtons(self, buttons, controller='Xbox', testState='continuous'):
+        """Get button states from a controller.
 
-        Valid button values are 'A', 'B', 'RThumb', 'RShoulder' 'X', 'Y',
-        'LThumb', 'LShoulder', 'Up', 'Down', 'Left', 'Right', 'Enter', 'Back',
-        'VolUp', 'VolDown', and 'Home'.
+        Returns `True` if any names specified to `buttons` reflect `testState`
+        since the last :py:class:`~Rift.updateInputState` or
+        :py:class:`~Rift.flip` call. If multiple button names are specified as a
+        `list` or `tuple` to `buttons`, multiple button states are tested,
+        returning `True` if all the buttons presently satisfy the `testState`.
+        Note that not all controllers available share the same buttons. If a
+        button is not available, this function will always return `False`.
 
         Parameters
         ----------
         buttons : `list` of `str` or `str`
-            Buttons to test.
+            Buttons to test. Valid `buttons` names are 'A', 'B', 'RThumb',
+            'RShoulder' 'X', 'Y', 'LThumb', 'LShoulder', 'Up', 'Down', 'Left',
+            'Right', 'Enter', 'Back', 'VolUp', 'VolDown', and 'Home'. Names can
+            be passed as a `list` to test multiple button states.
         controller : `str`
             Controller name.
-        stateMode : `str`
-            State to test.
+        testState : `str`
+            State to test. Valid values are:
+
+                * **continuous** - Button is presently being held down.
+                * **rising** or **pressed** - Button has been *pressed* since
+                  the last update.
+                * **falling** or **released** - Button has been *released* since
+                  the last update.
 
         Returns
         -------
-        bool
-            Button state.
+        tuple of bool, float
+            Button state and timestamp in seconds the controller was polled.
 
         Examples
         --------
@@ -1743,8 +1752,8 @@ class Rift(window.Window):
             _, state = ovr.getButton(
                 RIFT_CONTROLLER_TYPES[controller],
                 RIFT_BUTTON_TYPES[buttons],
-                stateMode)
-            return state
+                testState)
+            return state, self.controllerPollTimes[controller]
         elif isinstance(buttons, (list, tuple,)):  # combine buttons
             buttonBits = 0x00000000
             for buttonName in buttons:
@@ -1752,19 +1761,19 @@ class Rift(window.Window):
             _, state = ovr.getButton(
                 RIFT_CONTROLLER_TYPES[controller],
                 buttons,
-                stateMode)
-            return state
+                testState)
+            return state, self.controllerPollTimes[controller]
         elif isinstance(buttons, int):  # using enums directly
             _, state = ovr.getButton(
                 RIFT_CONTROLLER_TYPES[controller],
                 buttons,
-                stateMode)
-            return state
+                testState)
+            return state, self.controllerPollTimes[controller]
         else:
             ValueError("Invalid 'buttonNames' specified.")
 
-    def vibrateController(self, controller, frequency='low', amplitude=1.0):
-        """Vibrate a controller.
+    def startHaptics(self, controller, frequency='low', amplitude=1.0):
+        """Start haptic feedback (vibration).
 
         Vibration is constant at fixed frequency and amplitude. Vibration lasts
         2.5 seconds, so this function needs to be called more often than that
@@ -1772,13 +1781,13 @@ class Rift(window.Window):
         used here.
 
         There are only two frequencies permitted 'high' and 'low', however,
-        amplitude can vary from 0.0 to 1.0. Specifying frequency='off' stops
-        vibration.
+        amplitude can vary from 0.0 to 1.0. Specifying `frequency`='off' stops
+        vibration if in progress.
 
         Parameters
         ----------
         controller : str
-            Name of the controller to get hand trigger values.
+            Name of the controller to vibrate.
         frequency : str
             Vibration frequency. Valid values are: 'off', 'low', or 'high'.
         amplitude : float
@@ -1790,6 +1799,22 @@ class Rift(window.Window):
             RIFT_CONTROLLER_TYPES[controller],
             frequency,
             amplitude)
+
+    def stopHaptics(self, controller):
+        """Stop haptic feedback.
+
+        Convenience function to stop controller vibration initiated by the last
+        :py:class:`~Rift.vibrateController` call. This is the same as calling
+        ``vibrateController(controller, frequency='off')``.
+
+        Parameters
+        ----------
+        controller : str
+            Name of the controller to stop vibrating.
+
+        """
+        ovr.setControllerVibration(
+            RIFT_CONTROLLER_TYPES[controller], 'off', 0.0)
 
     # def getTouches(self, touchNames, stateMode='continuous'):
     #     """Returns True if any buttons are touched using sensors. This feature
@@ -1810,11 +1835,23 @@ class Rift(window.Window):
 
 
 def createPose(pos=(0., 0., 0.), ori=(0., 0., 0., 1.)):
-    """Create a new Rift pose object (psychxr.ovr.LibOVRPose).
+    """Create a new Rift pose object (``psychxr.libovr.LibOVRPose``).
 
-    LibOVRPose is used to represent a rigid body pose mainly for use with the
+    `LibOVRPose` is used to represent a rigid body pose mainly for use with the
     PsychXR's LibOVR module. There are several methods associated with the
     object to manipulate the pose.
+
+    Parameters
+    ----------
+    pos : tuple, list, or ndarray of float
+        Position vector/coordinate (x, y, z).
+    ori : tuple, list, or ndarray of float
+        Orientation quaternion (x, y, z, w).
+
+    Returns
+    -------
+    LibOVRPose
+        Object representing a rigid body pose for use with LibOVR.
 
     """
     return ovr.LibOVRPose(pos, ori)
