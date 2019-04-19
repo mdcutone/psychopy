@@ -68,6 +68,10 @@ RIFT_TRACKED_DEVICE_TYPES = {
     "Object3": ovr.LIBOVR_TRACKED_DEVICE_TYPE_OBJECT3
 }
 
+RIFT_PERF_HUD_MODES = {
+    'PerfSummary': ovr.LIBOVR_PERF_HUD_PERF_SUMMARY,
+    'Off': ovr.LIBOVR_PERF_HUD_OFF}
+
 
 class LibOVRError(Exception):
     """Exception for LibOVR errors."""
@@ -383,23 +387,25 @@ class Rift(window.Window):
             HUD mode to use.
 
         """
-        ovr.perfHudMode(mode)
+        result = ovr.setInt(ovr.LIBOVR_PERF_HUD_MODE, RIFT_PERF_HUD_MODES[mode])
         logging.info('Performance HUD mode set to "{}".'.format(mode))
 
     def hidePerfHud(self):
         """Hide the performance HUD."""
-        ovr.hidePerfHud()
+        result = ovr.setInt(ovr.LIBOVR_PERF_HUD_MODE, ovr.LIBOVR_PERF_HUD_OFF)
         logging.info('Performance HUD disabled.')
 
     @property
     def userHeight(self):
         """Get user height in meters (`float`)."""
-        return ovr.getUserHeight()
+        return ovr.getFloat(ovr.LIBOVR_KEY_PLAYER_HEIGHT,
+                            ovr.LIBOVR_DEFAULT_PLAYER_HEIGHT)
 
     @property
     def eyeHeight(self):
         """Eye height in meters (`float`)."""
-        return ovr.getEyeHeight()
+        return ovr.getFloat(ovr.LIBOVR_KEY_EYE_HEIGHT,
+                            ovr.LIBOVR_DEFAULT_EYE_HEIGHT)
 
     @property
     def eyeToNoseDistance(self):
@@ -419,12 +425,11 @@ class Rift(window.Window):
             iad = self.eyeToNoseDistance * 2.0
 
         """
-        return ovr.getEyeToNoseDist()
+        eyeToNoseDist = np.zeros((2,), dtype=np.float32)
+        result = ovr.getFloatArray(ovr.LIBOVR_KEY_EYE_TO_NOSE_DISTANCE,
+                                   eyeToNoseDist)
 
-    @property
-    def neckEyeDistance(self):
-        """Neck to eye distance in meters (`float`). """
-        return ovr.getNeckEyeDist()
+        return eyeToNoseDist
 
     def setIAS(self, dist):
         """Set the inter-axial separation (IAS).
@@ -516,14 +521,6 @@ class Rift(window.Window):
         """
         return [ovr.getPixelsPerTanAngleAtCenter(ovr.LIBOVR_EYE_LEFT),
             ovr.getPixelsPerTanAngleAtCenter(ovr.LIBOVR_EYE_RIGHT)]
-
-    @property
-    def pixelsPerDegreeAtCenter(self):
-        """Approximate pixels-per-degree at the display center for each eye.
-
-        """
-        return [ovr.getPixelsPerDegree(ovr.LIBOVR_EYE_LEFT),
-            ovr.getPixelsPerDegree(ovr.LIBOVR_EYE_RIGHT)]
 
     @property
     def trackerCount(self):
