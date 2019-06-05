@@ -16,11 +16,13 @@ __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
 import numpy as np
 
 
-def normalize(v):
+def normalize(v, out=None):
     """Normalize a vector or quaternion.
 
     v : tuple, list or ndarray of float
         Vector to normalize.
+    out : ndarray, optional
+        Optional output array.
 
     Returns
     -------
@@ -33,16 +35,22 @@ def normalize(v):
       returned.
 
     """
-    v = np.asarray(v)
+    if not isinstance(v, np.ndarray):
+        v = np.asarray(v)
+
+    if out is None:
+        toReturn = np.zeros_like(v)
+    else:
+        toReturn = out
+
+    toReturn[:] = v
     norm = np.linalg.norm(v)
     if norm == 1.0:  # already normalized
-        return v
+        return toReturn
     elif norm != 0.0:
-        v /= norm
-    else:
-        return np.zeros_like(v)
+        toReturn /= norm
 
-    return v
+    return toReturn
 
 
 def lerp(v0, v1, t, out=None):
@@ -73,8 +81,12 @@ def lerp(v0, v1, t, out=None):
         midpoint = lerp(u, v, 0.5)  # 0.5 to interpolate half-way between points
 
     """
-    v0 = np.asarray(v0)
-    v1 = np.asarray(v1)
+    if not isinstance(v0, np.ndarray):
+        v0 = np.asarray(v0)
+
+    if not isinstance(v1, np.ndarray):
+        v1 = np.asarray(v1)
+
     assert v0.shape == v1.shape  # make sure the inputs have the same dims
     origShape = v0.shape
     v0, v1 = np.atleast_2d(v0, v1)
@@ -92,7 +104,7 @@ def lerp(v0, v1, t, out=None):
         return np.reshape(toReturn, origShape)
 
 
-def slerp(q0, q1, t):
+def slerp(q0, q1, t, out=None):
     """Spherical linear interpolation (SLERP) between two quaternions.
 
     Interpolation occurs along the shortest arc between the initial and final
@@ -108,6 +120,8 @@ def slerp(q0, q1, t):
         are imaginary components.
     t : float
         Interpolation weight factor [0, 1].
+    out : ndarray, optional
+        Optional output array.
 
     Returns
     -------
@@ -123,6 +137,11 @@ def slerp(q0, q1, t):
     # Implementation based on code found here:
     #  https://en.wikipedia.org/wiki/Slerp
     #
+    if out is None:
+        toReturn = np.zeros((4,))
+    else:
+        toReturn = out
+
     q0 = normalize(q0)
     q1 = normalize(q1)
 
@@ -131,19 +150,18 @@ def slerp(q0, q1, t):
         q1 = -q1
         dot = -dot
 
-    # small angle, use linear interpolation instead and return
-    if dot > 0.9995:
-        interp = q0 + t * (q1 - q0)
-        return normalize(interp)
+    if dot > 0.9995:  # small angle, use linear interpolation instead
+        toReturn[:] = normalize(q0 + t * (q1 - q0))
+    else:
+        theta0 = np.arccos(dot)
+        theta = theta0 * t
+        sinTheta = np.sin(theta)
+        sinTheta0 = np.sin(theta0)
+        s1 = sinTheta / sinTheta0
+        s0 = np.cos(theta) - dot * s1
+        toReturn[:] = (q0 * s0) + (q1 * s1)
 
-    theta0 = np.arccos(dot)
-    theta = theta0 * t
-    sinTheta = np.sin(theta)
-    sinTheta0 = np.sin(theta0)
-    s0 = np.cos(theta) - dot * sinTheta / sinTheta0
-    s1 = sinTheta / sinTheta0
-
-    return (q0 * s0) + (q1 * s1)
+    return toReturn
 
 
 def quatToAxisAngle(q, degrees=False):
@@ -193,7 +211,7 @@ def quatToAxisAngle(q, degrees=False):
     return axis, np.degrees(angle) if degrees else angle
 
 
-def quatFromAxisAngle(axis, angle, degrees=False):
+def quatFromAxisAngle(axis, angle, degrees=False, out=None):
     """Create a quaternion to represent a rotation about `axis` vector by
     `angle`.
 
@@ -207,6 +225,8 @@ def quatFromAxisAngle(axis, angle, degrees=False):
     degrees : bool
         Indicate `angle` is in degrees, otherwise `angle` will be treated as
         radians.
+    out : ndarray, optional
+        Optional output array.
 
     Returns
     -------
@@ -222,13 +242,18 @@ def quatFromAxisAngle(axis, angle, degrees=False):
         ori = quatFromAxisAngle(axis, angle, degrees=True)  # using degrees!
 
     """
-    halfRad = np.radians(float(angle)) / 2.0 if degrees else float(angle) / 2.0
-    q = np.zeros((4,))
-    axis = normalize(axis)
-    np.multiply(axis, np.sin(halfRad), out=q[:3])
-    q[3] = np.cos(halfRad)
+    if out is None:
+        toReturn = np.zeros((4,))
+    else:
+        toReturn = out
 
-    return q + 0.0  # remove negative zeros
+    halfRad = np.radians(float(angle)) / 2.0 if degrees else float(angle) / 2.0
+    axis = normalize(axis)
+    np.multiply(axis, np.sin(halfRad), out=toReturn[:3])
+    toReturn[3] = np.cos(halfRad)
+    toReturn += 0.0  # remove negative zeros
+
+    return toReturn
 
 
 def multQuat(q0, q1, out=None):
@@ -242,9 +267,8 @@ def multQuat(q0, q1, out=None):
     q0, q1 : ndarray, list, or tuple of float
         Quaternions to multiply in form [x, y, z, w] where w is real and x, y, z
         are imaginary components.
-    out : ndarray or None
-        Alternative array to write values. Must be `shape` == (4,) and same
-        `dtype` as the `dtype` argument.
+    out : ndarray, optional
+        Alternative array to write values.
 
     Returns
     -------
@@ -268,13 +292,10 @@ def multQuat(q0, q1, out=None):
     qr[:3] = np.cross(q0[:3], q1[:3]) + q0[:3] * q1[3] + q1[:3] * q0[3]
     qr[3] = q0[3] * q1[3] - q0[:3].dot(q1[:3])
 
-    if out is None:
-        return qr
-
     return qr
 
 
-def invertQuat(q):
+def invertQuat(q, out=None):
     """Get tht multiplicative inverse of a quaternion.
 
     This gives a quaternion which rotates in the opposite direction with equal
@@ -286,6 +307,8 @@ def invertQuat(q):
     q : ndarray, list, or tuple of float
         Quaternion to invert in form [x, y, z, w] where w is real and x, y, z
         are imaginary components.
+    out : ndarray, optional
+        Alternative length 4 1-D array to write values.
 
     Returns
     -------
@@ -311,12 +334,18 @@ def invertQuat(q):
 
     """
     qn = normalize(q)
-    # conjugate the quaternion
-    conj = np.zeros((4,))
-    conj[:3] = -1.0 * qn[:3]
-    conj[3] = qn[3]
 
-    return conj / np.sqrt(np.sum(np.square(qn)))
+    if out is None:
+        toReturn = np.zeros((4,), dtype=qn.dtype)
+    else:
+        toReturn = out
+
+    # conjugate the quaternion
+    toReturn[:3] = -qn[:3]
+    toReturn[3] = qn[3]
+    toReturn /= np.sqrt(np.sum(np.square(qn)))
+
+    return toReturn
 
 
 def matrixFromQuat(q, out=None):
@@ -334,8 +363,7 @@ def matrixFromQuat(q, out=None):
     Returns
     -------
     ndarray or None
-        4x4 rotation matrix in row-major order. Returns `None` if `out` is
-        specified.
+        4x4 rotation matrix in row-major order. 
 
     Examples
     --------
@@ -390,11 +418,10 @@ def matrixFromQuat(q, out=None):
 
     R += 0.0  # remove negative zeros
 
-    if out is None:
-        return R
+    return R
 
 
-def scaleMatrix(s):
+def scaleMatrix(s, out=None):
     """Create a scaling matrix.
 
     The resulting matrix is the same as a generated by a `glScale` call.
@@ -403,6 +430,8 @@ def scaleMatrix(s):
     ----------
     s : ndarray, tuple, or list of float
         Scaling factors [sx, sy, sz].
+    out : ndarray, optional
+        Optional output array.
 
     Returns
     -------
@@ -411,8 +440,15 @@ def scaleMatrix(s):
 
     """
     # from glScale
-    s = np.asarray(s)
-    S = np.zeros((4, 4,), dtype=s.dtype)
+    if not isinstance(s, np.ndarray):
+        s = np.asarray(s)
+
+    if out is None:
+        S = np.zeros((4, 4,), dtype=s.dtype)
+    else:
+        S = out
+        S.fill(0.0)
+
     S[0, 0] = s[0]
     S[1, 1] = s[1]
     S[2, 2] = s[2]
@@ -421,7 +457,7 @@ def scaleMatrix(s):
     return S
 
 
-def rotationMatrix(angle, axis):
+def rotationMatrix(angle, axis, out=None):
     """Create a rotation matrix.
 
     The resulting matrix will rotate points about `axis` by `angle`. The
@@ -433,6 +469,8 @@ def rotationMatrix(angle, axis):
         Rotation angle in degrees.
     axis : ndarray, list, or tuple of float
         Axis vector components.
+    out : ndarray, optional
+        Optional output array.
 
     Returns
     -------
@@ -454,7 +492,12 @@ def rotationMatrix(angle, axis):
     x, y, z = axis
     cd = 1.0 - c
 
-    R = np.zeros((4, 4,), dtype=axis.dtype)
+    if out is None:
+        R = np.zeros((4, 4,), dtype=axis.dtype)
+    else:
+        R = out
+        R.fill(0.0)
+
     R[0, 0] = x2 * cd + c
     R[0, 1] = x * y * cd - zs
     R[0, 2] = x * z * cd + ys
@@ -472,7 +515,7 @@ def rotationMatrix(angle, axis):
     return R + 0.0  # remove negative zeros
 
 
-def translationMatrix(t):
+def translationMatrix(t, out=None):
     """Create a translation matrix.
 
     The resulting matrix is the same as generated by a `glTranslate` call.
@@ -481,6 +524,8 @@ def translationMatrix(t):
     ----------
     t : ndarray, tuple, or list of float
         Translation vector [tx, ty, tz].
+    out : ndarray, optional
+        Optional output array.
 
     Returns
     -------
@@ -488,8 +533,16 @@ def translationMatrix(t):
         4x4 translation matrix in row-major order.
 
     """
-    t = np.asarray(t)
-    T = np.identity(4, dtype=t.dtype)
+    if not isinstance(t, np.ndarray):
+        t = np.asarray(t)
+
+    if out is None:
+        T = np.identity(4, dtype=t.dtype)
+    else:
+        T = out
+        T.fill(0.0)
+        T[0, 0] = T[1, 1] = T[2, 2] = T[3, 3] = 1.0
+
     T[:3, 3] = t
 
     return T
@@ -517,7 +570,6 @@ def concatenate(*args, out=None):
     -------
     ndarray
         Concatenation of input matrices as a 4x4 matrix in row-major order.
-        `None` is returned if `out` was specified.
 
     Examples
     --------
@@ -591,8 +643,7 @@ def concatenate(*args, out=None):
     for mat in args:
         np.matmul(np.asarray(mat, dtype=use_dtype), toReturn, out=toReturn)
 
-    if out is None:
-        return toReturn
+    return toReturn
 
 
 def applyMatrix(m, points, out=None):
@@ -697,3 +748,16 @@ def poseToMatrix(pos, ori, out=None):
     if out is None:
         return toReturn
 
+
+if __name__ == "__main__":
+    q0fp32 = np.asarray([4, 3, 2, 1], dtype='float32')
+    q1fp32 = np.asarray([1, 2, 3, 4], dtype='float32')
+    out = np.zeros((4,), dtype=np.float32)
+
+    slerp(q0fp32, q1fp32, 0.5, out)
+    print(out)
+
+    q0fp64 = np.asarray([1, 2, 3, 4], dtype='float64')
+    q1fp64 = np.asarray([4, 3, 2, 1], dtype='float64')
+
+    result = slerp(q0fp64, q1fp64, 0.5)
