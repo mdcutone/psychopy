@@ -363,7 +363,7 @@ def matrixFromQuat(q, out=None):
     Returns
     -------
     ndarray or None
-        4x4 rotation matrix in row-major order. 
+        4x4 rotation matrix in row-major order.
 
     Examples
     --------
@@ -440,8 +440,9 @@ def scaleMatrix(s, out=None):
 
     """
     # from glScale
+    dtype = np.float64 if out is None else out.dtype
     if not isinstance(s, np.ndarray):
-        s = np.asarray(s)
+        s = np.asarray(s, dtype=dtype)
 
     if out is None:
         S = np.zeros((4, 4,), dtype=s.dtype)
@@ -533,8 +534,9 @@ def translationMatrix(t, out=None):
         4x4 translation matrix in row-major order.
 
     """
+    dtype = np.float64 if out is None else out.dtype
     if not isinstance(t, np.ndarray):
-        t = np.asarray(t)
+        t = np.asarray(t, dtype=dtype)
 
     if out is None:
         T = np.identity(4, dtype=t.dtype)
@@ -632,16 +634,16 @@ def concatenate(*args, out=None):
         pointClipSpace = np.matmul(MVP, pointModel.T)
 
     """
+    dtype = args[0].dtype if out is None else out.dtype
     if out is None:
-        toReturn = np.identity(4)
-        use_dtype = toReturn.dtype
+        toReturn = np.identity(4, dtype=dtype)
     else:
-        use_dtype = out.dtype
-        out[:, :] = np.identity(4, dtype=use_dtype)
+        out[:, :] = np.identity(4, dtype=dtype)  # clear output
         toReturn = out
 
     for mat in args:
-        np.matmul(np.asarray(mat, dtype=use_dtype), toReturn, out=toReturn)
+        # force all matrices to have the same dtype
+        np.matmul(np.asarray(mat, dtype=dtype), toReturn, out=toReturn)
 
     return toReturn
 
@@ -663,8 +665,8 @@ def applyMatrix(m, points, out=None):
 
     Returns
     -------
-    ndarray or None
-        Transformed points. If `None` if `out` was specified.
+    ndarray
+        Transformed points.
 
     Examples
     --------
@@ -690,22 +692,25 @@ def applyMatrix(m, points, out=None):
         applyMatrix(M3x3, points, out=outPoints)
 
     """
-    m = np.asarray(m)
-    points = np.asarray(points)
+    dtype = np.float64 if out is None else out.dtype
+    if not isinstance(m, np.ndarray):
+        m = np.asarray(m, dtype=dtype)
+
+    if not isinstance(points, np.ndarray):
+        points = np.asarray(points, dtype=dtype)
+
     assert points.ndim == 2
 
     if out is None:
-        toReturn = np.zeros(points.shape, dtype=points.dtype)
+        toReturn = np.zeros_like(points)
     else:
         # make sure we have the same dtype as the input
         assert out.dtype == points.dtype and out.shape == points.shape
         toReturn = out
 
     np.dot(points, m.T, out=toReturn)
-    # toReturn[:, :] = points.dot(m.T)
 
-    if out is None:
-        return toReturn
+    return toReturn
 
 
 def poseToMatrix(pos, ori, out=None):
@@ -728,36 +733,36 @@ def poseToMatrix(pos, ori, out=None):
     Returns
     -------
     ndarray
-        4x4 transformation matrix. Returns `None` if `out` is specified.
+        4x4 transformation matrix.
+
+    Notes
+    -----
+    * If `out` is specified, vectors `pos` and `ori` will be converted to
+      arrays with matching dtype.
 
     """
-    if out is None:
-        use_dtype = pos.dtype
-        toReturn = np.zeros((4, 4,), dtype=use_dtype)
-    else:
-        use_dtype = out.dtype
-        toReturn = out
+    dtype = np.float64 if out is None else out.dtype
+    if not isinstance(pos, np.ndarray):
+        pos = np.asarray(pos, dtype=dtype)
 
-    pos = np.asarray(pos, dtype=use_dtype)
-    ori = np.asarray(ori, dtype=use_dtype)
+    if not isinstance(ori, np.ndarray):
+        ori = np.asarray(ori, dtype=dtype)
+
     transMat = translationMatrix(pos)
     rotMat = matrixFromQuat(ori)
 
-    np.matmul(rotMat, transMat, out=toReturn)
+    if out is not None:
+        return np.matmul(rotMat, transMat, out=out)
 
-    if out is None:
-        return toReturn
+    return np.matmul(rotMat, transMat)
 
 
 if __name__ == "__main__":
-    q0fp32 = np.asarray([4, 3, 2, 1], dtype='float32')
-    q1fp32 = np.asarray([1, 2, 3, 4], dtype='float32')
-    out = np.zeros((4,), dtype=np.float32)
+    q = np.asarray([0., 0., 0., 1.], dtype='float32')
+    pos = np.asarray([1., 2., 3.], dtype='float32')
 
-    slerp(q0fp32, q1fp32, 0.5, out)
-    print(out)
+    m = np.zeros((4, 4,), dtype='float32')
 
-    q0fp64 = np.asarray([1, 2, 3, 4], dtype='float64')
-    q1fp64 = np.asarray([4, 3, 2, 1], dtype='float64')
+    print(poseToMatrix(pos, q))
 
-    result = slerp(q0fp64, q1fp64, 0.5)
+    print(id(m) == id(poseToMatrix(pos, q)))
