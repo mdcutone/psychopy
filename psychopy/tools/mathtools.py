@@ -105,7 +105,7 @@ def lerp(v0, v1, t, out=None, dtype=None):
     v0, v1 = np.atleast_2d(v0, v1)
 
     ncols = v0.shape[1]
-    t0 = np.dtype(dtype).type(1.0) - t
+    t0 = dtype(1.0) - t
     for i in range(ncols):
         toReturn[:, i] = t0 * v0[:, i] + t * v1[:, i]
 
@@ -441,7 +441,7 @@ def matrixFromQuat(q, out=None, dtype=None):
     b, c, d, a = q[:]
     vsqr = np.square(q)
 
-    u = np.dtype(dtype).type(2.0)
+    u = dtype(2.0)
     R[0, 0] = vsqr[3] + vsqr[0] - vsqr[1] - vsqr[2]
     R[1, 0] = u * (b * c + a * d)
     R[2, 0] = u * (b * d - a * c)
@@ -548,7 +548,7 @@ def rotationMatrix(angle, axis, out=None, dtype=None):
     xs, ys, zs = axis * s
     x2, y2, z2 = np.square(axis)  # type inferred by input
     x, y, z = axis
-    cd = np.dtype(dtype).type(1.0) - c
+    cd = dtype(1.0) - c
 
     R[0, 0] = x2 * cd + c
     R[0, 1] = x * y * cd - zs
