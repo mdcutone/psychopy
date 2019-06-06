@@ -191,7 +191,7 @@ def quatToAxisAngle(q, degrees=False, dtype=None):
         Quaternion in form [x, y, z, w] where w is real and x, y, z
         are imaginary components.
     degrees : bool
-        Indicate `angle` is to returned in degrees, otherwise `angle` will be
+        Indicate `angle` is to be returned in degrees, otherwise `angle` will be
         returned in radians.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
@@ -226,7 +226,7 @@ def quatToAxisAngle(q, degrees=False, dtype=None):
     q = normalize(q, dtype=dtype)  # returns ndarray
     v = np.sqrt(np.sum(np.square(q[:3])))
     axis = q[:3] / v
-    angle = np.dtype(dtype).type(2.0) * np.arctan2(v, q[3])
+    angle = dtype(2.0) * np.arctan2(v, q[3])
     axis += 0.0
 
     return axis, np.degrees(angle) if degrees else angle
