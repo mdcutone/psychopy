@@ -9,9 +9,9 @@ posing, rendering, etc.)
 
 Warning
 ~~~~~~~
-Sub-routines used by functions here will perform arithmetic using the highest
-floating-point precision of the provided input arguments. Vectors provided as
-Python lists and tuples will be coerced into 64-bit floating-point arrays.
+Sub-routines used by functions here will perform arithmetic using 64-bit
+floating-point precision unless otherwise specified. Arrays passed to functions
+will be automatically coerced to matching data types.
 
 .. automodule:: psychopy.tools.mathtools
 .. currentmodule:: psychopy.tools.mathtools
