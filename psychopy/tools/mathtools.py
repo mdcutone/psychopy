@@ -16,13 +16,17 @@ __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
 import numpy as np
 
 
-def normalize(v, out=None):
+def normalize(v, out=None, dtype=None):
     """Normalize a vector or quaternion.
 
     v : tuple, list or ndarray of float
         Vector to normalize.
     out : ndarray, optional
         Optional output array.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
 
     Returns
     -------
@@ -35,16 +39,16 @@ def normalize(v, out=None):
       returned.
 
     """
-    if not isinstance(v, np.ndarray):
-        v = np.asarray(v)
 
     if out is None:
-        toReturn = np.zeros_like(v)
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        toReturn = np.zeros_like(v, dtype=dtype)
     else:
+        dtype = out.dtype
         toReturn = out
 
-    toReturn[:] = v
-    norm = np.linalg.norm(v)
+    toReturn[:] = np.asarray(v, dtype=dtype)
+    norm = np.linalg.norm(toReturn)
     if norm == 1.0:  # already normalized
         return toReturn
     elif norm != 0.0:
@@ -53,7 +57,7 @@ def normalize(v, out=None):
     return toReturn
 
 
-def lerp(v0, v1, t, out=None):
+def lerp(v0, v1, t, out=None, dtype=None):
     """Linear interpolation (LERP) between two vectors/coordinates.
 
     Parameters
@@ -66,6 +70,10 @@ def lerp(v0, v1, t, out=None):
         Interpolation weight factor [0, 1].
     out : ndarray, optional
         Optional output array. Must have the same `shape` and `dtype` as `v0`.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
 
     Returns
     -------
@@ -81,30 +89,30 @@ def lerp(v0, v1, t, out=None):
         midpoint = lerp(u, v, 0.5)  # 0.5 to interpolate half-way between points
 
     """
-    if not isinstance(v0, np.ndarray):
-        v0 = np.asarray(v0)
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        toReturn = np.zeros_like(v0, dtype=dtype)
+    else:
+        dtype = out.dtype
+        toReturn = out
 
-    if not isinstance(v1, np.ndarray):
-        v1 = np.asarray(v1)
+    t = np.dtype(dtype).type(t)
+    v0 = np.asarray(v0, dtype=dtype)
+    v1 = np.asarray(v1, dtype=dtype)
 
     assert v0.shape == v1.shape  # make sure the inputs have the same dims
     origShape = v0.shape
     v0, v1 = np.atleast_2d(v0, v1)
 
-    if out is None:
-        toReturn = np.zeros_like(v0)
-    else:
-        toReturn = out
-
     ncols = v0.shape[1]
-    t0 = 1.0 - t
-    toReturn[:, 0:ncols] = t0 * v0[:, 0:ncols] + t * v1[:, 0:ncols]
+    t0 = np.dtype(dtype).type(1.0) - t
+    for i in range(ncols):
+        toReturn[:, i] = t0 * v0[:, i] + t * v1[:, i]
 
-    if out is None:
-        return np.reshape(toReturn, origShape)
+    return np.reshape(toReturn, origShape)
 
 
-def slerp(q0, q1, t, out=None):
+def slerp(q0, q1, t, out=None, dtype=None):
     """Spherical linear interpolation (SLERP) between two quaternions.
 
     Interpolation occurs along the shortest arc between the initial and final
@@ -122,6 +130,10 @@ def slerp(q0, q1, t, out=None):
         Interpolation weight factor [0, 1].
     out : ndarray, optional
         Optional output array.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
 
     Returns
     -------
@@ -138,12 +150,15 @@ def slerp(q0, q1, t, out=None):
     #  https://en.wikipedia.org/wiki/Slerp
     #
     if out is None:
-        toReturn = np.zeros((4,))
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        toReturn = np.zeros((4,), dtype=dtype)
     else:
+        dtype = out.dtype
         toReturn = out
 
-    q0 = normalize(q0)
-    q1 = normalize(q1)
+    q0 = normalize(q0, dtype=dtype)
+    q1 = normalize(q1, dtype=dtype)
+    t = dtype(t)
 
     dot = np.dot(q0, q1)
     if dot < 0.0:
@@ -151,7 +166,7 @@ def slerp(q0, q1, t, out=None):
         dot = -dot
 
     if dot > 0.9995:  # small angle, use linear interpolation instead
-        toReturn[:] = normalize(q0 + t * (q1 - q0))
+        toReturn[:] = normalize(q0 + t * (q1 - q0), dtype=dtype)
     else:
         theta0 = np.arccos(dot)
         theta = theta0 * t
@@ -164,7 +179,7 @@ def slerp(q0, q1, t, out=None):
     return toReturn
 
 
-def quatToAxisAngle(q, degrees=False):
+def quatToAxisAngle(q, degrees=False, dtype=None):
     """Convert a quaternion to `axis` and `angle` representation.
 
     This allows you to use quaternions to set the orientation of stimuli that
@@ -178,6 +193,10 @@ def quatToAxisAngle(q, degrees=False):
     degrees : bool
         Indicate `angle` is to returned in degrees, otherwise `angle` will be
         returned in radians.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
 
     Returns
     -------
@@ -203,15 +222,17 @@ def quatToAxisAngle(q, degrees=False):
         myStim.draw()
 
     """
-    q = normalize(q)
+    dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    q = normalize(q, dtype=dtype)  # returns ndarray
     v = np.sqrt(np.sum(np.square(q[:3])))
-    axis = (q[:3] / v) + 0.0
-    angle = 2.0 * np.arctan2(v, q[3])
+    axis = q[:3] / v
+    angle = np.dtype(dtype).type(2.0) * np.arctan2(v, q[3])
+    axis += 0.0
 
     return axis, np.degrees(angle) if degrees else angle
 
 
-def quatFromAxisAngle(axis, angle, degrees=False, out=None):
+def quatFromAxisAngle(axis, angle, degrees=False, dtype=None):
     """Create a quaternion to represent a rotation about `axis` vector by
     `angle`.
 
@@ -225,8 +246,9 @@ def quatFromAxisAngle(axis, angle, degrees=False, out=None):
     degrees : bool
         Indicate `angle` is in degrees, otherwise `angle` will be treated as
         radians.
-    out : ndarray, optional
-        Optional output array.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, 'float64' is used.
 
     Returns
     -------
@@ -242,13 +264,15 @@ def quatFromAxisAngle(axis, angle, degrees=False, out=None):
         ori = quatFromAxisAngle(axis, angle, degrees=True)  # using degrees!
 
     """
-    if out is None:
-        toReturn = np.zeros((4,))
-    else:
-        toReturn = out
+    dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    toReturn = np.zeros((4,), dtype=dtype)
 
-    halfRad = np.radians(float(angle)) / 2.0 if degrees else float(angle) / 2.0
-    axis = normalize(axis)
+    if degrees:
+        halfRad = np.radians(angle, dtype=dtype) / dtype(2.0)
+    else:
+        halfRad = np.dtype(dtype).type(angle) / dtype(2.0)
+
+    axis = normalize(axis, dtype=dtype)
     np.multiply(axis, np.sin(halfRad), out=toReturn[:3])
     toReturn[3] = np.cos(halfRad)
     toReturn += 0.0  # remove negative zeros
@@ -256,7 +280,7 @@ def quatFromAxisAngle(axis, angle, degrees=False, out=None):
     return toReturn
 
 
-def multQuat(q0, q1, out=None):
+def multQuat(q0, q1, out=None, dtype=None):
     """Multiply quaternion `q0` and `q1`.
 
     The orientation of the returned quaternion is the combination of the input
@@ -269,6 +293,10 @@ def multQuat(q0, q1, out=None):
         are imaginary components.
     out : ndarray, optional
         Alternative array to write values.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
 
     Returns
     -------
@@ -281,13 +309,15 @@ def multQuat(q0, q1, out=None):
     * Quaternions are normalized prior to multiplication.
 
     """
-    q0 = normalize(q0)
-    q1 = normalize(q1)
-
     if out is None:
-        qr = np.zeros_like(q0)
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        qr = np.zeros((4,), dtype=dtype)
     else:
+        dtype = out.dtype
         qr = out
+
+    q0 = normalize(q0, dtype=dtype)
+    q1 = normalize(q1, dtype=dtype)
 
     qr[:3] = np.cross(q0[:3], q1[:3]) + q0[:3] * q1[3] + q1[:3] * q0[3]
     qr[3] = q0[3] * q1[3] - q0[:3].dot(q1[:3])
@@ -295,7 +325,7 @@ def multQuat(q0, q1, out=None):
     return qr
 
 
-def invertQuat(q, out=None):
+def invertQuat(q, out=None, dtype=None):
     """Get tht multiplicative inverse of a quaternion.
 
     This gives a quaternion which rotates in the opposite direction with equal
@@ -309,6 +339,10 @@ def invertQuat(q, out=None):
         are imaginary components.
     out : ndarray, optional
         Alternative length 4 1-D array to write values.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
 
     Returns
     -------
@@ -333,12 +367,14 @@ def invertQuat(q, out=None):
     * Quaternions are normalized prior to inverting.
 
     """
-    qn = normalize(q)
-
     if out is None:
-        toReturn = np.zeros((4,), dtype=qn.dtype)
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        toReturn = np.zeros((4,), dtype=dtype)
     else:
+        dtype = out.dtype
         toReturn = out
+
+    qn = normalize(q, dtype=dtype)  # normalized copy
 
     # conjugate the quaternion
     toReturn[:3] = -qn[:3]
@@ -348,7 +384,7 @@ def invertQuat(q, out=None):
     return toReturn
 
 
-def matrixFromQuat(q, out=None):
+def matrixFromQuat(q, out=None, dtype=None):
     """Create a rotation matrix from a quaternion.
 
     Parameters
@@ -359,6 +395,10 @@ def matrixFromQuat(q, out=None):
     out : ndarray or None
         Alternative array to write values. Must be `shape` == (4,4,) and same
         `dtype` as the `dtype` argument.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
 
     Returns
     -------
@@ -389,39 +429,38 @@ def matrixFromQuat(q, out=None):
     """
     # based off implementations from
     # https://github.com/glfw/glfw/blob/master/deps/linmath.h
-    q = normalize(q)
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        R = np.zeros((4, 4,), dtype=dtype)
+    else:
+        dtype = out.dtype
+        R = out
+        R.fill(0.0)
+
+    q = normalize(q, dtype=dtype)
     b, c, d, a = q[:]
     vsqr = np.square(q)
 
-    if out is None:
-        R = np.zeros((4, 4,), dtype=q.dtype)
-    else:
-        R = out
-
+    u = np.dtype(dtype).type(2.0)
     R[0, 0] = vsqr[3] + vsqr[0] - vsqr[1] - vsqr[2]
-    R[1, 0] = 2.0 * (b * c + a * d)
-    R[2, 0] = 2.0 * (b * d - a * c)
-    R[3, 0] = 0.0
+    R[1, 0] = u * (b * c + a * d)
+    R[2, 0] = u * (b * d - a * c)
 
-    R[0, 1] = 2.0 * (b * c - a * d)
+    R[0, 1] = u * (b * c - a * d)
     R[1, 1] = vsqr[3] - vsqr[0] + vsqr[1] - vsqr[2]
-    R[2, 1] = 2.0 * (c * d + a * b)
-    R[3, 1] = 0.0
+    R[2, 1] = u * (c * d + a * b)
 
-    R[0, 2] = 2.0 * (b * d + a * c)
-    R[1, 2] = 2.0 * (c * d - a * b)
+    R[0, 2] = u * (b * d + a * c)
+    R[1, 2] = u * (c * d - a * b)
     R[2, 2] = vsqr[3] - vsqr[0] - vsqr[1] + vsqr[2]
-    R[3, 2] = 0.0
 
-    R[:3, 3] = 0.0
     R[3, 3] = 1.0
-
-    R += 0.0  # remove negative zeros
+    R[:, :] += 0.0  # remove negative zeros
 
     return R
 
 
-def scaleMatrix(s, out=None):
+def scaleMatrix(s, out=None, dtype=None):
     """Create a scaling matrix.
 
     The resulting matrix is the same as a generated by a `glScale` call.
@@ -432,6 +471,10 @@ def scaleMatrix(s, out=None):
         Scaling factors [sx, sy, sz].
     out : ndarray, optional
         Optional output array.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
 
     Returns
     -------
@@ -440,15 +483,15 @@ def scaleMatrix(s, out=None):
 
     """
     # from glScale
-    dtype = np.float64 if out is None else out.dtype
-    if not isinstance(s, np.ndarray):
-        s = np.asarray(s, dtype=dtype)
-
     if out is None:
-        S = np.zeros((4, 4,), dtype=s.dtype)
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        S = np.zeros((4, 4,), dtype=dtype)
     else:
+        dtype = out.dtype
         S = out
         S.fill(0.0)
+
+    s = np.asarray(s, dtype=dtype)
 
     S[0, 0] = s[0]
     S[1, 1] = s[1]
@@ -458,7 +501,7 @@ def scaleMatrix(s, out=None):
     return S
 
 
-def rotationMatrix(angle, axis, out=None):
+def rotationMatrix(angle, axis, out=None, dtype=None):
     """Create a rotation matrix.
 
     The resulting matrix will rotate points about `axis` by `angle`. The
@@ -471,33 +514,41 @@ def rotationMatrix(angle, axis, out=None):
     axis : ndarray, list, or tuple of float
         Axis vector components.
     out : ndarray, optional
-        Optional output array.
+        Optional 4x4 output array. All computations will use the data type of
+        this array.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
 
     Returns
     -------
     ndarray
-        4x4 scaling matrix in row-major order.
+        4x4 scaling matrix in row-major order. Will be the same array as `out`
+        if specified, if not, a new array will be allocated.
 
     Notes
     -----
     * Vector `axis` is normalized before creating the matrix.
 
     """
-    axis = normalize(axis)
-    angle = np.radians(angle)
-    c = np.cos(angle)
-    s = np.sin(angle)
-
-    xs, ys, zs = axis * s
-    x2, y2, z2 = np.square(axis)
-    x, y, z = axis
-    cd = 1.0 - c
-
     if out is None:
-        R = np.zeros((4, 4,), dtype=axis.dtype)
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        R = np.zeros((4, 4,), dtype=dtype)
     else:
+        dtype = out.dtype
         R = out
         R.fill(0.0)
+
+    axis = normalize(axis, dtype=dtype)
+    angle = np.radians(angle, dtype=dtype)
+    c = np.cos(angle, dtype=dtype)
+    s = np.sin(angle, dtype=dtype)
+
+    xs, ys, zs = axis * s
+    x2, y2, z2 = np.square(axis)  # type inferred by input
+    x, y, z = axis
+    cd = np.dtype(dtype).type(1.0) - c
 
     R[0, 0] = x2 * cd + c
     R[0, 1] = x * y * cd - zs
@@ -512,11 +563,12 @@ def rotationMatrix(angle, axis, out=None):
     R[2, 2] = z2 * cd + c
 
     R[3, 3] = 1.0
+    R[:, :] += 0.0  # remove negative zeros
 
-    return R + 0.0  # remove negative zeros
+    return R
 
 
-def translationMatrix(t, out=None):
+def translationMatrix(t, out=None, dtype=None):
     """Create a translation matrix.
 
     The resulting matrix is the same as generated by a `glTranslate` call.
@@ -526,31 +578,35 @@ def translationMatrix(t, out=None):
     t : ndarray, tuple, or list of float
         Translation vector [tx, ty, tz].
     out : ndarray, optional
-        Optional output array.
+        Optional 4x4 output array. All computations will use the data type of
+        this array.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not
+        specified, the default is 'float64'.
 
     Returns
     -------
     ndarray
-        4x4 translation matrix in row-major order.
+        4x4 translation matrix in row-major order. Will be the same array as
+        `out` if specified, if not, a new array will be allocated.
 
     """
-    dtype = np.float64 if out is None else out.dtype
-    if not isinstance(t, np.ndarray):
-        t = np.asarray(t, dtype=dtype)
-
     if out is None:
-        T = np.identity(4, dtype=t.dtype)
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        T = np.identity(4, dtype=dtype)
     else:
+        dtype = out.dtype
         T = out
         T.fill(0.0)
-        T[0, 0] = T[1, 1] = T[2, 2] = T[3, 3] = 1.0
+        np.fill_diagonal(T, 1.0)
 
-    T[:3, 3] = t
+    T[:3, 3] = np.asarray(t, dtype=dtype)
 
     return T
 
 
-def concatenate(*args, out=None):
+def concatenate(*args, out=None, dtype=None):
     """Concatenate matrix transformations.
 
     Combine transformation matrices into a single matrix. This is similar to
@@ -559,14 +615,21 @@ def concatenate(*args, out=None):
     right-to-left, or the last argument to first. Note that changing the order
     of the input matrices changes the final result.
 
+    The data types of input matrices are coerced to match that of `out` or
+    `dtype`. For performance reasons, it is best that all arrays passed to this
+    function should have matching data types.
+
     Parameters
     ----------
     *args
         4x4 matrices to combine of type `ndarray`. Matrices are multiplied from
         right-to-left.
-    out : ndarray
-        Optional 4x4 output array. All computations will use the data type of
-        this array.
+    out : ndarray, optional
+        Optional 4x4 output array.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
 
     Returns
     -------
@@ -634,21 +697,23 @@ def concatenate(*args, out=None):
         pointClipSpace = np.matmul(MVP, pointModel.T)
 
     """
-    dtype = args[0].dtype if out is None else out.dtype
     if out is None:
-        toReturn = np.identity(4, dtype=dtype)
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        toReturn = np.identity(4, dtype=dtype)  # glLoadIdentity
     else:
-        out[:, :] = np.identity(4, dtype=dtype)  # clear output
+        dtype = out.dtype
         toReturn = out
+        toReturn.fill(0.0)
+        np.fill_diagonal(toReturn, 1.0)
 
     for mat in args:
-        # force all matrices to have the same dtype
+        # force all matrices to have the same dtype as out
         np.matmul(np.asarray(mat, dtype=dtype), toReturn, out=toReturn)
 
     return toReturn
 
 
-def applyMatrix(m, points, out=None):
+def applyMatrix(m, points, out=None, dtype=None):
     """Apply a transformation matrix over a 2D array of points.
 
     Parameters
@@ -662,6 +727,10 @@ def applyMatrix(m, points, out=None):
     out : ndarray, optional
         Optional output array to write values. Must be same `shape` and `dtype`
         as `points`.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not
+        specified, the default is 'float64'.
 
     Returns
     -------
@@ -692,28 +761,22 @@ def applyMatrix(m, points, out=None):
         applyMatrix(M3x3, points, out=outPoints)
 
     """
-    dtype = np.float64 if out is None else out.dtype
-    if not isinstance(m, np.ndarray):
-        m = np.asarray(m, dtype=dtype)
-
-    if not isinstance(points, np.ndarray):
-        points = np.asarray(points, dtype=dtype)
-
-    assert points.ndim == 2
-
     if out is None:
-        toReturn = np.zeros_like(points)
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        toReturn = np.zeros_like(points, dtype=dtype)
     else:
-        # make sure we have the same dtype as the input
-        assert out.dtype == points.dtype and out.shape == points.shape
         toReturn = out
 
+    m = np.asarray(m, dtype=dtype)
+    points = np.asarray(points, dtype=dtype)
+
+    assert points.ndim == 2
     np.dot(points, m.T, out=toReturn)
 
     return toReturn
 
 
-def poseToMatrix(pos, ori, out=None):
+def poseToMatrix(pos, ori, out=None, dtype=None):
     """Convert a pose to a 4x4 transformation matrix.
 
     A pose is represented by a position coordinate `pos` and orientation
@@ -729,40 +792,28 @@ def poseToMatrix(pos, ori, out=None):
     out : ndarray, optional
         Optional output array for 4x4 matrix. All computations will use the data
         type of this array.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not
+        specified, the default is 'float64'.
 
     Returns
     -------
     ndarray
         4x4 transformation matrix.
 
-    Notes
-    -----
-    * If `out` is specified, vectors `pos` and `ori` will be converted to
-      arrays with matching dtype.
-
     """
-    dtype = np.float64 if out is None else out.dtype
-    if not isinstance(pos, np.ndarray):
-        pos = np.asarray(pos, dtype=dtype)
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        toReturn = np.zeros((4, 4,), dtype=dtype)
+    else:
+        toReturn = out
 
-    if not isinstance(ori, np.ndarray):
-        ori = np.asarray(ori, dtype=dtype)
-
-    transMat = translationMatrix(pos)
-    rotMat = matrixFromQuat(ori)
+    transMat = translationMatrix(pos, dtype=dtype)
+    rotMat = matrixFromQuat(ori, dtype=dtype)
 
     if out is not None:
-        return np.matmul(rotMat, transMat, out=out)
+        return np.matmul(rotMat, transMat, out=toReturn)
 
     return np.matmul(rotMat, transMat)
 
-
-if __name__ == "__main__":
-    q = np.asarray([0., 0., 0., 1.], dtype='float32')
-    pos = np.asarray([1., 2., 3.], dtype='float32')
-
-    m = np.zeros((4, 4,), dtype='float32')
-
-    print(poseToMatrix(pos, q))
-
-    print(id(m) == id(poseToMatrix(pos, q)))
