@@ -371,7 +371,7 @@ def invertQuat(q, out=None, dtype=None):
     q : ndarray, list, or tuple of float
         Quaternion to invert in form [x, y, z, w] where w is real and x, y, z
         are imaginary components. If `q` is 2D (Nx4), each row is treated as a
-        seperate quaternion and inverted.
+        separate quaternion and inverted.
     out : ndarray, optional
         Alternative array to write values. Must have the same shape as `q`.
     dtype : dtype or str, optional
@@ -414,7 +414,7 @@ def invertQuat(q, out=None, dtype=None):
     # conjugate the quaternion
     qinv[:, :3] = -qn[:, :3]
     qinv[:, 3] = qn[:, 3]
-    qinv /= np.sum(np.square(qn), axis=1)[:, np.newaxis]
+    qinv /= np.sqrt(np.sum(np.square(qn), axis=1)[:, np.newaxis])
     qinv += 0.0  # remove negative zeros
 
     return toReturn
