@@ -19,10 +19,11 @@ import numpy as np
 def normalize(v, out=None, dtype=None):
     """Normalize a vector or quaternion.
 
-    v : tuple, list or ndarray of float
-        Vector to normalize.
+    v : ndarray
+        Vector to normalize. If a 2D array is specified, rows are treated as
+        separate vectors.
     out : ndarray, optional
-        Optional output array.
+        Optional output array. Must have same shape as `v`.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -38,21 +39,37 @@ def normalize(v, out=None, dtype=None):
     * If the vector is degenerate (length is zero), a vector of all zeros is
       returned.
 
-    """
+    Examples
+    --------
+    Normalize a vector::
 
+        v = [1., 2., 3., 4.]
+        vn = normalize(v)
+
+    The `normalize` function is vectorized. It's considerably faster to
+    normalize large arrays of vectors than to call `normalize` separately for
+    each one::
+
+        v = np.random.uniform(-1.0, 1.0, (1000, 4,))  # 1000 length 4 vectors
+        vn = np.zeros((1000, 4))  # place to write values
+        normalize(v, out=vn)  # very fast!
+
+        # don't do this!
+        for i in range(1000):
+            vn[i, :] = normalize(v[i, :])
+
+    """
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.zeros_like(v, dtype=dtype)
+        toReturn = np.asarray(v, dtype=dtype)
     else:
-        dtype = out.dtype
         toReturn = out
 
-    toReturn[:] = np.asarray(v, dtype=dtype)
-    norm = np.linalg.norm(toReturn)
-    if norm == 1.0:  # already normalized
-        return toReturn
-    elif norm != 0.0:
-        toReturn /= norm
+    v2d = np.atleast_2d(toReturn)  # 2d view of array
+    norm = np.linalg.norm(v2d, axis=1)
+    norm[norm == 0.0] = np.NaN  # make sure if length==0 division succeeds
+    v2d /= norm[:, np.newaxis]
+    np.nan_to_num(v2d, copy=False)  # fix NaNs
 
     return toReturn
 
