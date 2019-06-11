@@ -346,6 +346,7 @@ def multQuat(q0, q1, out=None, dtype=None):
     qr[:, :3] += q1[:, :3] * np.expand_dims(q0[:, 3], axis=1)
     qr[:, 3] = q0[:, 3] * q1[:, 3]
     qr[:, 3] -= np.sum(q0[:, :3] * q1[:, :3], axis=1)  # dot product
+    qr += 0.0
 
     return toReturn
 
@@ -394,17 +395,18 @@ def invertQuat(q, out=None, dtype=None):
     """
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.zeros((4,), dtype=dtype)
+        toReturn = np.zeros(q.shape, dtype=dtype)
     else:
-        dtype = out.dtype
+        dtype = np.dtype(out.dtype).type
         toReturn = out
 
-    qn = normalize(q, dtype=dtype)  # normalized copy
+    qn, qinv = np.atleast_2d(normalize(q, dtype=dtype), toReturn)
 
     # conjugate the quaternion
-    toReturn[:3] = -qn[:3]
-    toReturn[3] = qn[3]
-    toReturn /= np.sqrt(np.sum(np.square(qn)))
+    qinv[:, :3] = -qn[:, :3]
+    qinv[:, 3] = qn[:, 3]
+    qinv /= np.sum(np.square(qn), axis=1)[:, np.newaxis]
+    qinv += 0.0  # remove negative zeros
 
     return toReturn
 
