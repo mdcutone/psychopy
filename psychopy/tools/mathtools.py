@@ -326,6 +326,14 @@ def multQuat(q0, q1, out=None, dtype=None):
     -----
     * Quaternions are normalized prior to multiplication.
 
+    Examples
+    --------
+    Combine the orientations of two quaternions::
+
+        a = quatFromAxisAngle([0., 0., -1.], 45.0, degrees=True)
+        b = quatFromAxisAngle([0., 0., -1.], 90.0, degrees=True)
+        c = multQuat(a, b)  # rotates 135 degrees about -Z axis
+
     """
     assert q0.shape == q1.shape
     if out is None:
@@ -362,9 +370,10 @@ def invertQuat(q, out=None, dtype=None):
     ----------
     q : ndarray, list, or tuple of float
         Quaternion to invert in form [x, y, z, w] where w is real and x, y, z
-        are imaginary components.
+        are imaginary components. If `q` is 2D (Nx4), each row is treated as a
+        seperate quaternion and inverted.
     out : ndarray, optional
-        Alternative length 4 1-D array to write values.
+        Alternative array to write values. Must have the same shape as `q`.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -460,7 +469,7 @@ def matrixFromQuat(q, out=None, dtype=None):
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
         R = np.zeros((4, 4,), dtype=dtype)
     else:
-        dtype = out.dtype
+        dtype = np.dtype(out.dtype).type
         R = out
         R.fill(0.0)
 
