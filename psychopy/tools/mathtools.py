@@ -126,11 +126,8 @@ def lerp(v0, v1, t, out=None, dtype=None):
     return toReturn
 
 
-def slerp(q0, q1, t, out=None, dtype=None):
+def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
     """Spherical linear interpolation (SLERP) between two quaternions.
-
-    Interpolation occurs along the shortest arc between the initial and final
-    quaternion.
 
     The behaviour of this function depends on the types of arguments:
 
@@ -149,9 +146,13 @@ def slerp(q0, q1, t, out=None, dtype=None):
         Final quaternion in form [x, y, z, w] where w is real and x, y, z
         are imaginary components.
     t : float
-        Interpolation weight factor [0, 1].
+        Interpolation weight factor within interval 0.0 and 1.0.
+    shortest : bool, optional
+        Ensure interpolation occurs along the shortest arc along the 4-D
+        hypersphere (default is `True`).
     out : ndarray, optional
-        Optional output array.
+        Optional output array. Must be same shape as the expected returned array
+        if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -161,6 +162,15 @@ def slerp(q0, q1, t, out=None, dtype=None):
     -------
     ndarray
         Quaternion [x, y, z, w] at `t`.
+
+    Examples
+    --------
+    Interpolate between two orientations::
+
+        q0 = quatFromAxisAngle([0., 0., -1.], 90.0, degrees=True)
+        q1 = quatFromAxisAngle([0., 0., -1.], -90.0, degrees=True)
+        # halfway between 90 and -90 is 0.0 or quaternion [0. 0. 0. 1.]
+        qr = slerp(q0, q1, 0.5)
 
     """
     # Implementation based on code found here:
@@ -179,9 +189,10 @@ def slerp(q0, q1, t, out=None, dtype=None):
                                normalize(q1, dtype=dtype),
                                toReturn)
 
-    dot = np.sum(q0 * q1, axis=1)  # dot product along columns
-    dot[dot < 0.0] *= -1.0
-    q1[dot < 0.0] *= -1.0
+    dot = np.clip(np.sum(q0 * q1, axis=1), -1.0, 1.0)
+    if shortest:
+        dot[dot < 0.0] *= -1.0
+        q1[dot < 0.0] *= -1.0
 
     theta0 = np.arccos(dot)
     theta = theta0 * t
@@ -419,6 +430,58 @@ def invertQuat(q, out=None, dtype=None):
 
     return toReturn
 
+
+def applyQuat(q, points, out=None, dtype=None):
+    """Apply a quaternion to points/coordinates.
+
+    Parameters
+    ----------
+    q : ndarray, list, or tuple of float
+        Quaternion to invert in form [x, y, z, w] where w is real and x, y, z
+        are imaginary components.
+    points : array_like
+        2D array of points/coordinates to transform, where each row is a single
+        point and the number of columns should match the dimensions of the
+        matrix.
+    out : ndarray, optional
+        Optional output array to write values. Must be same `shape` and `dtype`
+        as `points`.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not
+        specified, the default is 'float64'.
+
+    Returns
+    -------
+    ndarray
+        Transformed points.
+
+    """
+    # based on 'quat_mul_vec3' implementation from linmath.h
+    points = np.asarray(points, dtype=dtype)
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        toReturn = np.zeros(points.shape, dtype=dtype)
+    else:
+        assert points.shape == out.shape
+        dtype = np.dtype(out.dtype).type
+        toReturn = out
+
+    pin, pout = np.atleast_2d(points, toReturn)
+    qin = np.tile(q, (pin.shape[0], 1))
+
+    pout[:, :] = pin[:, :]
+    t = np.cross(qin[:, :3], pin[:, :3], axis=1)
+    t *= dtype(2.0)
+    u = np.cross(qin[:, :3], t, axis=1)
+    t *= np.expand_dims(qin[:, 3], axis=1)
+    pout[:, :3] += t
+    pout[:, :3] += u
+    pout += 0.0  # remove negative zeros
+    # remove values very close to zero
+    pout[np.abs(pout) <= np.finfo(dtype).eps] = 0.0
+
+    return toReturn
 
 def matrixFromQuat(q, out=None, dtype=None):
     """Create a rotation matrix from a quaternion.
