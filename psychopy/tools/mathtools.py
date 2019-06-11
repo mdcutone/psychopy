@@ -305,11 +305,13 @@ def multQuat(q0, q1, out=None, dtype=None):
 
     Parameters
     ----------
-    q0, q1 : ndarray, list, or tuple of float
+    q0, q1 : array_like
         Quaternions to multiply in form [x, y, z, w] where w is real and x, y, z
-        are imaginary components.
+        are imaginary components. If 2D (Nx4) arrays are specified, quaternions
+        are multiplied row-wise between each array.
     out : ndarray, optional
-        Alternative array to write values.
+        Alternative array to write values. Must be have the same shape as `q0`
+        and `q1`.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -318,28 +320,34 @@ def multQuat(q0, q1, out=None, dtype=None):
     Returns
     -------
     ndarray
-        Combined orientation of `q0` amd `q1`. Returns `None` if `out` is
-        specified.
+        Combined orientations of `q0` amd `q1`.
 
     Notes
     -----
     * Quaternions are normalized prior to multiplication.
 
     """
+    assert q0.shape == q1.shape
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        qr = np.zeros((4,), dtype=dtype)
+        toReturn = np.zeros(q0.shape, dtype=dtype)
     else:
-        dtype = out.dtype
-        qr = out
+        dtype = np.dtype(out.dtype).type
+        toReturn = out
+        toReturn.fill(0.0)  # clear array
 
-    q0 = normalize(q0, dtype=dtype)
-    q1 = normalize(q1, dtype=dtype)
+    qr = np.atleast_2d(toReturn)
+    q0 = np.atleast_2d(normalize(q0, dtype=dtype))
+    q1 = np.atleast_2d(normalize(q1, dtype=dtype))
 
-    qr[:3] = np.cross(q0[:3], q1[:3]) + q0[:3] * q1[3] + q1[:3] * q0[3]
-    qr[3] = q0[3] * q1[3] - q0[:3].dot(q1[:3])
+    # multiply quaternions for each row of the operand arrays
+    qr[:, :3] = np.cross(q0[:, :3], q1[:, :3], axis=1)
+    qr[:, :3] += q0[:, :3] * np.expand_dims(q1[:, 3], axis=1)
+    qr[:, :3] += q1[:, :3] * np.expand_dims(q0[:, 3], axis=1)
+    qr[:, 3] = q0[:, 3] * q1[:, 3]
+    qr[:, 3] -= np.sum(q0[:, :3] * q1[:, :3], axis=1)  # dot product
 
-    return qr
+    return toReturn
 
 
 def invertQuat(q, out=None, dtype=None):
