@@ -80,9 +80,9 @@ def lerp(v0, v1, t, out=None, dtype=None):
     Parameters
     ----------
     v0 : tuple, list or ndarray of float
-        Initial vector. Can be 2D where each row is a point.
+        Initial vector/coordinate. Can be 2D where each row is a point.
     v1 : tuple, list or ndarray of float
-        Final vector. Must be the same shape as `v0`.
+        Final vector/coordinate. Must be the same shape as `v0`.
     t : float
         Interpolation weight factor [0, 1].
     out : ndarray, optional
@@ -110,23 +110,20 @@ def lerp(v0, v1, t, out=None, dtype=None):
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
         toReturn = np.zeros_like(v0, dtype=dtype)
     else:
-        dtype = out.dtype
+        dtype = np.dtype(out.dtype).type
         toReturn = out
+        toReturn.fill(0.0)
 
-    t = np.dtype(dtype).type(t)
+    t = dtype(t)
     v0 = np.asarray(v0, dtype=dtype)
     v1 = np.asarray(v1, dtype=dtype)
+    v0, v1, vr = np.atleast_2d(v0, v1, toReturn)
 
-    assert v0.shape == v1.shape  # make sure the inputs have the same dims
-    origShape = v0.shape
-    v0, v1 = np.atleast_2d(v0, v1)
-
-    ncols = v0.shape[1]
     t0 = dtype(1.0) - t
-    for i in range(ncols):
-        toReturn[:, i] = t0 * v0[:, i] + t * v1[:, i]
+    vr[:, :] = v0 * t0
+    vr[:, :] += v1 * t
 
-    return np.reshape(toReturn, origShape)
+    return toReturn
 
 
 def slerp(q0, q1, t, out=None, dtype=None):
@@ -135,12 +132,20 @@ def slerp(q0, q1, t, out=None, dtype=None):
     Interpolation occurs along the shortest arc between the initial and final
     quaternion.
 
+    The behaviour of this function depends on the types of arguments:
+
+    * If `q0` and `q1` are both 1-D and `t` is scalar, the interpolation at `t`
+      is returned.
+    * If `q0` and `q1` are both 2-D Nx4 arrays and `t` is scalar, an Nx4 array
+      is returned with each row containing the interpolation at `t` for each
+      quaternion pair at matching row indices in `q0` and `q1`.
+
     Parameters
     ----------
-    q0 : tuple, list or ndarray of float
+    q0 : array_like
         Initial quaternion in form [x, y, z, w] where w is real and x, y, z
         are imaginary components.
-    q1 : tuple, list or ndarray of float
+    q1 : array_like
         Final quaternion in form [x, y, z, w] where w is real and x, y, z
         are imaginary components.
     t : float
@@ -157,41 +162,36 @@ def slerp(q0, q1, t, out=None, dtype=None):
     ndarray
         Quaternion [x, y, z, w] at `t`.
 
-    Notes
-    -----
-    * If the dot product between quaternions is >0.9995, linear interpolation is
-      used instead of SLERP.
-
     """
     # Implementation based on code found here:
     #  https://en.wikipedia.org/wiki/Slerp
     #
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.zeros((4,), dtype=dtype)
+        toReturn = np.zeros(q0.shape, dtype=dtype)
     else:
-        dtype = out.dtype
+        dtype = np.dtype(out.dtype).type
         toReturn = out
+        toReturn.fill(0.0)
 
-    q0 = normalize(q0, dtype=dtype)
-    q1 = normalize(q1, dtype=dtype)
     t = dtype(t)
+    q0, q1, qr = np.atleast_2d(normalize(q0, dtype=dtype),
+                               normalize(q1, dtype=dtype),
+                               toReturn)
 
-    dot = np.dot(q0, q1)
-    if dot < 0.0:
-        q1 = -q1
-        dot = -dot
+    dot = np.sum(q0 * q1, axis=1)  # dot product along columns
+    dot[dot < 0.0] *= -1.0
+    q1[dot < 0.0] *= -1.0
 
-    if dot > 0.9995:  # small angle, use linear interpolation instead
-        toReturn[:] = normalize(q0 + t * (q1 - q0), dtype=dtype)
-    else:
-        theta0 = np.arccos(dot)
-        theta = theta0 * t
-        sinTheta = np.sin(theta)
-        sinTheta0 = np.sin(theta0)
-        s1 = sinTheta / sinTheta0
-        s0 = np.cos(theta) - dot * s1
-        toReturn[:] = (q0 * s0) + (q1 * s1)
+    theta0 = np.arccos(dot)
+    theta = theta0 * t
+    sinTheta = np.sin(theta)
+    s1 = sinTheta / np.sin(theta0)
+    s0 = np.cos(theta[:, np.newaxis]) - \
+         dot[:, np.newaxis] * s1[:, np.newaxis]
+    qr[:, :] = q0 * s0
+    qr[:, :] += q1 * s1[:, np.newaxis]
+    qr[:, :] += 0.0
 
     return toReturn
 
@@ -414,7 +414,7 @@ def invertQuat(q, out=None, dtype=None):
     # conjugate the quaternion
     qinv[:, :3] = -qn[:, :3]
     qinv[:, 3] = qn[:, 3]
-    qinv /= np.sqrt(np.sum(np.square(qn), axis=1)[:, np.newaxis])
+    qinv /= np.sum(np.square(qn), axis=1)[:, np.newaxis]
     qinv += 0.0  # remove negative zeros
 
     return toReturn
