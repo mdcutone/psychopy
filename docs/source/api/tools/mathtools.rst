@@ -23,6 +23,7 @@ will be automatically coerced to matching data types.
     slerp
     multQuat
     invertQuat
+    applyQuat
     quatToAxisAngle
     quatFromAxisAngle
     matrixFromQuat
@@ -41,6 +42,7 @@ Function details
 .. autofunction:: slerp
 .. autofunction:: multQuat
 .. autofunction:: invertQuat
+.. autofunction:: applyQuat
 .. autofunction:: quatToAxisAngle
 .. autofunction:: quatFromAxisAngle
 .. autofunction:: matrixFromQuat

@@ -11,7 +11,7 @@
 __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
            'matrixFromQuat', 'scaleMatrix', 'rotationMatrix',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
-           'quatToAxisAngle', 'poseToMatrix']
+           'quatToAxisAngle', 'poseToMatrix', 'applyQuat']
 
 import numpy as np
 
@@ -432,29 +432,53 @@ def invertQuat(q, out=None, dtype=None):
 
 
 def applyQuat(q, points, out=None, dtype=None):
-    """Apply a quaternion to points/coordinates.
+    """Rotate points/coordinates using a quaternion.
+
+    This is similar to using `applyMatrix` with a rotation matrix. However, it
+    is computationally less intensive to use `applyQuat` if one only wishes to
+    rotate points.
 
     Parameters
     ----------
-    q : ndarray, list, or tuple of float
+    q : array_like
         Quaternion to invert in form [x, y, z, w] where w is real and x, y, z
         are imaginary components.
     points : array_like
         2D array of points/coordinates to transform, where each row is a single
-        point and the number of columns should match the dimensions of the
-        matrix.
+        point. Only the x, y, and z components (the first three columns) are
+        rotated. Additional columns are copied.
     out : ndarray, optional
         Optional output array to write values. Must be same `shape` and `dtype`
         as `points`.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not
-        specified, the default is 'float64'.
+        provided, the default is 'float64'.
 
     Returns
     -------
     ndarray
         Transformed points.
+
+    Examples
+    --------
+    Rotate points using a quaternion::
+
+        points = [[1., 0., 0.], [0., -1., 0.]]
+        quat = quatFromAxisAngle([0., 0., -1.], -90.0, degrees=True)
+        pointsRotated = applyQuat(quat, points)
+        # [[0. 1. 0.]
+        #  [1. 0. 0.]]
+
+    Show that you get the same result as a rotation matrix::
+
+        axis = [0., 0., -1.]
+        angle = -90.0
+        rotMat = rotationMatrix(angle, axis)[:3, :3]  # rotation sub-matrix only
+        rotQuat = quatFromAxisAngle(axis, angle, degrees=True)
+        points = [[1., 0., 0.], [0., -1., 0.]]
+        isClose = np.allclose(applyMatrix(rotMat, points),  # True
+                              applyQuat(rotQuat, points))
 
     """
     # based on 'quat_mul_vec3' implementation from linmath.h
@@ -467,8 +491,8 @@ def applyQuat(q, points, out=None, dtype=None):
         dtype = np.dtype(out.dtype).type
         toReturn = out
 
-    pin, pout = np.atleast_2d(points, toReturn)
-    qin = np.tile(q, (pin.shape[0], 1))
+    pin, pout = np.atleast_2d(np.asarray(points, dtype=dtype), toReturn)
+    qin = np.tile(np.asarray(q, dtype=dtype), (pin.shape[0], 1))
 
     pout[:, :] = pin[:, :]
     t = np.cross(qin[:, :3], pin[:, :3], axis=1)
@@ -482,6 +506,7 @@ def applyQuat(q, points, out=None, dtype=None):
     pout[np.abs(pout) <= np.finfo(dtype).eps] = 0.0
 
     return toReturn
+
 
 def matrixFromQuat(q, out=None, dtype=None):
     """Create a rotation matrix from a quaternion.
@@ -817,9 +842,9 @@ def applyMatrix(m, points, out=None, dtype=None):
 
     Parameters
     ----------
-    m : ndarray
+    m : array_like
         Transformation matrix.
-    points : ndarray
+    points : array_like
         2D array of points/coordinates to transform, where each row is a single
         point and the number of columns should match the dimensions of the
         matrix.
@@ -864,6 +889,7 @@ def applyMatrix(m, points, out=None, dtype=None):
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
         toReturn = np.zeros_like(points, dtype=dtype)
     else:
+        dtype = np.dtype(out.dtype).type
         toReturn = out
 
     m = np.asarray(m, dtype=dtype)
@@ -871,6 +897,7 @@ def applyMatrix(m, points, out=None, dtype=None):
 
     assert points.ndim == 2
     np.dot(points, m.T, out=toReturn)
+    toReturn[np.abs(toReturn) <= np.finfo(dtype).eps] = 0.0
 
     return toReturn
 
