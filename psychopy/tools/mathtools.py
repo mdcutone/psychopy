@@ -12,7 +12,7 @@ __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
            'matrixFromQuat', 'scaleMatrix', 'rotationMatrix',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
            'quatToAxisAngle', 'poseToMatrix', 'applyQuat', 'orthogonalize',
-           'reflect']
+           'reflect', 'cross']
 
 import numpy as np
 
@@ -148,6 +148,7 @@ def reflect(v, n, out=None, dtype=None):
         Reflected vector `v` off normal `n`.
 
     """
+    # based off https://github.com/glfw/glfw/blob/master/deps/linmath.h
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
         toReturn = np.zeros_like(v, dtype=dtype)
@@ -161,9 +162,63 @@ def reflect(v, n, out=None, dtype=None):
                              toReturn)
 
     u = dtype(2.0)
-    print((u * np.sum(n * v, axis=1)))
     vr[:, :] = v
     vr[:, :] -= (u * np.sum(n * v, axis=1))[:, np.newaxis] * n
+
+    return toReturn
+
+
+def cross(v0, v1, out=None, dtype=None):
+    """Cross product of two 3D vectors.
+
+    Parameters
+    ----------
+    v0, v1 : array_like
+        Vector(s) in form [x, y, z] or [x, y, z, 1].
+    out : ndarray, optional
+        Optional output array with same shape as `v0` and `v1`. If `v0` and `v1`
+        are 2-D, this array can be either Nx3 or Nx4 but, must have the same
+        number of rows.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
+
+    Returns
+    -------
+    ndarray
+        Cross product of `v0` and `v1`.
+
+    Notes
+    -----
+    * If input vectors are 4D, the last value of the cross product vectors is
+      always set to 1.
+    * If input vectors `v0` and `v1` are Nx3 and `out` is Nx4, the cross product
+      is computed and the last column is filled with 1.
+
+    """
+    if out is None:
+        assert v0.shape == v1.shape
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        toReturn = np.zeros_like(v0, dtype=dtype)
+    else:
+        dtype = np.dtype(out.dtype).type
+        toReturn = out
+        toReturn.fill(0.0)
+
+    v0, v1, vr = np.atleast_2d(np.asarray(v0, dtype=dtype),
+                               np.asarray(v1, dtype=dtype),
+                               toReturn)
+
+    vr[:, 0] = v0[:, 1] * v1[:, 2]
+    vr[:, 1] = v0[:, 2] * v1[:, 0]
+    vr[:, 2] = v0[:, 0] * v1[:, 1]
+    vr[:, 0] -= v0[:, 2] * v1[:, 1]
+    vr[:, 1] -= v0[:, 0] * v1[:, 2]
+    vr[:, 2] -= v0[:, 1] * v1[:, 0]
+
+    if vr.shape[1] == 4:  # if 4D, fill the last component with zeros
+        vr[:, 3] = dtype(1.0)
 
     return toReturn
 
@@ -173,9 +228,9 @@ def lerp(v0, v1, t, out=None, dtype=None):
 
     Parameters
     ----------
-    v0 : tuple, list or ndarray of float
+    v0 : array_like
         Initial vector/coordinate. Can be 2D where each row is a point.
-    v1 : tuple, list or ndarray of float
+    v1 : array_like
         Final vector/coordinate. Must be the same shape as `v0`.
     t : float
         Interpolation weight factor [0, 1].
@@ -824,7 +879,7 @@ def translationMatrix(t, out=None, dtype=None):
     return T
 
 
-def concatenate(*args, out=None, dtype=None):
+def concatenate(m, out=None, dtype=None):
     """Concatenate matrix transformations.
 
     Combine transformation matrices into a single matrix. This is similar to
@@ -839,9 +894,8 @@ def concatenate(*args, out=None, dtype=None):
 
     Parameters
     ----------
-    *args
-        4x4 matrices to combine of type `ndarray`. Matrices are multiplied from
-        right-to-left.
+    m : array_like
+        List of matrices to concatenate.
     out : ndarray, optional
         Optional 4x4 output array.
     dtype : dtype or str, optional
@@ -862,11 +916,13 @@ def concatenate(*args, out=None, dtype=None):
         S = scaleMatrix([2.0, 2.0, 2.0])  # scale model 2x
         R = rotationMatrix(-90., [0., 0., -1])  # rotate -90 about -Z axis
         T = translationMatrix([0., 0., -5.])  # translate point 5 units away
-        SRT = concatenate(S, R, T)
+        SRT = concatenate([S, R, T])
 
         # transform a point in model-space coordinates to world-space
         pointModel = np.array([0., 1., 0., 1.])
         pointWorld = np.matmul(SRT, pointModel.T)  # point in WCS
+        # ... or ...
+        pointWorld = matrixApply(SRT, pointModel)
 
     Create a model-view matrix from a world-space pose represented by an
     orientation (quaternion) and position (vector). The resulting matrix will
@@ -888,7 +944,7 @@ def concatenate(*args, out=None, dtype=None):
         V = lookAt(eyePos, eyeFwd, eyeUp)  # from viewtools
 
         # modelview matrix
-        MV = concatenate(M, V)
+        MV = concatenate([M, V])
 
     You can put the created matrix in the OpenGL matrix stack as shown below.
     Note that the matrix must have a 32-bit floating-point data type and needs
@@ -924,7 +980,7 @@ def concatenate(*args, out=None, dtype=None):
         toReturn.fill(0.0)
         np.fill_diagonal(toReturn, 1.0)
 
-    for mat in args:
+    for mat in m:
         # force all matrices to have the same dtype as out
         np.matmul(np.asarray(mat, dtype=dtype), toReturn, out=toReturn)
 
@@ -962,7 +1018,7 @@ def applyMatrix(m, points, out=None, dtype=None):
         S = scaleMatrix([5.0, 5.0, 5.0])  # scale 2x
         R = rotationMatrix(180., [0., 0., -1])  # rotate 180 degrees
         T = translationMatrix([0., 1.5, -3.])  # translate point up and away
-        M = concatenate(S, R, T)  # create transform matrix
+        M = concatenate([S, R, T])  # create transform matrix
 
         # points to transform, must be 2D!
         points = np.array([[0., 1., 0., 1.], [-1., 0., 0., 1.]]) # [x, y, z, w]
@@ -1037,9 +1093,3 @@ def poseToMatrix(pos, ori, out=None, dtype=None):
 
     return np.matmul(rotMat, transMat)
 
-
-if __name__ == "__main__":
-    points = np.array([[0., 1., 0.], [0., 0., 1.]])
-    nml = np.array([[0., -1., 0.], [0., 1., 0.]])
-    out = np.zeros_like(points)
-    print(reflect(points, nml, out=out))
