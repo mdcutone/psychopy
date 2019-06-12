@@ -11,7 +11,7 @@
 __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
            'matrixFromQuat', 'scaleMatrix', 'rotationMatrix',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
-           'quatToAxisAngle', 'poseToMatrix', 'applyQuat']
+           'quatToAxisAngle', 'poseToMatrix', 'applyQuat', 'orthogonalize']
 
 import numpy as np
 
@@ -70,6 +70,53 @@ def normalize(v, out=None, dtype=None):
     norm[norm == 0.0] = np.NaN  # make sure if length==0 division succeeds
     v2d /= norm[:, np.newaxis]
     np.nan_to_num(v2d, copy=False)  # fix NaNs
+
+    return toReturn
+
+
+def orthogonalize(v, n, out=None, dtype=None):
+    """Orthogonalize a vector.
+
+    This function ensures that `v` is perpendicular to `n`.
+
+    Parameters
+    ----------
+    v : array_like
+        Vector to orthogonalize, can be Nx2, Nx3, or Nx4.
+    n : array_like
+        Normal vector, must have same shape as `v`.
+    out : ndarray, optional
+        Optional output array. Must have the same `shape` and `dtype` as `v0`.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
+
+    Returns
+    -------
+    ndarray
+        Orthogonalized vector `v`.
+
+    Warnings
+    --------
+    If `v` and `n` are the same, the perpendicular direction is indeterminate
+    resulting in a degenerate vector (all zeros).
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        toReturn = np.zeros_like(v, dtype=dtype)
+    else:
+        dtype = np.dtype(out.dtype).type
+        toReturn = out
+        toReturn.fill(0.0)
+
+    v, n, vr = np.atleast_2d(np.asarray(v, dtype=dtype),
+                             np.asarray(n, dtype=dtype),
+                             toReturn)
+    vr[:, :] = v
+    vr[:, :] -= n * np.sum(n * v, axis=1)[:, np.newaxis]  # dot product
+    normalize(vr, out=vr)
 
     return toReturn
 
@@ -943,3 +990,9 @@ def poseToMatrix(pos, ori, out=None, dtype=None):
 
     return np.matmul(rotMat, transMat)
 
+if __name__ == "__main__":
+    points = np.array([[0., 1., 0.], [0., 0., 1.]])
+    nml = np.array([[0., 1., 0.], [0., 1., 0.]])
+
+
+    print(orthogonalize(points, nml))
