@@ -11,7 +11,8 @@
 __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
            'matrixFromQuat', 'scaleMatrix', 'rotationMatrix',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
-           'quatToAxisAngle', 'poseToMatrix', 'applyQuat', 'orthogonalize']
+           'quatToAxisAngle', 'poseToMatrix', 'applyQuat', 'orthogonalize',
+           'reflect']
 
 import numpy as np
 
@@ -20,8 +21,8 @@ def normalize(v, out=None, dtype=None):
     """Normalize a vector or quaternion.
 
     v : ndarray
-        Vector to normalize. If a 2D array is specified, rows are treated as
-        separate vectors.
+        Vector to normalize, can be Nx2, Nx3, or Nx4. If a 2D array is
+        specified, rows are treated as separate vectors.
     out : ndarray, optional
         Optional output array. Must have same shape as `v`.
     dtype : dtype or str, optional
@@ -75,18 +76,19 @@ def normalize(v, out=None, dtype=None):
 
 
 def orthogonalize(v, n, out=None, dtype=None):
-    """Orthogonalize a vector.
+    """Orthogonalize a vector relative to a normal vector.
 
-    This function ensures that `v` is perpendicular to `n`.
+    This function ensures that `v` is perpendicular (or orthogonal) to `n`.
 
     Parameters
     ----------
     v : array_like
-        Vector to orthogonalize, can be Nx2, Nx3, or Nx4.
+        Vector to orthogonalize, can be Nx2, Nx3, or Nx4. If a 2D array is
+        specified, rows are treated as separate vectors.
     n : array_like
         Normal vector, must have same shape as `v`.
     out : ndarray, optional
-        Optional output array. Must have the same `shape` and `dtype` as `v0`.
+        Optional output array. Must have same shape as `v` and `n`.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -95,12 +97,12 @@ def orthogonalize(v, n, out=None, dtype=None):
     Returns
     -------
     ndarray
-        Orthogonalized vector `v`.
+        Orthogonalized vector `v` relative to normal vector `n`.
 
     Warnings
     --------
-    If `v` and `n` are the same, the perpendicular direction is indeterminate
-    resulting in a degenerate vector (all zeros).
+    If `v` and `n` are the same, the direction of the perpendicular vector is
+    indeterminate. The resulting vector is degenerate.
 
     """
     if out is None:
@@ -117,6 +119,51 @@ def orthogonalize(v, n, out=None, dtype=None):
     vr[:, :] = v
     vr[:, :] -= n * np.sum(n * v, axis=1)[:, np.newaxis]  # dot product
     normalize(vr, out=vr)
+
+    return toReturn
+
+
+def reflect(v, n, out=None, dtype=None):
+    """Reflection of a vector.
+
+    Get the reflection of `v` relative to normal `n`.
+
+    Parameters
+    ----------
+    v : array_like
+        Vector to reflect, can be Nx2, Nx3, or Nx4. If a 2D array is specified,
+        rows are treated as separate vectors.
+    n : array_like
+        Normal vector, must have same shape as `v`.
+    out : ndarray, optional
+        Optional output array. Must have same shape as `v` and `n`.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
+
+    Returns
+    -------
+    ndarray
+        Reflected vector `v` off normal `n`.
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        toReturn = np.zeros_like(v, dtype=dtype)
+    else:
+        dtype = np.dtype(out.dtype).type
+        toReturn = out
+        toReturn.fill(0.0)
+
+    v, n, vr = np.atleast_2d(np.asarray(v, dtype=dtype),
+                             np.asarray(n, dtype=dtype),
+                             toReturn)
+
+    u = dtype(2.0)
+    print((u * np.sum(n * v, axis=1)))
+    vr[:, :] = v
+    vr[:, :] -= (u * np.sum(n * v, axis=1))[:, np.newaxis] * n
 
     return toReturn
 
@@ -162,11 +209,11 @@ def lerp(v0, v1, t, out=None, dtype=None):
         toReturn.fill(0.0)
 
     t = dtype(t)
+    t0 = dtype(1.0) - t
     v0 = np.asarray(v0, dtype=dtype)
     v1 = np.asarray(v1, dtype=dtype)
     v0, v1, vr = np.atleast_2d(v0, v1, toReturn)
 
-    t0 = dtype(1.0) - t
     vr[:, :] = v0 * t0
     vr[:, :] += v1 * t
 
@@ -990,9 +1037,9 @@ def poseToMatrix(pos, ori, out=None, dtype=None):
 
     return np.matmul(rotMat, transMat)
 
+
 if __name__ == "__main__":
     points = np.array([[0., 1., 0.], [0., 0., 1.]])
-    nml = np.array([[0., 1., 0.], [0., 1., 0.]])
-
-
-    print(orthogonalize(points, nml))
+    nml = np.array([[0., -1., 0.], [0., 1., 0.]])
+    out = np.zeros_like(points)
+    print(reflect(points, nml, out=out))
