@@ -12,10 +12,14 @@ __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
            'matrixFromQuat', 'scaleMatrix', 'rotationMatrix',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
            'quatToAxisAngle', 'poseToMatrix', 'applyQuat', 'orthogonalize',
-           'reflect', 'cross']
+           'reflect', 'cross', 'distance']
 
 import numpy as np
 
+
+# ------------------------------------------------------------------------------
+# Vector Operations
+#
 
 def normalize(v, out=None, dtype=None):
     """Normalize a vector or quaternion.
@@ -102,7 +106,7 @@ def orthogonalize(v, n, out=None, dtype=None):
     Warnings
     --------
     If `v` and `n` are the same, the direction of the perpendicular vector is
-    indeterminate. The resulting vector is degenerate.
+    indeterminate. The resulting vector is degenerate (all zeros).
 
     """
     if out is None:
@@ -194,7 +198,7 @@ def cross(v0, v1, out=None, dtype=None):
     * If input vectors are 4D, the last value of the cross product vectors is
       always set to 1.
     * If input vectors `v0` and `v1` are Nx3 and `out` is Nx4, the cross product
-      is computed and the last column is filled with 1.
+      is computed and the last column of `out` is filled with 1.
 
     """
     if out is None:
@@ -274,6 +278,47 @@ def lerp(v0, v1, t, out=None, dtype=None):
 
     return toReturn
 
+
+def distance(v0, v1, out=None, dtype=None):
+    """Get the distance between vectors/coordinates.
+
+    Parameters
+    ----------
+    v0, v1 : array_like
+        Vectors to compute the distance between.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
+
+    Returns
+    -------
+    float
+        Distance between vectors `v0` and `v1`.
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    else:
+        dtype = np.dtype(out.dtype).type
+
+    v0, v1 = np.atleast_2d(np.asarray(v0, dtype=dtype),
+                           np.asarray(v1, dtype=dtype))
+
+    if out is None:
+        dist = np.zeros((v0.shape[0],), dtype=dtype)
+    else:
+        dist = out
+        dist.fill(0.0)
+
+    dist[:] = np.sqrt(np.sum(np.square(v1 - v0), axis=1))
+
+    return dist
+
+
+# ------------------------------------------------------------------------------
+# Quaternion Operations
+#
 
 def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
     """Spherical linear interpolation (SLERP) between two quaternions.
@@ -504,9 +549,9 @@ def multQuat(q0, q1, out=None, dtype=None):
         toReturn = out
         toReturn.fill(0.0)  # clear array
 
-    qr = np.atleast_2d(toReturn)
-    q0 = np.atleast_2d(normalize(q0, dtype=dtype))
-    q1 = np.atleast_2d(normalize(q1, dtype=dtype))
+    q0, q1, qr = np.atleast_2d(normalize(q0, dtype=dtype),
+                               normalize(q1, dtype=dtype),
+                               toReturn)
 
     # multiply quaternions for each row of the operand arrays
     qr[:, :3] = np.cross(q0[:, :3], q1[:, :3], axis=1)
@@ -657,6 +702,10 @@ def applyQuat(q, points, out=None, dtype=None):
     return toReturn
 
 
+# ------------------------------------------------------------------------------
+# Matrix Operations
+#
+
 def matrixFromQuat(q, out=None, dtype=None):
     """Create a rotation matrix from a quaternion.
 
@@ -740,8 +789,10 @@ def scaleMatrix(s, out=None, dtype=None):
 
     Parameters
     ----------
-    s : ndarray, tuple, or list of float
-        Scaling factors [sx, sy, sz].
+    s : array_like or float
+        Scaling factor(s). If `s` is scalar (float), scaling will be uniform.
+        Providing a vector of scaling values [sx, sy, sz] will result in an
+        anisotropic scaling matrix if any of the values differ.
     out : ndarray, optional
         Optional output array.
     dtype : dtype or str, optional
@@ -764,11 +815,16 @@ def scaleMatrix(s, out=None, dtype=None):
         S = out
         S.fill(0.0)
 
-    s = np.asarray(s, dtype=dtype)
+    if isinstance(s, (float, int,)):
+        s = dtype(s)
+        S[0, 0] = s
+        S[1, 1] = s
+        S[2, 2] = s
+    else:
+        S[0, 0] = dtype(s[0])
+        S[1, 1] = dtype(s[1])
+        S[2, 2] = dtype(s[2])
 
-    S[0, 0] = s[0]
-    S[1, 1] = s[1]
-    S[2, 2] = s[2]
     S[3, 3] = 1.0
 
     return S
