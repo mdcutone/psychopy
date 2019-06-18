@@ -1197,6 +1197,26 @@ def transform(pos, ori, points, out=None, dtype=None):
     ndarray
         Transformed points.
 
+    Examples
+    --------
+    Transform points by a position and orientation::
+        # pose
+        ori = quatFromAxisAngle([0., 0., -1.], 90.0, degrees=True)
+        pos = [0., 1.5, 0.]
+        # points to transform
+        points = np.array([[0., 1., 0.], [-1., 0., 0.]])  # [x, y, z]
+        outPoints = np.zeros_like(points)  # output array
+        transform(pos, ori, points, out=outPoints)  # do the transformation
+
+    It is more computationally efficient to use `transform` rather than
+    constructing a transformation matrix. However, you can get the same results
+    as the previous example using a matrix by doing the following::
+
+        R = rotationMatrix(90., [0., 0., -1])
+        T = translationMatrix([0., 1.5, -3.])
+        M = concatenate([R, T])
+        applyMatrix(M, points, out=outPoints)
+
     """
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
@@ -1208,7 +1228,7 @@ def transform(pos, ori, points, out=None, dtype=None):
     points = np.asarray(points, dtype=dtype)
 
     if out is None:
-        toReturn = np.zeros_like(points, dtype=points.dtype)
+        toReturn = np.zeros_like(points, dtype=dtype)
     else:
         assert out.shape == points.shape
         toReturn = out
