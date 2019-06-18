@@ -1120,10 +1120,10 @@ def applyMatrix(m, points, out=None, dtype=None):
 
     m = np.asarray(m, dtype=dtype)
     points = np.asarray(points, dtype=dtype)
+    pout, points = np.atleast_2d(toReturn, points)
 
-    assert points.ndim == 2
-    np.dot(points, m.T, out=toReturn)
-    toReturn[np.abs(toReturn) <= np.finfo(dtype).eps] = 0.0
+    np.dot(points, m.T, out=pout)
+    pout[np.abs(pout) <= np.finfo(dtype).eps] = 0.0
 
     return toReturn
 
@@ -1178,7 +1178,7 @@ def transform(pos, ori, points, out=None, dtype=None):
     Parameters
     ----------
     pos : array_like
-        Position vector [x, y, z].
+        Position vector [x, y, z] or [x, y, z, 1].
     ori : array_like
         Orientation quaternion in form [x, y, z, w] where w is real and x, y, z
         are imaginary components.
@@ -1199,18 +1199,20 @@ def transform(pos, ori, points, out=None, dtype=None):
 
     Examples
     --------
-    Transform points by a position and orientation::
+    Transform points by a position coordinate and orientation quaternion::
+
         # pose
         ori = quatFromAxisAngle([0., 0., -1.], 90.0, degrees=True)
-        pos = [0., 1.5, 0.]
+        pos = [0., 1.5, -3.]
         # points to transform
-        points = np.array([[0., 1., 0.], [-1., 0., 0.]])  # [x, y, z]
+        points = np.array([[0., 1., 0., 1.], [-1., 0., 0., 1.]])  # [x, y, z, 1]
         outPoints = np.zeros_like(points)  # output array
         transform(pos, ori, points, out=outPoints)  # do the transformation
 
     It is more computationally efficient to use `transform` rather than
-    constructing a transformation matrix. However, you can get the same results
-    as the previous example using a matrix by doing the following::
+    constructing a transformation matrix and using `applyMatrix`. However, you
+    can get the same results as the previous example using a matrix by doing the
+    following::
 
         R = rotationMatrix(90., [0., 0., -1])
         T = translationMatrix([0., 1.5, -3.])
@@ -1230,10 +1232,13 @@ def transform(pos, ori, points, out=None, dtype=None):
     if out is None:
         toReturn = np.zeros_like(points, dtype=dtype)
     else:
-        assert out.shape == points.shape
+        if out.shape != points.shape:
+            raise ValueError(
+                "Array 'out' and 'points' do not have matching shapes.")
+
         toReturn = out
 
-    pout, points = np.atleast_2d(toReturn, points)
+    pout, points = np.atleast_2d(toReturn, points)  # create 2d views
 
     # apply rotation
     applyQuat(ori, points, out=pout)
