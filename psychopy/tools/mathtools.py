@@ -66,7 +66,7 @@ def normalize(v, out=None, dtype=None):
     """
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.asarray(v, dtype=dtype)
+        toReturn = np.array(v, dtype=dtype)
     else:
         toReturn = out
 
@@ -111,15 +111,20 @@ def orthogonalize(v, n, out=None, dtype=None):
     """
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.zeros_like(v, dtype=dtype)
     else:
         dtype = np.dtype(out.dtype).type
+
+    v = np.asarray(v, dtype=dtype)
+    n = np.asarray(n, dtype=dtype)
+
+    if out is None:
+        toReturn = np.zeros_like(v, dtype=dtype)
+    else:
         toReturn = out
         toReturn.fill(0.0)
 
-    v, n, vr = np.atleast_2d(np.asarray(v, dtype=dtype),
-                             np.asarray(n, dtype=dtype),
-                             toReturn)
+    v, n, vr = np.atleast_2d(v, n, toReturn)
+
     vr[:, :] = v
     vr[:, :] -= n * np.sum(n * v, axis=1)[:, np.newaxis]  # dot product
     normalize(vr, out=vr)
@@ -155,15 +160,19 @@ def reflect(v, n, out=None, dtype=None):
     # based off https://github.com/glfw/glfw/blob/master/deps/linmath.h
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.zeros_like(v, dtype=dtype)
     else:
         dtype = np.dtype(out.dtype).type
+
+    v = np.asarray(v, dtype=dtype)
+    n = np.asarray(n, dtype=dtype)
+
+    if out is None:
+        toReturn = np.zeros_like(v, dtype=dtype)
+    else:
         toReturn = out
         toReturn.fill(0.0)
 
-    v, n, vr = np.atleast_2d(np.asarray(v, dtype=dtype),
-                             np.asarray(n, dtype=dtype),
-                             toReturn)
+    v, n, vr = np.atleast_2d(v, n, toReturn)
 
     u = dtype(2.0)
     vr[:, :] = v
@@ -195,24 +204,28 @@ def cross(v0, v1, out=None, dtype=None):
 
     Notes
     -----
-    * If input vectors are 4D, the last value of the cross product vectors is
-      always set to 1.
+    * If input vectors are 4D, the last value of cross product vectors is always
+      set to 1.
     * If input vectors `v0` and `v1` are Nx3 and `out` is Nx4, the cross product
       is computed and the last column of `out` is filled with 1.
 
     """
     if out is None:
-        assert v0.shape == v1.shape
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.zeros_like(v0, dtype=dtype)
     else:
         dtype = np.dtype(out.dtype).type
+
+    v0 = np.asarray(v0, dtype=dtype)
+    v1 = np.asarray(v1, dtype=dtype)
+
+    assert v0.shape == v1.shape
+    if out is None:
+        toReturn = np.zeros(v0.shape, dtype=dtype)
+    else:
         toReturn = out
         toReturn.fill(0.0)
 
-    v0, v1, vr = np.atleast_2d(np.asarray(v0, dtype=dtype),
-                               np.asarray(v1, dtype=dtype),
-                               toReturn)
+    v0, v1, vr = np.atleast_2d(v0, v1, toReturn)
 
     vr[:, 0] = v0[:, 1] * v1[:, 2]
     vr[:, 1] = v0[:, 2] * v1[:, 0]
@@ -261,16 +274,20 @@ def lerp(v0, v1, t, out=None, dtype=None):
     """
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.zeros_like(v0, dtype=dtype)
     else:
         dtype = np.dtype(out.dtype).type
-        toReturn = out
-        toReturn.fill(0.0)
 
     t = dtype(t)
     t0 = dtype(1.0) - t
     v0 = np.asarray(v0, dtype=dtype)
     v1 = np.asarray(v1, dtype=dtype)
+
+    if out is None:
+        toReturn = np.zeros_like(v0, dtype=dtype)
+    else:
+        toReturn = out
+        toReturn.fill(0.0)
+
     v0, v1, vr = np.atleast_2d(v0, v1, toReturn)
 
     vr[:, :] = v0 * t0
@@ -286,6 +303,8 @@ def distance(v0, v1, out=None, dtype=None):
     ----------
     v0, v1 : array_like
         Vectors to compute the distance between.
+    out : ndarray, optional
+        Optional output array. Must have same number of rows as `v0` and `v1`.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -293,7 +312,7 @@ def distance(v0, v1, out=None, dtype=None):
 
     Returns
     -------
-    float
+    ndarray
         Distance between vectors `v0` and `v1`.
 
     """
@@ -311,6 +330,7 @@ def distance(v0, v1, out=None, dtype=None):
         dist = out
         dist.fill(0.0)
 
+    # compute distance
     dist[:] = np.sqrt(np.sum(np.square(v1 - v0), axis=1))
 
     return dist
@@ -1139,6 +1159,7 @@ def poseToMatrix(pos, ori, out=None, dtype=None):
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
         toReturn = np.zeros((4, 4,), dtype=dtype)
     else:
+        dtype = np.dtype(dtype).type
         toReturn = out
 
     transMat = translationMatrix(pos, dtype=dtype)
@@ -1149,3 +1170,57 @@ def poseToMatrix(pos, ori, out=None, dtype=None):
 
     return np.matmul(rotMat, transMat)
 
+
+def transform(pos, ori, points, out=None, dtype=None):
+    """Transform points using a position and orientation. Points are rotated
+    then translated.
+
+    Parameters
+    ----------
+    pos : array_like
+        Position vector [x, y, z].
+    ori : array_like
+        Orientation quaternion in form [x, y, z, w] where w is real and x, y, z
+        are imaginary components.
+    points : array_like
+        Point(s) [x, y, z] to transform.
+    out : ndarray, optional
+        Optional output array for 4x4 matrix. All computations will use the data
+        type of this array.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not
+        specified, the default is 'float64'.
+
+    Returns
+    -------
+    ndarray
+        Transformed points.
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    else:
+        dtype = np.dtype(dtype).type
+
+    pos = np.asarray(pos, dtype=dtype)
+    ori = np.asarray(ori, dtype=dtype)
+    points = np.asarray(points, dtype=dtype)
+
+    if out is None:
+        toReturn = np.zeros_like(points, dtype=points.dtype)
+    else:
+        assert out.shape == points.shape
+        toReturn = out
+
+    pout, points = np.atleast_2d(toReturn, points)
+
+    # apply rotation
+    applyQuat(ori, points, out=pout)
+
+    # apply translation
+    pout[:, 0] += pos[0]
+    pout[:, 1] += pos[1]
+    pout[:, 2] += pos[2]
+
+    return toReturn
