@@ -15,6 +15,7 @@ __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
            'reflect', 'cross', 'distance']
 
 import numpy as np
+import functools
 
 
 # ------------------------------------------------------------------------------
@@ -577,8 +578,9 @@ def multQuat(q0, q1, out=None, dtype=None):
     qr[:, :3] = np.cross(q0[:, :3], q1[:, :3], axis=1)
     qr[:, :3] += q0[:, :3] * np.expand_dims(q1[:, 3], axis=1)
     qr[:, :3] += q1[:, :3] * np.expand_dims(q0[:, 3], axis=1)
-    qr[:, 3] = q0[:, 3] * q1[:, 3]
-    qr[:, 3] -= np.sum(q0[:, :3] * q1[:, :3], axis=1)  # dot product
+    qr[:, 3] = q0[:, 3]
+    qr[:, 3] *= q1[:, 3]
+    qr[:, 3] -= np.sum(np.multiply(q0[:, :3], q1[:, :3]), axis=1)  # dot product
     qr += 0.0
 
     return toReturn
@@ -796,7 +798,7 @@ def matrixFromQuat(q, out=None, dtype=None):
     R[1, 2] = u * (c * d - a * b)
     R[2, 2] = vsqr[3] - vsqr[0] - vsqr[1] + vsqr[2]
 
-    R[3, 3] = 1.0
+    R[3, 3] = dtype(1.0)
     R[:, :] += 0.0  # remove negative zeros
 
     return R
@@ -958,20 +960,20 @@ def translationMatrix(t, out=None, dtype=None):
 def concatenate(m, out=None, dtype=None):
     """Concatenate matrix transformations.
 
-    Combine transformation matrices into a single matrix. This is similar to
+    Combine 4x4 transformation matrices into a single matrix. This is similar to
     what occurs when building a matrix stack in OpenGL using `glRotate`,
     `glTranslate`, and `glScale` calls. Matrices are multiplied together from
-    right-to-left, or the last argument to first. Note that changing the order
-    of the input matrices changes the final result.
+    right-to-left, or the last item to first. Note that changing the order of
+    the input matrices changes the final result.
 
     The data types of input matrices are coerced to match that of `out` or
-    `dtype`. For performance reasons, it is best that all arrays passed to this
-    function should have matching data types.
+    `dtype` if `out` is `None`. For performance reasons, it is best that all
+    arrays passed to this function should have matching data types.
 
     Parameters
     ----------
-    m : array_like
-        List of matrices to concatenate.
+    m : list or tuple
+        List of matrices to concatenate. All matrices must be 4x4.
     out : ndarray, optional
         Optional 4x4 output array.
     dtype : dtype or str, optional
@@ -1049,16 +1051,14 @@ def concatenate(m, out=None, dtype=None):
     """
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.identity(4, dtype=dtype)  # glLoadIdentity
+        toReturn = np.zeros((4, 4,), dtype=dtype)
     else:
-        dtype = out.dtype
+        dtype = np.dtype(dtype).type
         toReturn = out
         toReturn.fill(0.0)
-        np.fill_diagonal(toReturn, 1.0)
 
-    for mat in m:
-        # force all matrices to have the same dtype as out
-        np.matmul(np.asarray(mat, dtype=dtype), toReturn, out=toReturn)
+    toReturn[:, :] = functools.reduce(
+        np.matmul, map(lambda x: np.asarray(x, dtype=dtype), reversed(m)))
 
     return toReturn
 
@@ -1178,7 +1178,7 @@ def transform(pos, ori, points, out=None, dtype=None):
     Parameters
     ----------
     pos : array_like
-        Position vector [x, y, z] or [x, y, z, 1].
+        Position vector in form [x, y, z] or [x, y, z, 1].
     ori : array_like
         Orientation quaternion in form [x, y, z, w] where w is real and x, y, z
         are imaginary components.
@@ -1209,15 +1209,20 @@ def transform(pos, ori, points, out=None, dtype=None):
         outPoints = np.zeros_like(points)  # output array
         transform(pos, ori, points, out=outPoints)  # do the transformation
 
-    It is more computationally efficient to use `transform` rather than
-    constructing a transformation matrix and using `applyMatrix`. However, you
-    can get the same results as the previous example using a matrix by doing the
-    following::
+    You can get the same results as the previous example using a matrix by doing
+    the following::
 
         R = rotationMatrix(90., [0., 0., -1])
         T = translationMatrix([0., 1.5, -3.])
         M = concatenate([R, T])
         applyMatrix(M, points, out=outPoints)
+
+    Notes
+    -----
+    * In performance tests, `applyMatrix` is noticeably faster than `transform`
+      for very large arrays.
+    * If the input arrays for `points` or `pos` is Nx4, the last column is
+      ignored.
 
     """
     if out is None:
