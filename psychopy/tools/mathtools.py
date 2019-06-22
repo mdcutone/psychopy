@@ -283,11 +283,8 @@ def lerp(v0, v1, t, out=None, dtype=None):
     v0 = np.asarray(v0, dtype=dtype)
     v1 = np.asarray(v1, dtype=dtype)
 
-    if out is None:
-        toReturn = np.zeros_like(v0, dtype=dtype)
-    else:
-        toReturn = out
-        toReturn.fill(0.0)
+    toReturn = np.zeros_like(v0, dtype=dtype) if out is None else out
+    toReturn.fill(0.0)
 
     v0, v1, vr = np.atleast_2d(v0, v1, toReturn)
 
@@ -325,11 +322,8 @@ def distance(v0, v1, out=None, dtype=None):
     v0, v1 = np.atleast_2d(np.asarray(v0, dtype=dtype),
                            np.asarray(v1, dtype=dtype))
 
-    if out is None:
-        dist = np.zeros((v0.shape[0],), dtype=dtype)
-    else:
-        dist = out
-        dist.fill(0.0)
+    dist = np.zeros((v0.shape[0],), dtype=dtype) if out is None else out
+    dist.fill(0.0)
 
     # compute distance
     dist[:] = np.sqrt(np.sum(np.square(v1 - v0), axis=1))
@@ -393,16 +387,17 @@ def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
     #
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.zeros(q0.shape, dtype=dtype)
     else:
         dtype = np.dtype(out.dtype).type
-        toReturn = out
-        toReturn.fill(0.0)
 
+    q0 = normalize(q0, dtype=dtype)
+    q1 = normalize(q1, dtype=dtype)
+    assert q0.shape == q1.shape
+
+    toReturn = np.zeros(q0.shape, dtype=dtype) if out is None else out
+    toReturn.fill(0.0)
     t = dtype(t)
-    q0, q1, qr = np.atleast_2d(normalize(q0, dtype=dtype),
-                               normalize(q1, dtype=dtype),
-                               toReturn)
+    q0, q1, qr = np.atleast_2d(q0, q1, toReturn)
 
     dot = np.clip(np.sum(q0 * q1, axis=1), -1.0, 1.0)
     if shortest:
@@ -561,18 +556,17 @@ def multQuat(q0, q1, out=None, dtype=None):
         c = multQuat(a, b)  # rotates 135 degrees about -Z axis
 
     """
-    assert q0.shape == q1.shape
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.zeros(q0.shape, dtype=dtype)
     else:
         dtype = np.dtype(out.dtype).type
-        toReturn = out
-        toReturn.fill(0.0)  # clear array
 
-    q0, q1, qr = np.atleast_2d(normalize(q0, dtype=dtype),
-                               normalize(q1, dtype=dtype),
-                               toReturn)
+    q0 = normalize(q0, dtype=dtype)
+    q1 = normalize(q1, dtype=dtype)
+    assert q0.shape == q1.shape
+    toReturn = np.zeros(q0.shape, dtype=dtype) if out is None else out
+    toReturn.fill(0.0)  # clear array
+    q0, q1, qr = np.atleast_2d(q0, q1, toReturn)
 
     # multiply quaternions for each row of the operand arrays
     qr[:, :3] = np.cross(q0[:, :3], q1[:, :3], axis=1)
@@ -631,12 +625,12 @@ def invertQuat(q, out=None, dtype=None):
     """
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.zeros(q.shape, dtype=dtype)
     else:
         dtype = np.dtype(out.dtype).type
-        toReturn = out
 
-    qn, qinv = np.atleast_2d(normalize(q, dtype=dtype), toReturn)
+    q = normalize(q, dtype=dtype)
+    toReturn = np.zeros(q.shape, dtype=dtype) if out is None else out
+    qn, qinv = np.atleast_2d(q, toReturn)  # 2d views
 
     # conjugate the quaternion
     qinv[:, :3] = -qn[:, :3]
@@ -698,17 +692,17 @@ def applyQuat(q, points, out=None, dtype=None):
 
     """
     # based on 'quat_mul_vec3' implementation from linmath.h
-    points = np.asarray(points, dtype=dtype)
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.zeros(points.shape, dtype=dtype)
     else:
         assert points.shape == out.shape
         dtype = np.dtype(out.dtype).type
-        toReturn = out
+
+    points = np.asarray(points, dtype=dtype)
+    qin = np.asarray(q, dtype=dtype)
+    toReturn = np.zeros(points.shape, dtype=dtype) if out is None else out
 
     pin, pout = np.atleast_2d(points, toReturn)
-    qin = np.asarray(q, dtype=dtype)
     if qin.ndim == 1:  # tile if quaternion is 1D for broadcasting
         qin = np.tile(qin, (pin.shape[0], 1))
 
@@ -1115,13 +1109,17 @@ def applyMatrix(m, points, out=None, dtype=None):
     """
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
-        toReturn = np.zeros_like(points, dtype=dtype)
     else:
         dtype = np.dtype(out.dtype).type
-        toReturn = out
 
     m = np.asarray(m, dtype=dtype)
     points = np.asarray(points, dtype=dtype)
+
+    if out is None:
+        toReturn = np.zeros_like(points, dtype=dtype)
+    else:
+        toReturn = out
+
     pout, points = np.atleast_2d(toReturn, points)
 
     np.dot(points, m.T, out=pout)
