@@ -707,10 +707,12 @@ def applyQuat(q, points, out=None, dtype=None):
         dtype = np.dtype(out.dtype).type
         toReturn = out
 
-    pin, pout = np.atleast_2d(np.asarray(points, dtype=dtype), toReturn)
-    qin = np.tile(np.asarray(q, dtype=dtype), (pin.shape[0], 1))
+    pin, pout = np.atleast_2d(points, toReturn)
+    qin = np.asarray(q, dtype=dtype)
+    if qin.ndim == 1:  # tile if quaternion is 1D for broadcasting
+        qin = np.tile(qin, (pin.shape[0], 1))
 
-    pout[:, :] = pin[:, :]
+    pout[:, :] = pin[:, :]  # copy values into output array
     t = np.cross(qin[:, :3], pin[:, :3], axis=1)
     t *= dtype(2.0)
     u = np.cross(qin[:, :3], t, axis=1)
@@ -913,7 +915,7 @@ def rotationMatrix(angle, axis, out=None, dtype=None):
     R[2, 1] = y * z * cd + xs
     R[2, 2] = z2 * cd + c
 
-    R[3, 3] = 1.0
+    R[3, 3] = dtype(1.0)
     R[:, :] += 0.0  # remove negative zeros
 
     return R
