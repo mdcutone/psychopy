@@ -12,7 +12,7 @@ __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
            'matrixFromQuat', 'scaleMatrix', 'rotationMatrix',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
            'quatToAxisAngle', 'poseToMatrix', 'applyQuat', 'orthogonalize',
-           'reflect', 'cross', 'distance']
+           'reflect', 'cross', 'distance', 'dot']
 
 import numpy as np
 import functools
@@ -209,7 +209,7 @@ def dot(v0, v1, out=None, dtype=None):
         Dot product(s) of `v0` and `v1`.
 
     """
-    if out is None or v0.ndim == v1.ndim == 1:
+    if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
     else:
         dtype = np.dtype(out.dtype).type
@@ -364,7 +364,7 @@ def distance(v0, v1, out=None, dtype=None):
         Distance between vectors `v0` and `v1`.
 
     """
-    if out is None or v0.ndim == v1.ndim == 1:
+    if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
     else:
         dtype = np.dtype(out.dtype).type
@@ -499,7 +499,7 @@ def quatToAxisAngle(q, degrees=False, dtype=None):
 
     Examples
     --------
-    Using a quaternion to rotate a stimulus each frame::
+    Using a quaternion to rotate a stimulus a fixed angle each frame::
 
         # initial orientation, axis rotates in the Z direction
         qr = quatFromAxisAngle(0.0, [0., 0., -1.], degrees=True)
