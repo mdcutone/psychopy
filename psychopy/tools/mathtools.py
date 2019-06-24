@@ -187,7 +187,7 @@ def dot(v0, v1, out=None, dtype=None):
     The behaviour of this function depends on the format of the input arguments:
     * If `v0` and `v1` are 1D, the dot product is returned as a scalar and `out`
       is ignored.
-    * If `v0` and `v1` are 2D, an array of dot products between corresponding
+    * If `v0` and `v1` are 2D, a 1D array of dot products between corresponding
       row vectors are returned.
 
     Parameters
@@ -221,7 +221,6 @@ def dot(v0, v1, out=None, dtype=None):
         assert v0.shape == v1.shape
         toReturn = np.zeros((v0.shape[0],), dtype=dtype) if out is None else out
         v0, v1, vr = np.atleast_2d(v0, v1, toReturn)
-        toReturn.fill(0.0)
         toReturn[:] = np.sum((v1 * v0), axis=1)
     elif v0.ndim == v1.ndim == 1:
         toReturn = np.sqrt(np.sum(np.square(v1 - v0)))
@@ -272,6 +271,7 @@ def cross(v0, v1, out=None, dtype=None):
     toReturn = np.zeros(v0.shape, dtype=dtype) if out is None else out
     v0, v1, vr = np.atleast_2d(v0, v1, toReturn)
 
+    # compute the cross products
     vr[:, 0] = v0[:, 1] * v1[:, 2]
     vr[:, 1] = v0[:, 2] * v1[:, 0]
     vr[:, 2] = v0[:, 0] * v1[:, 1]
@@ -279,7 +279,7 @@ def cross(v0, v1, out=None, dtype=None):
     vr[:, 1] -= v0[:, 0] * v1[:, 2]
     vr[:, 2] -= v0[:, 1] * v1[:, 0]
 
-    if vr.shape[1] == 4:  # if 4D, fill the last component with zeros
+    if vr.shape[1] == 4:  # if 4D, fill the last component with ones
         vr[:, 3] = dtype(1.0)
 
     return toReturn
@@ -331,7 +331,6 @@ def lerp(v0, v1, t, out=None, dtype=None):
     toReturn.fill(0.0)
 
     v0, v1, vr = np.atleast_2d(v0, v1, toReturn)
-
     vr[:, :] = v0 * t0
     vr[:, :] += v1 * t
 
@@ -747,7 +746,7 @@ def applyQuat(q, points, out=None, dtype=None):
                               applyQuat(rotQuat, points))
 
     Specifying an array to `q` where each row is a quaternion transforms points
-    in matching rows of `points`::
+    in corresponding rows of `points`::
 
         points = [[1., 0., 0.], [0., -1., 0.]]
         quats = [quatFromAxisAngle([0., 0., -1.], -90.0, degrees=True),
@@ -873,7 +872,7 @@ def scaleMatrix(s, out=None, dtype=None):
 
     Parameters
     ----------
-    s : array_like or float
+    s : array_like, float or int
         Scaling factor(s). If `s` is scalar (float), scaling will be uniform.
         Providing a vector of scaling values [sx, sy, sz] will result in an
         anisotropic scaling matrix if any of the values differ.
