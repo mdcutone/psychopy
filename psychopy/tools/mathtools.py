@@ -125,7 +125,6 @@ def orthogonalize(v, n, out=None, dtype=None):
         toReturn.fill(0.0)
 
     v, n, vr = np.atleast_2d(v, n, toReturn)
-
     vr[:, :] = v
     vr[:, :] -= n * np.sum(n * v, axis=1)[:, np.newaxis]  # dot product
     normalize(vr, out=vr)
@@ -182,6 +181,56 @@ def reflect(v, n, out=None, dtype=None):
     return toReturn
 
 
+def dot(v0, v1, out=None, dtype=None):
+    """Dot product of two vectors.
+
+    The behaviour of this function depends on the format of the input arguments:
+    * If `v0` and `v1` are 1D, the dot product is returned as a scalar and `out`
+      is ignored.
+    * If `v0` and `v1` are 2D, an array of dot products between corresponding
+      row vectors are returned.
+
+    Parameters
+    ----------
+    v0, v1 : array_like
+        Vector(s) to compute dot products of (e.g. [x, y, z]).
+    out : ndarray, optional
+        Optional output array with same shape as `v0` and `v1`. If `v0` and `v1`
+        are 2-D, this array can be either Nx3 or Nx4 but, must have the same
+        number of rows.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
+
+    Returns
+    -------
+    ndarray
+        Dot product(s) of `v0` and `v1`.
+
+    """
+    if out is None or v0.ndim == v1.ndim == 1:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    else:
+        dtype = np.dtype(out.dtype).type
+
+    v0 = np.asarray(v0, dtype=dtype)
+    v1 = np.asarray(v1, dtype=dtype)
+
+    if v0.ndim == v1.ndim == 2:
+        assert v0.shape == v1.shape
+        toReturn = np.zeros((v0.shape[0],), dtype=dtype) if out is None else out
+        v0, v1, vr = np.atleast_2d(v0, v1, toReturn)
+        toReturn.fill(0.0)
+        toReturn[:] = np.sum((v1 * v0), axis=1)
+    elif v0.ndim == v1.ndim == 1:
+        toReturn = np.sqrt(np.sum(np.square(v1 - v0)))
+    else:
+        raise ValueError("Input arguments have invalid dimensions.")
+
+    return toReturn
+
+
 def cross(v0, v1, out=None, dtype=None):
     """Cross product of two 3D vectors.
 
@@ -220,12 +269,7 @@ def cross(v0, v1, out=None, dtype=None):
     v1 = np.asarray(v1, dtype=dtype)
 
     assert v0.shape == v1.shape
-    if out is None:
-        toReturn = np.zeros(v0.shape, dtype=dtype)
-    else:
-        toReturn = out
-        toReturn.fill(0.0)
-
+    toReturn = np.zeros(v0.shape, dtype=dtype) if out is None else out
     v0, v1, vr = np.atleast_2d(v0, v1, toReturn)
 
     vr[:, 0] = v0[:, 1] * v1[:, 2]
@@ -297,12 +341,19 @@ def lerp(v0, v1, t, out=None, dtype=None):
 def distance(v0, v1, out=None, dtype=None):
     """Get the distance between vectors/coordinates.
 
+    The behaviour of this function depends on the format of the input arguments:
+    * If `v0` and `v1` are 1D, the distance is returned as a scalar and `out` is
+      ignored.
+    * If `v0` and `v1` are 2D, an array of distances between corresponding row
+      vectors are returned.
+
     Parameters
     ----------
     v0, v1 : array_like
         Vectors to compute the distance between.
     out : ndarray, optional
         Optional output array. Must have same number of rows as `v0` and `v1`.
+        This is ignored if `v0` and `v1` are 1D.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -314,19 +365,24 @@ def distance(v0, v1, out=None, dtype=None):
         Distance between vectors `v0` and `v1`.
 
     """
-    if out is None:
+    if out is None or v0.ndim == v1.ndim == 1:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
     else:
         dtype = np.dtype(out.dtype).type
 
-    v0, v1 = np.atleast_2d(np.asarray(v0, dtype=dtype),
-                           np.asarray(v1, dtype=dtype))
+    v0 = np.asarray(v0, dtype=dtype)
+    v1 = np.asarray(v1, dtype=dtype)
 
-    dist = np.zeros((v0.shape[0],), dtype=dtype) if out is None else out
-    dist.fill(0.0)
-
-    # compute distance
-    dist[:] = np.sqrt(np.sum(np.square(v1 - v0), axis=1))
+    if v0.ndim == v1.ndim == 2:
+        v0, v1 = np.atleast_2d(v0, v1)
+        dist = np.zeros((v0.shape[0],), dtype=dtype) if out is None else out
+        dist.fill(0.0)
+        # compute distance
+        dist[:] = np.sqrt(np.sum(np.square(v1 - v0), axis=1))
+    elif v0.ndim == v1.ndim == 1:
+        dist = np.sqrt(np.sum(np.square(v1 - v0)))
+    else:
+        raise ValueError("Input arguments have invalid dimensions.")
 
     return dist
 
@@ -690,6 +746,14 @@ def applyQuat(q, points, out=None, dtype=None):
         isClose = np.allclose(applyMatrix(rotMat, points),  # True
                               applyQuat(rotQuat, points))
 
+    Specifying an array to `q` where each row is a quaternion transforms points
+    in matching rows of `points`::
+
+        points = [[1., 0., 0.], [0., -1., 0.]]
+        quats = [quatFromAxisAngle([0., 0., -1.], -90.0, degrees=True),
+                 quatFromAxisAngle([0., 0., -1.], 45.0, degrees=True)]
+        applyQuat(quats, points)
+
     """
     # based on 'quat_mul_vec3' implementation from linmath.h
     if out is None:
@@ -705,6 +769,8 @@ def applyQuat(q, points, out=None, dtype=None):
     pin, pout = np.atleast_2d(points, toReturn)
     if qin.ndim == 1:  # tile if quaternion is 1D for broadcasting
         qin = np.tile(qin, (pin.shape[0], 1))
+    else:
+        assert pin.shape == qin.shape
 
     pout[:, :] = pin[:, :]  # copy values into output array
     t = np.cross(qin[:, :3], pin[:, :3], axis=1)
@@ -1123,7 +1189,7 @@ def applyMatrix(m, points, out=None, dtype=None):
     pout, points = np.atleast_2d(toReturn, points)
 
     np.dot(points, m.T, out=pout)
-    pout[np.abs(pout) <= np.finfo(dtype).eps] = 0.0
+    pout[np.abs(pout) <= np.finfo(dtype).eps] = 0.0  # very small, make zero
 
     return toReturn
 
