@@ -185,15 +185,19 @@ def dot(v0, v1, out=None, dtype=None):
     """Dot product of two vectors.
 
     The behaviour of this function depends on the format of the input arguments:
+
     * If `v0` and `v1` are 1D, the dot product is returned as a scalar and `out`
       is ignored.
     * If `v0` and `v1` are 2D, a 1D array of dot products between corresponding
       row vectors are returned.
+    * If `v0` is 1D and `v1` is 2D, an array of dot products between `v0` and
+      each row of `v1` is returned.
 
     Parameters
     ----------
     v0, v1 : array_like
-        Vector(s) to compute dot products of (e.g. [x, y, z]).
+        Vector(s) to compute dot products of (e.g. [x, y, z]). `v0` must have
+        equal or fewer dimensions than `v1`.
     out : ndarray, optional
         Optional output array with same shape as `v0` and `v1`. If `v0` and `v1`
         are 2-D, this array can be either Nx3 or Nx4 but, must have the same
@@ -217,13 +221,12 @@ def dot(v0, v1, out=None, dtype=None):
     v0 = np.asarray(v0, dtype=dtype)
     v1 = np.asarray(v1, dtype=dtype)
 
-    if v0.ndim == v1.ndim == 2:
-        assert v0.shape == v1.shape
+    if v0.ndim == v1.ndim == 2 or v0.ndim == 2 and v1.ndim == 1:
         toReturn = np.zeros((v0.shape[0],), dtype=dtype) if out is None else out
-        v0, v1, vr = np.atleast_2d(v0, v1, toReturn)
-        toReturn[:] = np.sum((v1 * v0), axis=1)
+        vr = np.atleast_2d(toReturn)  # make sure we have a 2d view
+        vr[:] = np.sum((v1 * v0), axis=1)
     elif v0.ndim == v1.ndim == 1:
-        toReturn = np.sqrt(np.sum(np.square(v1 - v0)))
+        toReturn = np.sum((v1 * v0))
     else:
         raise ValueError("Input arguments have invalid dimensions.")
 
@@ -231,16 +234,15 @@ def dot(v0, v1, out=None, dtype=None):
 
 
 def cross(v0, v1, out=None, dtype=None):
-    """Cross product of two 3D vectors.
+    """Cross product of two 3-D vectors.
 
     Parameters
     ----------
     v0, v1 : array_like
-        Vector(s) in form [x, y, z] or [x, y, z, 1].
+        Vector(s) in form [x, y, z] or [x, y, z, 1]. `v1` must have equal or
+        fewer dimensions than `v0`.
     out : ndarray, optional
-        Optional output array with same shape as `v0` and `v1`. If `v0` and `v1`
-        are 2-D, this array can be either Nx3 or Nx4 but, must have the same
-        number of rows.
+        Optional output array. Must have same shape as `v0`.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -266,21 +268,36 @@ def cross(v0, v1, out=None, dtype=None):
 
     v0 = np.asarray(v0, dtype=dtype)
     v1 = np.asarray(v1, dtype=dtype)
-
-    assert v0.shape == v1.shape
     toReturn = np.zeros(v0.shape, dtype=dtype) if out is None else out
-    v0, v1, vr = np.atleast_2d(v0, v1, toReturn)
 
-    # compute the cross products
-    vr[:, 0] = v0[:, 1] * v1[:, 2]
-    vr[:, 1] = v0[:, 2] * v1[:, 0]
-    vr[:, 2] = v0[:, 0] * v1[:, 1]
-    vr[:, 0] -= v0[:, 2] * v1[:, 1]
-    vr[:, 1] -= v0[:, 0] * v1[:, 2]
-    vr[:, 2] -= v0[:, 1] * v1[:, 0]
+    if v0.ndim == v1.ndim == 2:  # 2D x 2D
+        vr = np.atleast_2d(toReturn)
+        vr[:, 0] = v0[:, 1] * v1[:, 2] - v0[:, 2] * v1[:, 1]
+        vr[:, 1] = v0[:, 2] * v1[:, 0] - v0[:, 0] * v1[:, 2]
+        vr[:, 2] = v0[:, 0] * v1[:, 1] - v0[:, 1] * v1[:, 0]
 
-    if vr.shape[1] == 4:  # if 4D, fill the last component with ones
-        vr[:, 3] = dtype(1.0)
+        if vr.shape[1] == 4:
+            vr[:, 3] = dtype(1.0)
+
+    elif v0.ndim == 2 and v1.ndim == 1:  # 2D x 1D
+        vr = np.atleast_2d(toReturn)
+        vr[:, 0] = v0[:, 1] * v1[2] - v0[:, 2] * v1[1]
+        vr[:, 1] = v0[:, 2] * v1[0] - v0[:, 0] * v1[2]
+        vr[:, 2] = v0[:, 0] * v1[1] - v0[:, 1] * v1[0]
+
+        if vr.shape[1] == 4:
+            vr[:, 3] = dtype(1.0)
+
+    elif v0.ndim == v1.ndim == 1:  # 1D x 1D
+        toReturn[0] = v0[1] * v1[2] - v0[2] * v1[1]
+        toReturn[1] = v0[2] * v1[0] - v0[0] * v1[2]
+        toReturn[2] = v0[0] * v1[1] - v0[1] * v1[0]
+
+        if toReturn.shape[0] == 4:
+            toReturn[3] = dtype(1.0)
+
+    else:
+        raise ValueError("Input arguments have invalid dimensions.")
 
     return toReturn
 
@@ -341,10 +358,13 @@ def distance(v0, v1, out=None, dtype=None):
     """Get the distance between vectors/coordinates.
 
     The behaviour of this function depends on the format of the input arguments:
+
     * If `v0` and `v1` are 1D, the distance is returned as a scalar and `out` is
       ignored.
     * If `v0` and `v1` are 2D, an array of distances between corresponding row
       vectors are returned.
+    * If `v0` is 1D and `v1` is 2D, an array of distance from `v0` to each row
+      of `v1` is returned.
 
     Parameters
     ----------
@@ -372,11 +392,8 @@ def distance(v0, v1, out=None, dtype=None):
     v0 = np.asarray(v0, dtype=dtype)
     v1 = np.asarray(v1, dtype=dtype)
 
-    if v0.ndim == v1.ndim == 2:
-        v0, v1 = np.atleast_2d(v0, v1)
-        dist = np.zeros((v0.shape[0],), dtype=dtype) if out is None else out
-        dist.fill(0.0)
-        # compute distance
+    if v0.ndim == v1.ndim == 2 or v0.ndim == 1 and v1.ndim == 2:
+        dist = np.zeros((v1.shape[0],), dtype=dtype) if out is None else out
         dist[:] = np.sqrt(np.sum(np.square(v1 - v0), axis=1))
     elif v0.ndim == v1.ndim == 1:
         dist = np.sqrt(np.sum(np.square(v1 - v0)))
