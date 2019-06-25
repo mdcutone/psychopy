@@ -239,10 +239,10 @@ def cross(v0, v1, out=None, dtype=None):
     Parameters
     ----------
     v0, v1 : array_like
-        Vector(s) in form [x, y, z] or [x, y, z, 1]. `v1` must have equal or
-        fewer dimensions than `v0`.
+        Vector(s) in form [x, y, z] or [x, y, z, 1].
     out : ndarray, optional
-        Optional output array. Must have same shape as `v0`.
+        Optional output array. Must have same shape as the input argument
+        (either `v0` or `v1`) with the most dimensions.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -256,9 +256,36 @@ def cross(v0, v1, out=None, dtype=None):
     Notes
     -----
     * If input vectors are 4D, the last value of cross product vectors is always
-      set to 1.
+      set to one.
     * If input vectors `v0` and `v1` are Nx3 and `out` is Nx4, the cross product
-      is computed and the last column of `out` is filled with 1.
+      is computed and the last column of `out` is filled with ones.
+
+    Examples
+    --------
+
+    Find the cross product of two vectors::
+
+        a = normalize([1, 2, 3])
+        b = normalize([3, 2, 1])
+        c = cross(a, b)
+
+    If input arguments are 2D, the function returns the cross products of
+    corresponding rows::
+
+        # create two 6x3 arrays with random numbers
+        a = normalize(np.random.uniform(-1.0, 1.0, (6, 3,)))
+        b = normalize(np.random.uniform(-1.0, 1.0, (6, 3,)))
+        cprod = np.zeros(a.shape)  # output has the same shape as inputs
+        cross(a, b, out=cprod)
+
+    If a 1D and 2D vector are specified, the cross product of each row of the
+    2D array with the 1D array will be returned::
+
+        # create two 6x3 arrays with random numbers
+        a = normalize([1, 2, 3])
+        b = normalize(np.random.uniform(-1.0, 1.0, (6, 3,)))
+        cprod = np.zeros(a.shape)
+        cross(a, b, out=cprod)
 
     """
     if out is None:
@@ -268,9 +295,10 @@ def cross(v0, v1, out=None, dtype=None):
 
     v0 = np.asarray(v0, dtype=dtype)
     v1 = np.asarray(v1, dtype=dtype)
-    toReturn = np.zeros(v0.shape, dtype=dtype) if out is None else out
 
     if v0.ndim == v1.ndim == 2:  # 2D x 2D
+        assert v0.shape == v1.shape
+        toReturn = np.zeros(v0.shape, dtype=dtype) if out is None else out
         vr = np.atleast_2d(toReturn)
         vr[:, 0] = v0[:, 1] * v1[:, 2] - v0[:, 2] * v1[:, 1]
         vr[:, 1] = v0[:, 2] * v1[:, 0] - v0[:, 0] * v1[:, 2]
@@ -279,7 +307,18 @@ def cross(v0, v1, out=None, dtype=None):
         if vr.shape[1] == 4:
             vr[:, 3] = dtype(1.0)
 
+    elif v0.ndim == v1.ndim == 1:  # 1D x 1D
+        assert v0.shape == v1.shape
+        toReturn = np.zeros(v0.shape, dtype=dtype) if out is None else out
+        toReturn[0] = v0[1] * v1[2] - v0[2] * v1[1]
+        toReturn[1] = v0[2] * v1[0] - v0[0] * v1[2]
+        toReturn[2] = v0[0] * v1[1] - v0[1] * v1[0]
+
+        if toReturn.shape[0] == 4:
+            toReturn[3] = dtype(1.0)
+
     elif v0.ndim == 2 and v1.ndim == 1:  # 2D x 1D
+        toReturn = np.zeros(v0.shape, dtype=dtype) if out is None else out
         vr = np.atleast_2d(toReturn)
         vr[:, 0] = v0[:, 1] * v1[2] - v0[:, 2] * v1[1]
         vr[:, 1] = v0[:, 2] * v1[0] - v0[:, 0] * v1[2]
@@ -288,16 +327,18 @@ def cross(v0, v1, out=None, dtype=None):
         if vr.shape[1] == 4:
             vr[:, 3] = dtype(1.0)
 
-    elif v0.ndim == v1.ndim == 1:  # 1D x 1D
-        toReturn[0] = v0[1] * v1[2] - v0[2] * v1[1]
-        toReturn[1] = v0[2] * v1[0] - v0[0] * v1[2]
-        toReturn[2] = v0[0] * v1[1] - v0[1] * v1[0]
+    elif v0.ndim == 1 and v1.ndim == 2:  # 1D x 2D
+        toReturn = np.zeros(v1.shape, dtype=dtype) if out is None else out
+        vr = np.atleast_2d(toReturn)
+        vr[:, 0] = v1[:, 2] * v0[1] - v1[:, 1] * v0[2]
+        vr[:, 1] = v1[:, 0] * v0[2] - v1[:, 2] * v0[0]
+        vr[:, 2] = v1[:, 1] * v0[0] - v1[:, 0] * v0[1]
 
-        if toReturn.shape[0] == 4:
-            toReturn[3] = dtype(1.0)
+        if vr.shape[1] == 4:
+            vr[:, 3] = dtype(1.0)
 
     else:
-        raise ValueError("Input arguments have invalid dimensions.")
+        raise ValueError("Input arguments have incorrect dimensions.")
 
     return toReturn
 
