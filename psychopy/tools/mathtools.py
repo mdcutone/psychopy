@@ -1352,8 +1352,8 @@ def poseToMatrix(pos, ori, out=None, dtype=None):
 
 
 def transform(pos, ori, points, out=None, dtype=None):
-    """Transform points using a position and orientation. Points are rotated
-    then translated.
+    """Transform points using a position, orientation. Points are rotated then
+    translated.
 
     Parameters
     ----------
@@ -1396,6 +1396,10 @@ def transform(pos, ori, points, out=None, dtype=None):
         T = translationMatrix([0., 1.5, -3.])
         M = concatenate([R, T])
         applyMatrix(M, points, out=outPoints)
+
+    If you are defining transformations with quaternions and coordinates, you
+    can skip the costly matrix creation process by using `transform`. However,
+    `applyMatrix` is marginally faster over very large arrays of points.
 
     Notes
     -----
