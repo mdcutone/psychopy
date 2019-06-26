@@ -564,7 +564,7 @@ def surfaceNormal(tri, norm=False, out=None, dtype=None):
         Normalize surface normals if ``True``, default is ``False``.
     out : ndarray, optional
         Optional output array. Must have one fewer dimensions than `tri`. The
-        shape of the last dimensions must be 3.
+        shape of the last dimension must be 3.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
