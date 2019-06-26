@@ -13,7 +13,7 @@ __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
            'quatToAxisAngle', 'poseToMatrix', 'applyQuat', 'orthogonalize',
            'reflect', 'cross', 'distance', 'dot', 'quatMagnitude', 'length',
-           'project']
+           'project', 'surfaceNormal']
 
 import numpy as np
 import functools
@@ -1620,24 +1620,3 @@ def transform(pos, ori, points, out=None, dtype=None):
     pout[:, 2] += pos[2]
 
     return toReturn
-
-
-if __name__ == "__main__":
-    points = [[[-1., 0., 0.], [0., 1., 0.], [1, 0, 0]],
-        [[1., 0., 0.], [0., 1., 0.], [-1, 0, 0]]]
-    #points = [[-1., 0., 0.], [0., 1., 0.], [1, 0, 0]]
-    #quats = [quatFromAxisAngle([0., 0., -1.], -90.0, degrees=True),
-    #         quatFromAxisAngle([0., 0., -1.], 45.0, degrees=True)]
-    #a = applyQuat(quats, points)
-
-    print(surfaceNormal(points, norm=True))
-    axis = [0., 0., -1.]
-    angle = -90.0
-    rotMat = rotationMatrix(angle, axis)[:3, :3]  # rotation sub-matrix only
-    rotQuat = quatFromAxisAngle(axis, angle, degrees=True)
-    points = [[1., 0., 0.], [0., -1., 0.]]
-    isClose = np.allclose(applyMatrix(rotMat, points),  # True
-                          applyQuat(rotQuat, points))
-
-
-    print(isClose)
