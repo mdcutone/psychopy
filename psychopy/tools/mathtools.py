@@ -222,6 +222,15 @@ def project(v0, v1, out=None, dtype=None):
             dot(v0, v1, dtype=dtype)[:, np.newaxis] / length(v1)[:, np.newaxis]
     elif v0.ndim == v1.ndim == 1:
         toReturn = v1 * (dot(v0, v1, dtype=dtype) / np.sum(np.square(v1)))
+    elif v0.ndim == 1 and v1.ndim == 2:
+        toReturn = np.zeros_like(v1, dtype=dtype) if out is None else out
+        toReturn[:, :] = v1[:, :]
+        toReturn *= \
+            dot(v0, v1, dtype=dtype)[:, np.newaxis] / length(v1)[:, np.newaxis]
+    elif v0.ndim == 2 and v1.ndim == 1:
+        toReturn = np.zeros_like(v0, dtype=dtype) if out is None else out
+        toReturn[:, :] = v1[:]
+        toReturn *= dot(v0, v1, dtype=dtype)[:, np.newaxis] / length(v1)
     else:
         raise ValueError("Input arguments have invalid dimensions.")
 
@@ -1554,7 +1563,7 @@ if __name__ == "__main__":
              quatFromAxisAngle([0., 0., -1.], 45.0, degrees=True)]
     a = applyQuat(quats, points)
 
-    print(dot(a[0], a))
+    print(project(a, a))
     axis = [0., 0., -1.]
     angle = -90.0
     rotMat = rotationMatrix(angle, axis)[:3, :3]  # rotation sub-matrix only
