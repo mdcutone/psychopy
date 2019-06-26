@@ -12,7 +12,7 @@ __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
            'matrixFromQuat', 'scaleMatrix', 'rotationMatrix',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
            'quatToAxisAngle', 'poseToMatrix', 'applyQuat', 'orthogonalize',
-           'reflect', 'cross', 'distance', 'dot']
+           'reflect', 'cross', 'distance', 'dot', 'quatMagnitude']
 
 import numpy as np
 import functools
@@ -221,7 +221,9 @@ def dot(v0, v1, out=None, dtype=None):
     v0 = np.asarray(v0, dtype=dtype)
     v1 = np.asarray(v1, dtype=dtype)
 
-    if v0.ndim == v1.ndim == 2 or v0.ndim == 2 and v1.ndim == 1:
+    if v0.ndim == v1.ndim == 2 or \
+            v0.ndim == 2 and v1.ndim == 1 or \
+            v0.ndim == 1 and v1.ndim == 2:
         toReturn = np.zeros((v0.shape[0],), dtype=dtype) if out is None else out
         vr = np.atleast_2d(toReturn)  # make sure we have a 2d view
         vr[:] = np.sum((v1 * v0), axis=1)
@@ -279,7 +281,7 @@ def cross(v0, v1, out=None, dtype=None):
         cross(a, b, out=cprod)
 
     If a 1D and 2D vector are specified, the cross product of each row of the
-    2D array with the 1D array will be returned::
+    2D array and the 1D array is returned::
 
         # create two 6x3 arrays with random numbers
         a = normalize([1, 2, 3])
@@ -433,11 +435,14 @@ def distance(v0, v1, out=None, dtype=None):
     v0 = np.asarray(v0, dtype=dtype)
     v1 = np.asarray(v1, dtype=dtype)
 
-    if v0.ndim == v1.ndim == 2 or v0.ndim == 1 and v1.ndim == 2:
+    if v0.ndim == v1.ndim == 2 or (v0.ndim == 2 and v1.ndim == 1):
         dist = np.zeros((v1.shape[0],), dtype=dtype) if out is None else out
         dist[:] = np.sqrt(np.sum(np.square(v1 - v0), axis=1))
     elif v0.ndim == v1.ndim == 1:
         dist = np.sqrt(np.sum(np.square(v1 - v0)))
+    elif v0.ndim == 1 and v1.ndim == 2:
+        dist = np.zeros((v0.shape[0],), dtype=dtype) if out is None else out
+        dist[:] = np.sqrt(np.sum(np.square(v1 - v0), axis=1))
     else:
         raise ValueError("Input arguments have invalid dimensions.")
 
@@ -627,6 +632,58 @@ def quatFromAxisAngle(axis, angle, degrees=False, dtype=None):
     np.multiply(axis, np.sin(halfRad), out=toReturn[:3])
     toReturn[3] = np.cos(halfRad)
     toReturn += 0.0  # remove negative zeros
+
+    return toReturn
+
+
+def quatMagnitude(q, squared=False, out=None, dtype=None):
+    """Get the magnitude of a quaternion.
+
+    A quaternion with a magnitude of 1 indicates that it is normalized.
+
+    Parameters
+    ----------
+    q : array_like
+        Quaternion(s) in form [x, y, z, w] where w is real and x, y, z are
+        imaginary components.
+    squared : bool, optional
+        If ``True`` return the squared magnitude. If you are just checking if a
+        quaternion is normalized, the squared magnitude will suffice to avoid
+        the square root operation.
+    out : ndarray, optional
+        Optional output array. Must have same length as the number of rows in
+        `q`.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
+
+    Returns
+    -------
+    float or ndarray
+        Magnitude of quaternion `q`.
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    else:
+        dtype = np.dtype(out.dtype).type
+
+    q = np.asarray(q, dtype=dtype)
+    if q.ndim == 1:
+        assert q.shape[0] == 4
+        toReturn = np.sum(np.square(q))
+        if not squared:
+            toReturn = np.sqrt(toReturn)
+    elif q.ndim == 2:
+        assert q.shape[1] == 4
+        toReturn = np.zeros((q.shape[0],), dtype=dtype) if out is None else out
+        if squared:
+            toReturn[:] = np.sum(np.square(q), axis=1)
+        else:
+            toReturn[:] = np.sqrt(np.sum(np.square(q), axis=1))
+    else:
+        raise ValueError("Input argument 'q' has incorrect dimensions.")
 
     return toReturn
 
@@ -1076,7 +1133,7 @@ def translationMatrix(t, out=None, dtype=None):
     return T
 
 
-def concatenate(m, out=None, dtype=None):
+def concatenate(matrices, out=None, dtype=None):
     """Concatenate matrix transformations.
 
     Combine 4x4 transformation matrices into a single matrix. This is similar to
@@ -1091,7 +1148,7 @@ def concatenate(m, out=None, dtype=None):
 
     Parameters
     ----------
-    m : list or tuple
+    matrices : list or tuple
         List of matrices to concatenate. All matrices must be 4x4.
     out : ndarray, optional
         Optional 4x4 output array.
@@ -1174,10 +1231,10 @@ def concatenate(m, out=None, dtype=None):
     else:
         dtype = np.dtype(dtype).type
         toReturn = out
-        toReturn.fill(0.0)
 
     toReturn[:, :] = functools.reduce(
-        np.matmul, map(lambda x: np.asarray(x, dtype=dtype), reversed(m)))
+        np.matmul,
+        map(lambda x: np.asarray(x, dtype=dtype), reversed(matrices)))
 
     return toReturn
 
