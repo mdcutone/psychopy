@@ -12,7 +12,8 @@ __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
            'matrixFromQuat', 'scaleMatrix', 'rotationMatrix',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
            'quatToAxisAngle', 'poseToMatrix', 'applyQuat', 'orthogonalize',
-           'reflect', 'cross', 'distance', 'dot', 'quatMagnitude']
+           'reflect', 'cross', 'distance', 'dot', 'quatMagnitude', 'length',
+           'project']
 
 import numpy as np
 import functools
@@ -21,6 +22,57 @@ import functools
 # ------------------------------------------------------------------------------
 # Vector Operations
 #
+
+def length(v, squared=False, out=None, dtype=None):
+    """Get the length of a vector.
+
+    Parameters
+    ----------
+    v : ndarray
+        Vector to normalize, can be Nx2, Nx3, or Nx4. If a 2D array is
+        specified, rows are treated as separate vectors.
+    squared : bool, optional
+        If ``True`` the squared length is returned. The default is ``False``.
+    out : ndarray, optional
+        1D to write vector lengths. The specified array must have same length
+        as number of rows in `v`. This is ignored if `v` is 1D.
+    dtype : dtype or str, optional
+        Data type for computations can either be 'float32' or 'float64'. If
+        `None` is specified, the data type of `out` is used. If `out` is not
+        provided, 'float64' is used by default.
+
+    Returns
+    -------
+    float or ndarray
+        Length of vector `v`.
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    else:
+        dtype = np.dtype(out.dtype).type
+
+    v = np.asarray(v, dtype=dtype)
+
+    if v.ndim == 2:
+        assert v.shape[1] <= 4
+        toReturn = np.zeros((v.shape[0],), dtype=dtype) if out is None else out
+        v2d, vr = np.atleast_2d(v, toReturn)  # 2d view of array
+        if squared:
+            vr[:, :] = np.sum(np.square(v2d), axis=1)
+        else:
+            vr[:, :] = np.sqrt(np.sum(np.square(v2d), axis=1))
+    elif v.ndim == 1:
+        assert v.shape[0] <= 4
+        if squared:
+            toReturn = np.sum(np.square(v))
+        else:
+            toReturn = np.sqrt(np.sum(np.square(v)))
+    else:
+        raise ValueError("Input arguments have invalid dimensions.")
+
+    return toReturn
+
 
 def normalize(v, out=None, dtype=None):
     """Normalize a vector or quaternion.
@@ -129,6 +181,51 @@ def orthogonalize(v, n, out=None, dtype=None):
     vr[:, :] -= n * np.sum(n * v, axis=1)[:, np.newaxis]  # dot product
     normalize(vr, out=vr)
 
+    return toReturn
+
+
+def project(v0, v1, out=None, dtype=None):
+    """Project a vector onto another.
+
+    Parameters
+    ----------
+    v0 : array_like
+        Vector can be Nx2, Nx3, or Nx4. If a 2D array is specified, rows are
+        treated as separate vectors.
+    v1 : array_like
+        Vector to project onto `v0`.
+    out : ndarray, optional
+        Optional output array. Must have same shape as `v` and `n`.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
+
+    Returns
+    -------
+    ndarray or float
+        Projection of vector `v0` on `v1`.
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    else:
+        dtype = np.dtype(out.dtype).type
+
+    v0 = np.asarray(v0, dtype=dtype)
+    v1 = np.asarray(v1, dtype=dtype)
+
+    if v0.ndim == v1.ndim == 2:
+        toReturn = np.zeros_like(v0, dtype=dtype) if out is None else out
+        toReturn[:, :] = v1[:, :]
+        toReturn *= \
+            dot(v0, v1, dtype=dtype)[:, np.newaxis] / length(v1)[:, np.newaxis]
+    elif v0.ndim == v1.ndim == 1:
+        toReturn = v1 * (dot(v0, v1, dtype=dtype) / np.sum(np.square(v1)))
+    else:
+        raise ValueError("Input arguments have invalid dimensions.")
+
+    toReturn += 0.0  # remove negative zeros
     return toReturn
 
 
@@ -639,7 +736,7 @@ def quatFromAxisAngle(axis, angle, degrees=False, dtype=None):
 def quatMagnitude(q, squared=False, out=None, dtype=None):
     """Get the magnitude of a quaternion.
 
-    A quaternion with a magnitude of 1 indicates that it is normalized.
+    A quaternion is normalized if its magnitude is 1.
 
     Parameters
     ----------
@@ -672,9 +769,10 @@ def quatMagnitude(q, squared=False, out=None, dtype=None):
     q = np.asarray(q, dtype=dtype)
     if q.ndim == 1:
         assert q.shape[0] == 4
-        toReturn = np.sum(np.square(q))
-        if not squared:
-            toReturn = np.sqrt(toReturn)
+        if squared:
+            toReturn = np.sum(np.square(q))
+        else:
+            toReturn = np.sqrt(np.sum(np.square(q)))
     elif q.ndim == 2:
         assert q.shape[1] == 4
         toReturn = np.zeros((q.shape[0],), dtype=dtype) if out is None else out
@@ -876,26 +974,34 @@ def applyQuat(q, points, out=None, dtype=None):
         assert points.shape == out.shape
         dtype = np.dtype(out.dtype).type
 
-    points = np.asarray(points, dtype=dtype)
     qin = np.asarray(q, dtype=dtype)
+    points = np.asarray(points, dtype=dtype)
     toReturn = np.zeros(points.shape, dtype=dtype) if out is None else out
-
     pin, pout = np.atleast_2d(points, toReturn)
-    if qin.ndim == 1:  # tile if quaternion is 1D for broadcasting
-        qin = np.tile(qin, (pin.shape[0], 1))
-    else:
-        assert pin.shape == qin.shape
-
     pout[:, :] = pin[:, :]  # copy values into output array
-    t = np.cross(qin[:, :3], pin[:, :3], axis=1)
-    t *= dtype(2.0)
-    u = np.cross(qin[:, :3], t, axis=1)
-    t *= np.expand_dims(qin[:, 3], axis=1)
-    pout[:, :3] += t
-    pout[:, :3] += u
-    pout += 0.0  # remove negative zeros
-    # remove values very close to zero
-    pout[np.abs(pout) <= np.finfo(dtype).eps] = 0.0
+
+    if qin.ndim == 1:
+        assert qin.shape[0] == 4
+        t = cross(qin[:3], pin[:, :3]) * dtype(2.0)
+        u = cross(qin[:3], t)
+        t *= qin[3]
+        pout[:, :3] += t
+        pout[:, :3] += u
+        pout += 0.0  # remove negative zeros
+        # remove values very close to zero
+        pout[np.abs(pout) <= np.finfo(dtype).eps] = 0.0
+    elif qin.ndim == 2:
+        assert qin.shape[1] == 4 and qin.shape[0] == pin.shape[0]
+        t = cross(qin[:, :3], pin[:, :3])
+        t *= dtype(2.0)
+        u = cross(qin[:, :3], t)
+        t *= np.expand_dims(qin[:, 3], axis=1)
+        pout[:, :3] += t
+        pout[:, :3] += u
+        pout += 0.0
+        pout[np.abs(pout) <= np.finfo(dtype).eps] = 0.0
+    else:
+        raise ValueError("Input arguments have invalid dimensions.")
 
     return toReturn
 
@@ -1368,9 +1474,9 @@ def transform(pos, ori, points, out=None, dtype=None):
         Optional output array for 4x4 matrix. All computations will use the data
         type of this array.
     dtype : dtype or str, optional
-        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
-        specified, the data type is inferred by `out`. If `out` is not
-        specified, the default is 'float64'.
+        Data type for computations can either be 'float32' or 'float64'. If
+        `None` is specified, the data type of `out` is used. If `out` is not
+        provided, 'float64' is used by default.
 
     Returns
     -------
@@ -1438,3 +1544,22 @@ def transform(pos, ori, points, out=None, dtype=None):
     pout[:, 2] += pos[2]
 
     return toReturn
+
+
+if __name__ == "__main__":
+    points = [[1., 0., 0.], [0., -1., 0.]]
+    quats = [quatFromAxisAngle([0., 0., -1.], -90.0, degrees=True),
+             quatFromAxisAngle([0., 0., -1.], 45.0, degrees=True)]
+    a = applyQuat(quats, points)
+
+    print(project(a, a))
+    axis = [0., 0., -1.]
+    angle = -90.0
+    rotMat = rotationMatrix(angle, axis)[:3, :3]  # rotation sub-matrix only
+    rotQuat = quatFromAxisAngle(axis, angle, degrees=True)
+    points = [[1., 0., 0.], [0., -1., 0.]]
+    isClose = np.allclose(applyMatrix(rotMat, points),  # True
+                          applyQuat(rotQuat, points))
+
+
+    print(isClose)
