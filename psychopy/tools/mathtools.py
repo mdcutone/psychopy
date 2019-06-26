@@ -318,14 +318,16 @@ def dot(v0, v1, out=None, dtype=None):
     v0 = np.asarray(v0, dtype=dtype)
     v1 = np.asarray(v1, dtype=dtype)
 
-    if v0.ndim == v1.ndim == 2 or \
-            v0.ndim == 2 and v1.ndim == 1 or \
-            v0.ndim == 1 and v1.ndim == 2:
+    if v0.ndim == v1.ndim == 2 or v0.ndim == 2 and v1.ndim == 1:
         toReturn = np.zeros((v0.shape[0],), dtype=dtype) if out is None else out
         vr = np.atleast_2d(toReturn)  # make sure we have a 2d view
-        vr[:] = np.sum((v1 * v0), axis=1)
+        vr[:] = np.sum(v1 * v0, axis=1)
     elif v0.ndim == v1.ndim == 1:
         toReturn = np.sum((v1 * v0))
+    elif v0.ndim == 1 and v1.ndim == 2:
+        toReturn = np.zeros((v1.shape[0],), dtype=dtype) if out is None else out
+        vr = np.atleast_2d(toReturn)  # make sure we have a 2d view
+        vr[:] = np.sum(v1 * v0, axis=1)
     else:
         raise ValueError("Input arguments have invalid dimensions.")
 
@@ -1552,7 +1554,7 @@ if __name__ == "__main__":
              quatFromAxisAngle([0., 0., -1.], 45.0, degrees=True)]
     a = applyQuat(quats, points)
 
-    print(project(a, a))
+    print(dot(a[0], a))
     axis = [0., 0., -1.]
     angle = -90.0
     rotMat = rotationMatrix(angle, axis)[:3, :3]  # rotation sub-matrix only
