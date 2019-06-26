@@ -184,60 +184,6 @@ def orthogonalize(v, n, out=None, dtype=None):
     return toReturn
 
 
-def project(v0, v1, out=None, dtype=None):
-    """Project a vector onto another.
-
-    Parameters
-    ----------
-    v0 : array_like
-        Vector can be Nx2, Nx3, or Nx4. If a 2D array is specified, rows are
-        treated as separate vectors.
-    v1 : array_like
-        Vector to project onto `v0`.
-    out : ndarray, optional
-        Optional output array. Must have same shape as `v` and `n`.
-    dtype : dtype or str, optional
-        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
-        specified, the data type is inferred by `out`. If `out` is not provided,
-        the default is 'float64'.
-
-    Returns
-    -------
-    ndarray or float
-        Projection of vector `v0` on `v1`.
-
-    """
-    if out is None:
-        dtype = np.float64 if dtype is None else np.dtype(dtype).type
-    else:
-        dtype = np.dtype(out.dtype).type
-
-    v0 = np.asarray(v0, dtype=dtype)
-    v1 = np.asarray(v1, dtype=dtype)
-
-    if v0.ndim == v1.ndim == 2:
-        toReturn = np.zeros_like(v0, dtype=dtype) if out is None else out
-        toReturn[:, :] = v1[:, :]
-        toReturn *= \
-            dot(v0, v1, dtype=dtype)[:, np.newaxis] / length(v1)[:, np.newaxis]
-    elif v0.ndim == v1.ndim == 1:
-        toReturn = v1 * (dot(v0, v1, dtype=dtype) / np.sum(np.square(v1)))
-    elif v0.ndim == 1 and v1.ndim == 2:
-        toReturn = np.zeros_like(v1, dtype=dtype) if out is None else out
-        toReturn[:, :] = v1[:, :]
-        toReturn *= \
-            dot(v0, v1, dtype=dtype)[:, np.newaxis] / length(v1)[:, np.newaxis]
-    elif v0.ndim == 2 and v1.ndim == 1:
-        toReturn = np.zeros_like(v0, dtype=dtype) if out is None else out
-        toReturn[:, :] = v1[:]
-        toReturn *= dot(v0, v1, dtype=dtype)[:, np.newaxis] / length(v1)
-    else:
-        raise ValueError("Input arguments have invalid dimensions.")
-
-    toReturn += 0.0  # remove negative zeros
-    return toReturn
-
-
 def reflect(v, n, out=None, dtype=None):
     """Reflection of a vector.
 
@@ -453,6 +399,54 @@ def cross(v0, v1, out=None, dtype=None):
     return toReturn
 
 
+def project(v0, v1, out=None, dtype=None):
+    """Project a vector onto another.
+
+    Parameters
+    ----------
+    v0 : array_like
+        Vector can be Nx2, Nx3, or Nx4. If a 2D array is specified, rows are
+        treated as separate vectors.
+    v1 : array_like
+        Vector to project onto `v0`.
+    out : ndarray, optional
+        Optional output array. Must have same shape as `v` and `n`.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
+
+    Returns
+    -------
+    ndarray or float
+        Projection of vector `v0` on `v1`.
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    else:
+        dtype = np.dtype(out.dtype).type
+
+    v0 = np.asarray(v0, dtype=dtype)
+    v1 = np.asarray(v1, dtype=dtype)
+
+    if v0.ndim == v1.ndim == 2 or v0.ndim == 1 and v1.ndim == 2:
+        toReturn = np.zeros_like(v1, dtype=dtype) if out is None else out
+        toReturn[:, :] = v1[:, :]
+        toReturn *= (dot(v0, v1, dtype=dtype) / length(v1))[:, np.newaxis]
+    elif v0.ndim == v1.ndim == 1:
+        toReturn = v1 * (dot(v0, v1, dtype=dtype) / np.sum(np.square(v1)))
+    elif v0.ndim == 2 and v1.ndim == 1:
+        toReturn = np.zeros_like(v0, dtype=dtype) if out is None else out
+        toReturn[:, :] = v1[:]
+        toReturn *= (dot(v0, v1, dtype=dtype) / length(v1))[:, np.newaxis]
+    else:
+        raise ValueError("Input arguments have invalid dimensions.")
+
+    toReturn += 0.0  # remove negative zeros
+    return toReturn
+
+
 def lerp(v0, v1, t, out=None, dtype=None):
     """Linear interpolation (LERP) between two vectors/coordinates.
 
@@ -555,6 +549,77 @@ def distance(v0, v1, out=None, dtype=None):
         raise ValueError("Input arguments have invalid dimensions.")
 
     return dist
+
+
+def surfaceNormal(tri, norm=False, out=None, dtype=None):
+    """Compute the surface normal of a given triangle.
+
+    Parameters
+    ----------
+    tri : array_like
+        Triangle vertices as 2D (3x3) array [p0, p1, p2] where each vertex is a
+        length 3 array [vx, xy, vz]. The input array can be 3D (Nx3x3) to
+        specify multiple triangles.
+    norm : bool, optional
+        Normalize surface normals if ``True``, default is ``False``.
+    out : ndarray, optional
+        Optional output array. Must have one fewer dimensions than `tri`. The
+        shape of the last dimensions must be 3.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
+
+    Returns
+    -------
+    nddarray
+        Surface normal of `tri`.
+
+    Examples
+    --------
+    Compute the surface normal of a triangle::
+
+        vertices = [[-1., 0., 0.], [0., 1., 0.], [1, 0, 0]]
+        norm = surfaceNormal(vertices)
+
+    Find the normals for multiple triangles, and put results in a pre-allocated
+    array::
+
+        vertices = [[[-1., 0., 0.], [0., 1., 0.], [1, 0, 0]],  # 2x3x3
+                    [[1., 0., 0.], [0., 1., 0.], [-1, 0, 0]]]
+        normals = np.zeros((2, 3, 3))
+        surfaceNormal(vertices, out=normals)
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    else:
+        dtype = np.dtype(out.dtype).type
+
+    tris = np.asarray(tri, dtype=dtype)
+    if tris.ndim == 2:
+        tris = np.expand_dims(tri, axis=0)
+
+    if tris.shape[0] == 1:
+        toReturn = np.zeros((3,), dtype=dtype) if out is None else out
+    else:
+        if out is None:
+            toReturn = np.zeros((tris.shape[0], 3), dtype=dtype)
+        else:
+            toReturn = out
+
+    # from https://www.khronos.org/opengl/wiki/Calculating_a_Surface_Normal
+    nr = np.atleast_2d(toReturn)
+    u = (tris[:, 1, :] - tris[:, 0, :])
+    v = (tris[:, 2, :] - tris[:, 1, :])
+    nr[:, 0] = u[:, 1] * v[:, 2] - u[:, 2] * v[:, 1]
+    nr[:, 1] = u[:, 2] * v[:, 0] - u[:, 0] * v[:, 2]
+    nr[:, 2] = u[:, 0] * v[:, 1] - u[:, 1] * v[:, 0]
+
+    if norm:
+        normalize(nr, out=nr)
+
+    return toReturn
 
 
 # ------------------------------------------------------------------------------
@@ -1558,12 +1623,14 @@ def transform(pos, ori, points, out=None, dtype=None):
 
 
 if __name__ == "__main__":
-    points = [[1., 0., 0.], [0., -1., 0.]]
-    quats = [quatFromAxisAngle([0., 0., -1.], -90.0, degrees=True),
-             quatFromAxisAngle([0., 0., -1.], 45.0, degrees=True)]
-    a = applyQuat(quats, points)
+    points = [[[-1., 0., 0.], [0., 1., 0.], [1, 0, 0]],
+        [[1., 0., 0.], [0., 1., 0.], [-1, 0, 0]]]
+    #points = [[-1., 0., 0.], [0., 1., 0.], [1, 0, 0]]
+    #quats = [quatFromAxisAngle([0., 0., -1.], -90.0, degrees=True),
+    #         quatFromAxisAngle([0., 0., -1.], 45.0, degrees=True)]
+    #a = applyQuat(quats, points)
 
-    print(project(a, a))
+    print(surfaceNormal(points, norm=True))
     axis = [0., 0., -1.]
     angle = -90.0
     rotMat = rotationMatrix(angle, axis)[:3, :3]  # rotation sub-matrix only
