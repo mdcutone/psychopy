@@ -13,7 +13,7 @@ Data Types
 Sub-routines used by functions here will perform arithmetic using 64-bit
 floating-point precision unless otherwise specified via the `dtype` argument.
 If a `dtype` is specified, input arguments will be coerced to match that type
-and all floating-point arithmetic with use the precision of the type. If input
+and all floating-point arithmetic will use the precision of the type. If input
 arrays have the same type as `dtype`, they will automatically pass-through
 without being recast as a different type. As a performance consideration, all
 input arguments should have matching types and `dtype` set accordingly.
@@ -36,16 +36,24 @@ function call (not to mention the loop itself) can be considerable.
 
 .. autosummary::
 
+    length
     normalize
-    reflect
     orthogonalize
+    reflect
+    dot
+    cross
+    project
     lerp
+    distance
+    surfaceNormal
     slerp
+    quatToAxisAngle
+    quatFromAngleAxis
+    quatMagnitude
     multQuat
     invertQuat
     applyQuat
-    quatToAxisAngle
-    quatFromAxisAngle
+    transform
     matrixFromQuat
     scaleMatrix
     rotationMatrix
@@ -57,16 +65,24 @@ function call (not to mention the loop itself) can be considerable.
 Function details
 ~~~~~~~~~~~~~~~~
 
+.. autofunction:: length
 .. autofunction:: normalize
-.. autofunction:: reflect
 .. autofunction:: orthogonalize
+.. autofunction:: reflect
+.. autofunction:: dot
+.. autofunction:: cross
+.. autofunction:: project
 .. autofunction:: lerp
+.. autofunction:: distance
+.. autofunction:: surfaceNormal
 .. autofunction:: slerp
+.. autofunction:: quatToAxisAngle
+.. autofunction:: quatFromAngleAxis
+.. autofunction:: quatMagnitude
 .. autofunction:: multQuat
 .. autofunction:: invertQuat
 .. autofunction:: applyQuat
-.. autofunction:: quatToAxisAngle
-.. autofunction:: quatFromAxisAngle
+.. autofunction:: transform
 .. autofunction:: matrixFromQuat
 .. autofunction:: scaleMatrix
 .. autofunction:: rotationMatrix
