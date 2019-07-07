@@ -43,8 +43,9 @@ def compareScreenshot(fileName, win, crit=5.0):
     win.movieFrames=[]
     #if the file exists run a test, if not save the file
     if not isfile(fileName):
-        frame = frame.resize((int(frame.size[0]/2), int(frame.size[1]/2)),
-                             resample=Image.LANCZOS)
+        if win.useRetina:  # if we're creating an image on retina then downsize
+            frame = frame.resize((int(frame.size[0]/2), int(frame.size[1]/2)),
+                                 resample=Image.LANCZOS)
         frame.save(fileName, optimize=1)
         skip("Created %s" % basename(fileName))
     else:
@@ -87,7 +88,7 @@ def compareTextFiles(pathToActual, pathToCorrect, delim=None,
         raise IOError("File not found")  # deliberately raise an error to see the warning message, but also to create file
 
     allowLines = 0
-    lineDiff = True
+    nLinesMatch = True
 
     if delim is None:
         if pathToCorrect.endswith('.csv'):
@@ -108,8 +109,9 @@ def compareTextFiles(pathToActual, pathToCorrect, delim=None,
             allowLines = round((tolerance * len(txtCorrect)) / 100, 0)
 
         # Check number of lines per document for equality
-        lineDiff = len(txtActual) == len(txtCorrect)
-        assert lineDiff
+        nLinesMatch = len(txtActual) == len(txtCorrect)
+        assert nLinesMatch
+        errLines = []
 
         for lineN in range(len(txtActual)):
             if delim is None:
@@ -118,8 +120,8 @@ def compareTextFiles(pathToActual, pathToCorrect, delim=None,
 
                 # just compare the entire line
                 if not lineActual == lineCorrect:
-                    allowLines -= 1
-                assert allowLines >= 0
+                    errLines.append({'actual':lineActual, 'correct':lineCorrect})
+                assert len(errLines) <= allowLines
 
             else:  # word by word instead
                 lineActual=txtActual[lineN].split(delim)
@@ -156,9 +158,9 @@ def compareTextFiles(pathToActual, pathToCorrect, delim=None,
         pathToLocal = pathToLocal+'_local'+ext
 
         # Set assertion type
-        if not lineDiff:  # Fail if number of lines not equal
+        if not nLinesMatch:  # Fail if number of lines not equal
             msg = "{} has the wrong number of lines".format(pathToActual)
-        elif allowLines < 0:  # Fail if tolerance reached
+        elif len(errLines) < allowLines:  # Fail if tolerance reached
             msg = 'Number of differences in {failed} exceeds the {tol}% tolerance'.format(failed=pathToActual,
                                                                                           tol=tolerance or 0)
         else:

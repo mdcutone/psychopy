@@ -499,7 +499,7 @@ class SettingsComponent(object):
 
         # decide if we need anchored useVersion or leave plain
         if self.params['Use version'].val not in ['', 'latest']:
-            versionStr = "-{}".format(self.params['Use version'])
+            versionStr = '-{}'.format(self.params['Use version'].val)
         else:
             versionStr = ''
 
@@ -610,7 +610,7 @@ class SettingsComponent(object):
         buff.writeIndentedLines(
             "expInfo['date'] = data.getDateStr()  # add a simple timestamp\n"
             "expInfo['expName'] = expName\n"
-            "expInfo['psychopyVersion'] = psychopyVersion")
+            "expInfo['psychopyVersion'] = psychopyVersion\n")
         level = self.params['logging level'].val.upper()
 
         saveToDir = self.getSaveDataDir()
@@ -738,7 +738,9 @@ class SettingsComponent(object):
                 "if expInfo['frameRate'] != None:\n"
                 "    frameDur = 1.0 / round(expInfo['frameRate'])\n"
                 "else:\n"
-                "    frameDur = 1.0 / 60.0  # could not measure, so guess\n")
+                "    frameDur = 1.0 / 60.0  # could not measure, so guess\n"
+                "\n# create a default keyboard (e.g. to check for escape)\n"
+                "defaultKeyboard = keyboard.Keyboard()")
         buff.writeIndentedLines(code)
 
     def writeWindowCodeJS(self, buff):
@@ -792,6 +794,10 @@ class SettingsComponent(object):
                     "  return function () {\n"
                     "    // ------Check if user ended loop early------\n"
                     "    if (currentLoop.finished) {\n"
+                    "      // Check for and save orphaned data\n"
+                    "      if (Object.keys(psychoJS.experiment._thisEntry).length > 0) {\n"
+                    "        psychoJS.experiment.nextEntry();\n"
+                    "      }\n"
                     "      thisScheduler.stop();\n"
                     "    } else if (typeof thisTrial === 'undefined' || !('isTrials' in thisTrial) || thisTrial.isTrials) {\n"
                     "      psychoJS.experiment.nextEntry();\n"
@@ -811,6 +817,10 @@ class SettingsComponent(object):
                     "}\n")
         buff.writeIndentedLines(recordLoopIterationFunc)
         quitFunc = ("\nfunction quitPsychoJS(message, isCompleted) {\n"
+                    "  // Check for and save orphaned data\n"
+                    "  if (Object.keys(psychoJS.experiment._thisEntry).length > 0) {\n"
+                    "    psychoJS.experiment.nextEntry();\n"
+                    "  }\n"
                     "  psychoJS.window.close();\n"
                     "  psychoJS.quit({message: message, isCompleted: isCompleted});\n\n"
                     "  return Scheduler.Event.QUIT;\n"

@@ -1,7 +1,3 @@
-# TODO GP3 Implementation
-# The current settings and params may make not sense for the GP3 implementation
-#
-#
 eyetracker.hw.gazepoint.gp3.EyeTracker:
     # Indicates if the device should actually be loaded at experiment runtime.
     enable: True
@@ -40,7 +36,6 @@ eyetracker.hw.gazepoint.gp3.EyeTracker:
         # (Sets the GP3 CALIBRATE_DELAY)
         target_delay: 0.5
         
-
     # The model name of the device.
     model_name: GP3
 

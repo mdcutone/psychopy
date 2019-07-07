@@ -251,7 +251,7 @@ class SoundDeviceSound(_SoundBase):
 
     def __init__(self, value="C", secs=0.5, octave=4, stereo=-1,
                  volume=1.0, loops=0,
-                 sampleRate=44100, blockSize=128,
+                 sampleRate=None, blockSize=128,
                  preBuffer=-1,
                  hamming=True,
                  startTime=0, stopTime=-1,
@@ -264,7 +264,7 @@ class SoundDeviceSound(_SoundBase):
                         to force sounds to stereo or mono
         :param volume: float 0-1
         :param loops: number of loops to play (-1=forever, 0=single repeat)
-        :param sampleRate: sample rate for synthesized tones
+        :param sampleRate: sample rate (for synthesized tones)
         :param blockSize: the size of the buffer on the sound card
                          (small for low latency, large for stability)
         :param preBuffer: integer to control streaming/buffering
@@ -295,7 +295,13 @@ class SoundDeviceSound(_SoundBase):
         self.preBuffer = preBuffer
         self.frameN = 0
         self._tSoundRequestPlay = 0
-        self.sampleRate = sampleRate
+        if sampleRate:  #a rate was requested so use it
+            self.sampleRate = sampleRate
+        else:  # no requested rate so use current stream or a default of 44100
+            rate = 44100  # start with a default
+            for streamLabel in streams:  # then look to see if we have an open stream and use that
+                rate = streams[streamLabel].sampleRate
+            self.sampleRate = rate
         self.channels = None  # let this be set by stereo
         self.stereo = stereo
         self.duplex = None
@@ -364,7 +370,7 @@ class SoundDeviceSound(_SoundBase):
                                          channels=-1,
                                          blockSize=-1)
             if altern is None:
-                raise SoundFormatError(err)
+                raise err
             else:  # safe to extract data
                 label, s = altern
             # update self in case it changed to fit the stream
