@@ -687,7 +687,6 @@ class Window(object):
             # NB - check if we need these
             GL.glActiveTexture(GL.GL_TEXTURE0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
-            GL.glEnable(GL.GL_STENCIL_TEST)
 
         # setup retina display if applicable
         global retinaContext
@@ -1876,7 +1875,7 @@ class Window(object):
     def mouseVisible(self, visibility):
         """Sets the visibility of the mouse cursor.
 
-        If Window was initialized with ``allowGUI=True`` then the mouse is
+        If Window was initialized with ``allowGUI=False`` then the mouse is
         initially set to invisible, otherwise it will initially be visible.
 
         Usage::
