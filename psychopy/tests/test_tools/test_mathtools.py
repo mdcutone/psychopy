@@ -39,12 +39,9 @@ def test_multQuat():
 
     for i in range(N):
         totalAngle = angles[i, 0] + angles[i, 1]
-        q0 = quatFromAngleAxis(
-            angles[i, 0], axes[i, :], degrees=True)
-        q1 = quatFromAngleAxis(
-            angles[i, 1], axes[i, :], degrees=True)
-        quatTarget = quatFromAngleAxis(
-            totalAngle, axes[i, :], degrees=True)
+        q0 = quatFromAngleAxis(angles[i, 0], axes[i, :], degrees=True)
+        q1 = quatFromAngleAxis(angles[i, 1], axes[i, :], degrees=True)
+        quatTarget = quatFromAngleAxis(totalAngle, axes[i, :], degrees=True)
 
         assert np.allclose(multQuat(q0, q1), quatTarget)
 
