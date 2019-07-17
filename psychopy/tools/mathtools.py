@@ -1592,7 +1592,7 @@ def transform(pos, ori, points, out=None, dtype=None):
     --------
     Transform points by a position coordinate and orientation quaternion::
 
-        # pose
+        # rigid body pose
         ori = quatFromAngleAxis(90.0, [0., 0., -1.], degrees=True)
         pos = [0., 1.5, -3.]
         # points to transform
@@ -1609,13 +1609,13 @@ def transform(pos, ori, points, out=None, dtype=None):
         applyMatrix(M, points, out=outPoints)
 
     If you are defining transformations with quaternions and coordinates, you
-    can skip the costly matrix creation process by using `transform`. However,
-    `applyMatrix` is marginally faster over very large arrays of points.
+    can skip the costly matrix creation process by using `transform`.
 
     Notes
     -----
     * In performance tests, `applyMatrix` is noticeably faster than `transform`
-      for very large arrays.
+      for very large arrays, however this is only true if you are applying the
+      same transformation to all points.
     * If the input arrays for `points` or `pos` is Nx4, the last column is
       ignored.
 
