@@ -10,7 +10,7 @@ posing, rendering, etc.)
 Data Types
 ~~~~~~~~~~
 
-Sub-routines used by functions here will perform arithmetic using 64-bit
+Sub-routines used by the functions here will perform arithmetic using 64-bit
 floating-point precision unless otherwise specified via the `dtype` argument.
 If a `dtype` is specified, input arguments will be coerced to match that type
 and all floating-point arithmetic will use the precision of the type. If input
@@ -22,8 +22,8 @@ Most functions have an `out` argument, where one can specify an array to write
 values to. The value of `dtype` is ignored if `out` is provided, and all input
 arrays will be converted to match the dtype of `out` (if not already).
 
-Optimization and Performance
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Performance
+~~~~~~~~~~~
 
 Most functions listed here are very fast, however they are optimized to work on
 arrays of values (vectorization). Calling functions repeatedly (for instance
@@ -53,14 +53,14 @@ function call (not to mention the loop itself) can be considerable.
     multQuat
     invertQuat
     applyQuat
-    transform
     matrixFromQuat
     scaleMatrix
     rotationMatrix
     translationMatrix
     concatenate
     applyMatrix
-    poseToMatrix
+    rigidBodyToMatrix
+    transform
 
 Function details
 ~~~~~~~~~~~~~~~~
@@ -82,11 +82,11 @@ Function details
 .. autofunction:: multQuat
 .. autofunction:: invertQuat
 .. autofunction:: applyQuat
-.. autofunction:: transform
 .. autofunction:: matrixFromQuat
 .. autofunction:: scaleMatrix
 .. autofunction:: rotationMatrix
 .. autofunction:: translationMatrix
 .. autofunction:: concatenate
 .. autofunction:: applyMatrix
-.. autofunction:: poseToMatrix
+.. autofunction:: rigidBodyToMatrix
+.. autofunction:: transform

@@ -9,7 +9,7 @@
 # Distributed under the terms of the GNU General Public License (GPL).
 
 __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAngleAxis',
-           'quatToMatrix', 'scaleMatrix', 'rotationMatrix',
+           'quatToMatrix', 'scaleMatrix', 'rotationMatrix', 'transform',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
            'quatToAngleAxis', 'rigidBodyToMatrix', 'applyQuat', 'orthogonalize',
            'reflect', 'cross', 'distance', 'dot', 'quatMagnitude', 'length',
