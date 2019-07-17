@@ -671,6 +671,26 @@ def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
         # halfway between 90 and -90 is 0.0 or quaternion [0. 0. 0. 1.]
         qr = slerp(q0, q1, 0.5)
 
+    Example of smooth rotation rotation of an object with fixed angular
+    velocity::
+
+        degPerSec = 10.0  # rotate a stimulus at 10 degrees per second
+
+        # initial orientation, axis rotates in the Z direction
+        qr = quatFromAngleAxis(0.0, [0., 0., -1.], degrees=True)
+        # amount to rotate every second
+        qv = quatFromAngleAxis(degPerSec, [0., 0., -1.], degrees=True)
+
+        # ---- within main experiment loop ----
+        # `frameTime` is the time elapsed in seconds from the last frame
+        qr = multQuat(qr, slerp((0., 0., 0., 1.), qv, degPerSec * frameTime))
+        angle, _ = quatToAngleAxis(qr)  # discard axis, only need angle
+
+        # myStim is a GratingStim or anything with an 'ori' argument which
+        # accepts angle in degrees
+        myStim.ori = angle
+        myStim.draw()
+
     """
     # Implementation based on code found here:
     #  https://en.wikipedia.org/wiki/Slerp
@@ -689,17 +709,16 @@ def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
     t = dtype(t)
     q0, q1, qr = np.atleast_2d(q0, q1, toReturn)
 
-    dot = np.clip(np.sum(q0 * q1, axis=1), -1.0, 1.0)
+    d = np.clip(np.sum(q0 * q1, axis=1), -1.0, 1.0)
     if shortest:
-        dot[dot < 0.0] *= -1.0
-        q1[dot < 0.0] *= -1.0
+        d[d < 0.0] *= -1.0
+        q1[d < 0.0] *= -1.0
 
-    theta0 = np.arccos(dot)
+    theta0 = np.arccos(d)
     theta = theta0 * t
     sinTheta = np.sin(theta)
     s1 = sinTheta / np.sin(theta0)
-    s0 = np.cos(theta[:, np.newaxis]) - \
-         dot[:, np.newaxis] * s1[:, np.newaxis]
+    s0 = np.cos(theta[:, np.newaxis]) - d[:, np.newaxis] * s1[:, np.newaxis]
     qr[:, :] = q0 * s0
     qr[:, :] += q1 * s1[:, np.newaxis]
     qr[:, :] += 0.0
