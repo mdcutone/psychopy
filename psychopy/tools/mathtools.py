@@ -13,7 +13,7 @@ __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAngleAxis',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
            'quatToAngleAxis', 'rigidBodyToMatrix', 'applyQuat', 'orthogonalize',
            'reflect', 'cross', 'distance', 'dot', 'quatMagnitude', 'length',
-           'project', 'surfaceNormal']
+           'project', 'surfaceNormal', 'invertMatrix']
 
 import numpy as np
 import functools
@@ -1344,6 +1344,56 @@ def translationMatrix(t, out=None, dtype=None):
     return T
 
 
+def invertMatrix(m, homogeneous=False, out=None, dtype=None):
+    """Invert a 4x4 matrix.
+
+    Parameters
+    ----------
+    m : array_like
+        4x4 matrix to invert.
+    homogeneous : bool, optional
+        Set as ``True`` if the input matrix specifies affine (homogeneous)
+        transformations (scale, rotation, and translation) and is orthonormal.
+        This will use a faster inverse method which handles such cases. Default
+        is ``False``.
+    out : ndarray, optional
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not
+        specified, the default is 'float64'.
+
+    Returns
+    -------
+    ndarray
+        4x4 matrix which is the inverse of `m`
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+        toReturn = np.zeros((4, 4), dtype=dtype)
+    else:
+        dtype = out.dtype
+        toReturn = out
+        toReturn.fill(0.0)
+
+    m = np.asarray(m, dtype=dtype)  # input as array
+
+    if not homogeneous:
+        toReturn[:, :] = np.linalg.inv(m)
+    else:
+        toReturn[:3, :3] = m[:3, :3].T
+        toReturn[0, 3] = -(m[0, 0] * m[0, 3] + m[1, 0] * m[1, 3] + m[2, 0] * m[2, 3])
+        toReturn[1, 3] = -(m[0, 1] * m[0, 3] + m[1, 1] * m[1, 3] + m[2, 1] * m[2, 3])
+        toReturn[2, 3] = -(m[0, 2] * m[0, 3] + m[1, 2] * m[1, 3] + m[2, 2] * m[2, 3])
+        toReturn[3, 3] = 1.0
+
+    toReturn[np.abs(toReturn) <= np.finfo(dtype).eps] = 0.0  # very small, make zero
+
+    return toReturn
+
+
 def concatenate(matrices, out=None, dtype=None):
     """Concatenate matrix transformations.
 
@@ -1447,6 +1497,8 @@ def concatenate(matrices, out=None, dtype=None):
     toReturn[:, :] = functools.reduce(
         np.matmul,
         map(lambda x: np.asarray(x, dtype=dtype), reversed(matrices)))
+
+    toReturn[np.abs(toReturn) <= np.finfo(dtype).eps] = 0.0  # very small, make zero
 
     return toReturn
 
@@ -1650,3 +1702,18 @@ def transform(pos, ori, points, out=None, dtype=None):
     pout[:, 2] += pos[2]
 
     return toReturn
+
+
+if __name__ == "__main__":
+
+    #S = scaleMatrix(2.0)
+    R = rotationMatrix(45.0, (0, 0, -1))
+    T = translationMatrix((-1, 2, -3))
+
+    M = concatenate([R, T])
+    Mi = invertMatrix(M, rigidBody=True)
+
+    print(concatenate([M, Mi]))
+
+    print(M)
+    print(Mi)

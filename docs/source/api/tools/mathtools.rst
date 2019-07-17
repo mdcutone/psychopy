@@ -88,6 +88,7 @@ Overview
     scaleMatrix
     rotationMatrix
     translationMatrix
+    invertMatrix
     concatenate
     applyMatrix
     rigidBodyToMatrix
@@ -117,6 +118,7 @@ Details
 .. autofunction:: scaleMatrix
 .. autofunction:: rotationMatrix
 .. autofunction:: translationMatrix
+.. autofunction:: invertMatrix
 .. autofunction:: concatenate
 .. autofunction:: applyMatrix
 .. autofunction:: rigidBodyToMatrix
