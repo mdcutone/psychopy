@@ -338,9 +338,10 @@ def cross(v0, v1, out=None, dtype=None):
     corresponding rows::
 
         # create two 6x3 arrays with random numbers
-        a = normalize(np.random.uniform(-1.0, 1.0, (6, 3,)))
-        b = normalize(np.random.uniform(-1.0, 1.0, (6, 3,)))
-        cprod = np.zeros(a.shape)  # output has the same shape as inputs
+        shape = (6, 3,)
+        a = normalize(np.random.uniform(-1.0, 1.0, shape))
+        b = normalize(np.random.uniform(-1.0, 1.0, shape))
+        cprod = np.zeros(shape)  # output has the same shape as inputs
         cross(a, b, out=cprod)
 
     If a 1D and 2D vector are specified, the cross product of each row of the
