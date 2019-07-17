@@ -11,7 +11,7 @@
 __all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAngleAxis',
            'quatToMatrix', 'scaleMatrix', 'rotationMatrix',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
-           'quatToAngleAxis', 'poseToMatrix', 'applyQuat', 'orthogonalize',
+           'quatToAngleAxis', 'rigidBodyToMatrix', 'applyQuat', 'orthogonalize',
            'reflect', 'cross', 'distance', 'dot', 'quatMagnitude', 'length',
            'project', 'surfaceNormal']
 
@@ -34,8 +34,8 @@ def length(v, squared=False, out=None, dtype=None):
     squared : bool, optional
         If ``True`` the squared length is returned. The default is ``False``.
     out : ndarray, optional
-        1D to write vector lengths. The specified array must have same length
-        as number of rows in `v`. This is ignored if `v` is 1D.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for computations can either be 'float32' or 'float64'. If
         `None` is specified, the data type of `out` is used. If `out` is not
@@ -81,7 +81,8 @@ def normalize(v, out=None, dtype=None):
         Vector to normalize, can be Nx2, Nx3, or Nx4. If a 2D array is
         specified, rows are treated as separate vectors.
     out : ndarray, optional
-        Optional output array. Must have same shape as `v`.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -145,7 +146,8 @@ def orthogonalize(v, n, out=None, dtype=None):
     n : array_like
         Normal vector, must have same shape as `v`.
     out : ndarray, optional
-        Optional output array. Must have same shape as `v` and `n`.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -197,7 +199,8 @@ def reflect(v, n, out=None, dtype=None):
     n : array_like
         Normal vector, must have same shape as `v`.
     out : ndarray, optional
-        Optional output array. Must have same shape as `v` and `n`.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -250,9 +253,8 @@ def dot(v0, v1, out=None, dtype=None):
         Vector(s) to compute dot products of (e.g. [x, y, z]). `v0` must have
         equal or fewer dimensions than `v1`.
     out : ndarray, optional
-        Optional output array with same shape as `v0` and `v1`. If `v0` and `v1`
-        are 2-D, this array can be either Nx3 or Nx4 but, must have the same
-        number of rows.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -289,15 +291,23 @@ def dot(v0, v1, out=None, dtype=None):
 
 
 def cross(v0, v1, out=None, dtype=None):
-    """Cross product of two 3-D vectors.
+    """Cross product of 3D vectors.
+
+    The behavior of this function depends on the dimensions of the inputs:
+
+    * If `v0` and `v1` are 1D, the cross product is returned as 1D vector.
+    * If `v0` and `v1` are 2D, a 1D array of cross products between
+      corresponding row vectors are returned.
+    * If `v0` is 1D and `v1` is 2D, an array of cross products between `v0` and
+      each row of `v1` are returned.
 
     Parameters
     ----------
     v0, v1 : array_like
         Vector(s) in form [x, y, z] or [x, y, z, 1].
     out : ndarray, optional
-        Optional output array. Must have same shape as the input argument
-        (either `v0` or `v1`) with the most dimensions.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -409,7 +419,8 @@ def project(v0, v1, out=None, dtype=None):
     v1 : array_like
         Vector to project onto `v0`.
     out : ndarray, optional
-        Optional output array. Must have same shape as `v` and `n`.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -458,7 +469,8 @@ def lerp(v0, v1, t, out=None, dtype=None):
     t : float
         Interpolation weight factor [0, 1].
     out : ndarray, optional
-        Optional output array. Must have the same `shape` and `dtype` as `v0`.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -507,16 +519,16 @@ def distance(v0, v1, out=None, dtype=None):
       ignored.
     * If `v0` and `v1` are 2D, an array of distances between corresponding row
       vectors are returned.
-    * If `v0` is 1D and `v1` is 2D, an array of distance from `v0` to each row
-      of `v1` is returned.
+    * If `v0` is 1D and `v1` is 2D, an array of distances from `v0` to each row
+      of `v1` are returned.
 
     Parameters
     ----------
     v0, v1 : array_like
         Vectors to compute the distance between.
     out : ndarray, optional
-        Optional output array. Must have same number of rows as `v0` and `v1`.
-        This is ignored if `v0` and `v1` are 1D.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -650,8 +662,8 @@ def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
         Ensure interpolation occurs along the shortest arc along the 4-D
         hypersphere (default is `True`).
     out : ndarray, optional
-        Optional output array. Must be same shape as the expected returned array
-        if `out` was not specified.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -671,8 +683,7 @@ def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
         # halfway between 90 and -90 is 0.0 or quaternion [0. 0. 0. 1.]
         qr = slerp(q0, q1, 0.5)
 
-    Example of smooth rotation rotation of an object with fixed angular
-    velocity::
+    Example of smooth rotation of an object with fixed angular velocity::
 
         degPerSec = 10.0  # rotate a stimulus at 10 degrees per second
 
@@ -682,7 +693,7 @@ def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
         qv = quatFromAngleAxis(degPerSec, [0., 0., -1.], degrees=True)
 
         # ---- within main experiment loop ----
-        # `frameTime` is the time elapsed in seconds from the last frame
+        # `frameTime` is the time elapsed in seconds from last `slerp`.
         qr = multQuat(qr, slerp((0., 0., 0., 1.), qv, degPerSec * frameTime))
         angle, _ = quatToAngleAxis(qr)  # discard axis, only need angle
 
@@ -788,9 +799,9 @@ def quatFromAngleAxis(angle, axis=(0., 0., -1.), degrees=False, dtype=None):
     angle : float
         Rotation angle in radians (or degrees if `degrees` is `True`. Rotations
         are right-handed about the specified `axis`.
-    axis : tuple, list or ndarray of float
+    axis : tuple, list or ndarray, optional
         Axis of rotation [x, y, z]. Default is -Z [0., 0., -1.].
-    degrees : bool
+    degrees : bool, optional
         Indicate `angle` is in degrees, otherwise `angle` will be treated as
         radians.
     dtype : dtype or str, optional
@@ -842,8 +853,8 @@ def quatMagnitude(q, squared=False, out=None, dtype=None):
         quaternion is normalized, the squared magnitude will suffice to avoid
         the square root operation.
     out : ndarray, optional
-        Optional output array. Must have same length as the number of rows in
-        `q`.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -893,8 +904,8 @@ def multQuat(q0, q1, out=None, dtype=None):
         are imaginary components. If 2D (Nx4) arrays are specified, quaternions
         are multiplied row-wise between each array.
     out : ndarray, optional
-        Alternative array to write values. Must be have the same shape as `q0`
-        and `q1`.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -956,7 +967,8 @@ def invertQuat(q, out=None, dtype=None):
         are imaginary components. If `q` is 2D (Nx4), each row is treated as a
         separate quaternion and inverted.
     out : ndarray, optional
-        Alternative array to write values. Must have the same shape as `q`.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -1020,8 +1032,8 @@ def applyQuat(q, points, out=None, dtype=None):
         point. Only the x, y, and z components (the first three columns) are
         rotated. Additional columns are copied.
     out : ndarray, optional
-        Optional output array to write values. Must be same `shape` and `dtype`
-        as `points`.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not
@@ -1113,8 +1125,8 @@ def quatToMatrix(q, out=None, dtype=None):
         Quaternion to convert in form [x, y, z, w] where w is real and x, y, z
         are imaginary components.
     out : ndarray or None
-        Alternative array to write values. Must be `shape` == (4,4,) and same
-        `dtype` as the `dtype` argument.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -1192,7 +1204,8 @@ def scaleMatrix(s, out=None, dtype=None):
         Providing a vector of scaling values [sx, sy, sz] will result in an
         anisotropic scaling matrix if any of the values differ.
     out : ndarray, optional
-        Optional output array.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -1238,8 +1251,8 @@ def rotationMatrix(angle, axis=(0., 0., -1.), out=None, dtype=None):
     axis : ndarray, list, or tuple of float
         Axis vector components.
     out : ndarray, optional
-        Optional 4x4 output array. All computations will use the data type of
-        this array.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -1302,8 +1315,8 @@ def translationMatrix(t, out=None, dtype=None):
     t : ndarray, tuple, or list of float
         Translation vector [tx, ty, tz].
     out : ndarray, optional
-        Optional 4x4 output array. All computations will use the data type of
-        this array.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not
@@ -1341,14 +1354,15 @@ def concatenate(matrices, out=None, dtype=None):
 
     The data types of input matrices are coerced to match that of `out` or
     `dtype` if `out` is `None`. For performance reasons, it is best that all
-    arrays passed to this function should have matching data types.
+    arrays passed to this function have matching data types.
 
     Parameters
     ----------
     matrices : list or tuple
         List of matrices to concatenate. All matrices must be 4x4.
     out : ndarray, optional
-        Optional 4x4 output array.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not provided,
@@ -1399,7 +1413,7 @@ def concatenate(matrices, out=None, dtype=None):
 
     You can put the created matrix in the OpenGL matrix stack as shown below.
     Note that the matrix must have a 32-bit floating-point data type and needs
-    to be loaded transposed.::
+    to be loaded transposed::
 
         GL.glMatrixMode(GL.GL_MODELVIEW)
         MV = np.asarray(MV, dtype='float32')  # must be 32-bit float!
@@ -1448,8 +1462,8 @@ def applyMatrix(m, points, out=None, dtype=None):
         point and the number of columns should match the dimensions of the
         matrix.
     out : ndarray, optional
-        Optional output array to write values. Must be same `shape` and `dtype`
-        as `points`.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not
@@ -1474,7 +1488,7 @@ def applyMatrix(m, points, out=None, dtype=None):
         newPoints = applyMatrix(M, points)  # apply the transformation
 
     Extract the 3x3 rotation sub-matrix from a 4x4 matrix and apply it to
-    points. Here the result in written to an already allocated array::
+    points. Here the result is written to a pre-allocated array::
 
         points = np.array([[0., 1., 0.], [-1., 0., 0.]])  # [x, y, z]
         outPoints = np.zeros(points.shape)
@@ -1505,8 +1519,8 @@ def applyMatrix(m, points, out=None, dtype=None):
     return toReturn
 
 
-def poseToMatrix(pos, ori, out=None, dtype=None):
-    """Convert a pose to a 4x4 transformation matrix.
+def rigidBodyToMatrix(pos, ori, out=None, dtype=None):
+    """Convert a rigid body pose to a 4x4 transformation matrix.
 
     A pose is represented by a position coordinate `pos` and orientation
     quaternion `ori`.
@@ -1519,8 +1533,8 @@ def poseToMatrix(pos, ori, out=None, dtype=None):
         Orientation quaternion in form [x, y, z, w] where w is real and x, y, z
         are imaginary components.
     out : ndarray, optional
-        Optional output array for 4x4 matrix. All computations will use the data
-        type of this array.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for arrays, can either be 'float32' or 'float64'. If `None` is
         specified, the data type is inferred by `out`. If `out` is not
@@ -1549,8 +1563,8 @@ def poseToMatrix(pos, ori, out=None, dtype=None):
 
 
 def transform(pos, ori, points, out=None, dtype=None):
-    """Transform points using a position, orientation. Points are rotated then
-    translated.
+    """Transform points using a position and orientation. Points are rotated
+    then translated.
 
     Parameters
     ----------
@@ -1562,8 +1576,8 @@ def transform(pos, ori, points, out=None, dtype=None):
     points : array_like
         Point(s) [x, y, z] to transform.
     out : ndarray, optional
-        Optional output array for 4x4 matrix. All computations will use the data
-        type of this array.
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
     dtype : dtype or str, optional
         Data type for computations can either be 'float32' or 'float64'. If
         `None` is specified, the data type of `out` is used. If `out` is not
