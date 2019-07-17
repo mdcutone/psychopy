@@ -28,7 +28,7 @@ def length(v, squared=False, out=None, dtype=None):
 
     Parameters
     ----------
-    v : ndarray
+    v : array_like
         Vector to normalize, can be Nx2, Nx3, or Nx4. If a 2D array is
         specified, rows are treated as separate vectors.
     squared : bool, optional
@@ -77,7 +77,7 @@ def length(v, squared=False, out=None, dtype=None):
 def normalize(v, out=None, dtype=None):
     """Normalize a vector or quaternion.
 
-    v : ndarray
+    v : array_like
         Vector to normalize, can be Nx2, Nx3, or Nx4. If a 2D array is
         specified, rows are treated as separate vectors.
     out : ndarray, optional
