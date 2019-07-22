@@ -8,10 +8,10 @@
 # Copyright (C) 2018 Jonathan Peirce
 # Distributed under the terms of the GNU General Public License (GPL).
 
-__all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAngleAxis',
+__all__ = ['normalize', 'lerp', 'slerp', 'multQuat', 'quatFromAxisAngle',
            'quatToMatrix', 'scaleMatrix', 'rotationMatrix', 'transform',
            'translationMatrix', 'concatenate', 'applyMatrix', 'invertQuat',
-           'quatToAngleAxis', 'rigidBodyToMatrix', 'applyQuat', 'orthogonalize',
+           'quatToAxisAngle', 'rigidBodyToMatrix', 'applyQuat', 'orthogonalize',
            'reflect', 'cross', 'distance', 'dot', 'quatMagnitude', 'length',
            'project', 'surfaceNormal', 'invertMatrix']
 
@@ -679,8 +679,8 @@ def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
     --------
     Interpolate between two orientations::
 
-        q0 = quatFromAngleAxis(90.0, degrees=True)
-        q1 = quatFromAngleAxis(-90.0, degrees=True)
+        q0 = quatFromAxisAngle(90.0, degrees=True)
+        q1 = quatFromAxisAngle(-90.0, degrees=True)
         # halfway between 90 and -90 is 0.0 or quaternion [0. 0. 0. 1.]
         qr = slerp(q0, q1, 0.5)
 
@@ -689,14 +689,14 @@ def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
         degPerSec = 10.0  # rotate a stimulus at 10 degrees per second
 
         # initial orientation, axis rotates in the Z direction
-        qr = quatFromAngleAxis(0.0, [0., 0., -1.], degrees=True)
+        qr = quatFromAxisAngle(0.0, [0., 0., -1.], degrees=True)
         # amount to rotate every second
-        qv = quatFromAngleAxis(degPerSec, [0., 0., -1.], degrees=True)
+        qv = quatFromAxisAngle(degPerSec, [0., 0., -1.], degrees=True)
 
         # ---- within main experiment loop ----
         # `frameTime` is the time elapsed in seconds from last `slerp`.
         qr = multQuat(qr, slerp((0., 0., 0., 1.), qv, degPerSec * frameTime))
-        angle, _ = quatToAngleAxis(qr)  # discard axis, only need angle
+        angle, _ = quatToAxisAngle(qr)  # discard axis, only need angle
 
         # myStim is a GratingStim or anything with an 'ori' argument which
         # accepts angle in degrees
@@ -738,7 +738,7 @@ def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
     return toReturn
 
 
-def quatToAngleAxis(q, degrees=False, dtype=None):
+def quatToAxisAngle(q, degrees=False, dtype=None):
     """Convert a quaternion to `axis` and `angle` representation.
 
     This allows you to use quaternions to set the orientation of stimuli that
@@ -768,15 +768,15 @@ def quatToAngleAxis(q, degrees=False, dtype=None):
     Using a quaternion to rotate a stimulus a fixed angle each frame::
 
         # initial orientation, axis rotates in the Z direction
-        qr = quatFromAngleAxis(0.0, [0., 0., -1.], degrees=True)
+        qr = quatFromAxisAngle(0.0, [0., 0., -1.], degrees=True)
         # rotation per-frame, here it's 0.1 degrees per frame
-        qf = quatFromAngleAxis(0.1, [0., 0., -1.], degrees=True)
+        qf = quatFromAxisAngle(0.1, [0., 0., -1.], degrees=True)
 
         # ---- within main experiment loop ----
         # myStim is a GratingStim or anything with an 'ori' argument which
         # accepts angle in degrees
         qr = multQuat(qr, qf)  # cumulative rotation
-        angle, _ = quatToAngleAxis(qr)  # discard axis, only need angle
+        angle, _ = quatToAxisAngle(qr)  # discard axis, only need angle
         myStim.ori = angle
         myStim.draw()
 
@@ -788,20 +788,20 @@ def quatToAngleAxis(q, degrees=False, dtype=None):
     angle = dtype(2.0) * np.arctan2(v, q[3])
     axis += 0.0
 
-    return np.degrees(angle) if degrees else angle, axis
+    return axis, np.degrees(angle) if degrees else angle
 
 
-def quatFromAngleAxis(angle, axis=(0., 0., -1.), degrees=False, dtype=None):
+def quatFromAxisAngle(axis, angle, degrees=False, dtype=None):
     """Create a quaternion to represent a rotation about `axis` vector by
     `angle`.
 
     Parameters
     ----------
+    axis : tuple, list or ndarray, optional
+        Axis of rotation [x, y, z].
     angle : float
         Rotation angle in radians (or degrees if `degrees` is `True`. Rotations
         are right-handed about the specified `axis`.
-    axis : tuple, list or ndarray, optional
-        Axis of rotation [x, y, z]. Default is -Z [0., 0., -1.].
     degrees : bool, optional
         Indicate `angle` is in degrees, otherwise `angle` will be treated as
         radians.
@@ -820,7 +820,7 @@ def quatFromAngleAxis(angle, axis=(0., 0., -1.), degrees=False, dtype=None):
 
         axis = [0., 0., -1.]  # rotate about -Z axis
         angle = 90.0  # angle in degrees
-        ori = quatFromAngleAxis(angle, axis,  degrees=True)  # using degrees!
+        ori = quatFromAxisAngle(angle, axis,  degrees=True)  # using degrees!
 
     """
     dtype = np.float64 if dtype is None else np.dtype(dtype).type
@@ -925,8 +925,8 @@ def multQuat(q0, q1, out=None, dtype=None):
     --------
     Combine the orientations of two quaternions::
 
-        a = quatFromAngleAxis(45.0, degrees=True)
-        b = quatFromAngleAxis(90.0, degrees=True)
+        a = quatFromAxisAngle(45.0, degrees=True)
+        b = quatFromAxisAngle(90.0, degrees=True)
         c = multQuat(a, b)  # rotates 135 degrees about -Z axis
 
     """
@@ -987,7 +987,7 @@ def invertQuat(q, out=None, dtype=None):
 
         angle = 90.0
         axis = [0., 0., -1.]
-        q = quatFromAngleAxis(angle, axis, degrees=True)
+        q = quatFromAxisAngle(angle, axis, degrees=True)
         qinv = invertQuat(q)
         qr = multQuat(q, qinv)
         qi = np.array([0., 0., 0., 1.])  # identity quaternion
@@ -1050,7 +1050,7 @@ def applyQuat(q, points, out=None, dtype=None):
     Rotate points using a quaternion::
 
         points = [[1., 0., 0.], [0., -1., 0.]]
-        quat = quatFromAngleAxis(-90.0, [0., 0., -1.], degrees=True)
+        quat = quatFromAxisAngle(-90.0, [0., 0., -1.], degrees=True)
         pointsRotated = applyQuat(quat, points)
         # [[0. 1. 0.]
         #  [1. 0. 0.]]
@@ -1060,7 +1060,7 @@ def applyQuat(q, points, out=None, dtype=None):
         axis = [0., 0., -1.]
         angle = -90.0
         rotMat = rotationMatrix(angle, axis)[:3, :3]  # rotation sub-matrix only
-        rotQuat = quatFromAngleAxis(angle, axis, degrees=True)
+        rotQuat = quatFromAxisAngle(angle, axis, degrees=True)
         points = [[1., 0., 0.], [0., -1., 0.]]
         isClose = np.allclose(applyMatrix(rotMat, points),  # True
                               applyQuat(rotQuat, points))
@@ -1069,8 +1069,8 @@ def applyQuat(q, points, out=None, dtype=None):
     in corresponding rows of `points`::
 
         points = [[1., 0., 0.], [0., -1., 0.]]
-        quats = [quatFromAngleAxis(-90.0, [0., 0., -1.], degrees=True),
-                 quatFromAngleAxis(45.0, [0., 0., -1.], degrees=True)]
+        quats = [quatFromAxisAngle(-90.0, [0., 0., -1.], degrees=True),
+                 quatFromAxisAngle(45.0, [0., 0., -1.], degrees=True)]
         applyQuat(quats, points)
 
     """
@@ -1445,7 +1445,7 @@ def concatenate(matrices, out=None, dtype=None):
     transform model-space coordinates to eye-space::
 
         # stimulus pose as quaternion and vector
-        stimOri = quatFromAngleAxis(-45.0, [0., 0., -1.])
+        stimOri = quatFromAxisAngle(-45.0, [0., 0., -1.])
         stimPos = [0., 1.5, -5.]
 
         # create model matrix
@@ -1646,7 +1646,7 @@ def transform(pos, ori, points, out=None, dtype=None):
     Transform points by a position coordinate and orientation quaternion::
 
         # rigid body pose
-        ori = quatFromAngleAxis(90.0, [0., 0., -1.], degrees=True)
+        ori = quatFromAxisAngle(90.0, [0., 0., -1.], degrees=True)
         pos = [0., 1.5, -3.]
         # points to transform
         points = np.array([[0., 1., 0., 1.], [-1., 0., 0., 1.]])  # [x, y, z, 1]
@@ -1711,7 +1711,7 @@ if __name__ == "__main__":
     T = translationMatrix((-1, 2, -3))
 
     M = concatenate([R, T])
-    Mi = invertMatrix(M, rigidBody=True)
+    Mi = invertMatrix(M)
 
     print(concatenate([M, Mi]))
 
