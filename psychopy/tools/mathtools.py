@@ -244,7 +244,7 @@ def dot(v0, v1, out=None, dtype=None):
       is ignored.
     * If `v0` and `v1` are 2D, a 1D array of dot products between corresponding
       row vectors are returned.
-    * If either `v0` is 1D and `v1` are 1D and 2D, an array of dot products
+    * If either `v0` and `v1` are 1D and 2D, an array of dot products
       between each row of the 2D vector and the 1D vector are returned.
 
     Parameters
@@ -298,7 +298,7 @@ def cross(v0, v1, out=None, dtype=None):
     * If `v0` and `v1` are 1D, the cross product is returned as 1D vector.
     * If `v0` and `v1` are 2D, a 2D array of cross products between
       corresponding row vectors are returned.
-    * If either `v0` is 1D and `v1` are 1D and 2D, an array of cross products
+    * If either `v0` and `v1` are 1D and 2D, an array of cross products
       between each row of the 2D vector and the 1D vector are returned.
 
     Parameters
@@ -520,7 +520,7 @@ def distance(v0, v1, out=None, dtype=None):
       ignored.
     * If `v0` and `v1` are 2D, an array of distances between corresponding row
       vectors are returned.
-    * If either `v0` is 1D and `v1` are 1D and 2D, an array of distances
+    * If either `v0` and `v1` are 1D and 2D, an array of distances
       between each row of the 2D vector and the 1D vector are returned.
 
     Parameters
