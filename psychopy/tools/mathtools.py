@@ -612,16 +612,16 @@ def angleTo(v, point, degrees=True, out=None, dtype=None):
                     length(point, squared=True, dtype=dtype))
         angle[:] = np.arccos(dot(v, point, dtype=dtype) / u)
     elif v.ndim == 1 and point.ndim == 2:
+        angle = np.zeros((v.shape[0],), dtype=dtype) if out is None else out
         u = np.sqrt(length(v, squared=True, dtype=dtype) *
                     length(point, squared=True, dtype=dtype))
-        angle = np.arccos(dot(v, point, dtype=dtype) / u)
+        angle[:] = np.arccos(dot(v, point, dtype=dtype) / u)
     elif v.ndim == point.ndim == 1:
         u = np.sqrt(length(v, squared=True, dtype=dtype) *
                     length(point, squared=True, dtype=dtype))
         angle = np.arccos(dot(v, point, dtype=dtype) / u)
     else:
         raise ValueError("Input arguments have invalid dimensions.")
-
 
     return np.degrees(angle) if degrees else angle
 
