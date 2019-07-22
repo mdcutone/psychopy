@@ -1703,17 +1703,3 @@ def transform(pos, ori, points, out=None, dtype=None):
 
     return toReturn
 
-
-if __name__ == "__main__":
-
-    #S = scaleMatrix(2.0)
-    R = rotationMatrix(45.0, (0, 0, -1))
-    T = translationMatrix((-1, 2, -3))
-
-    M = concatenate([R, T])
-    Mi = invertMatrix(M)
-
-    print(concatenate([M, Mi]))
-
-    print(M)
-    print(Mi)
