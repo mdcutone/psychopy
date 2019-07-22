@@ -7,6 +7,8 @@ quaternions. These functions are intended to provide basic support for common
 mathematical operations associated with displaying stimuli (e.g. animation,
 posing, rendering, etc.)
 
+For tools related to view transformations, see :mod:`~psychopy.tools.viewtools`.
+
 Performance and Optimization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
