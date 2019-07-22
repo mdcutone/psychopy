@@ -79,6 +79,7 @@ Overview
     project
     lerp
     distance
+    angleTo
     surfaceNormal
     slerp
     quatToAxisAngle
@@ -109,6 +110,7 @@ Details
 .. autofunction:: project
 .. autofunction:: lerp
 .. autofunction:: distance
+.. autofunction:: angleTo
 .. autofunction:: surfaceNormal
 .. autofunction:: slerp
 .. autofunction:: quatToAxisAngle

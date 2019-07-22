@@ -563,6 +563,69 @@ def distance(v0, v1, out=None, dtype=None):
     return dist
 
 
+def angleTo(v, point, degrees=True, out=None, dtype=None):
+    """Get the relative angle to a point from a vector.
+
+    The behaviour of this function depends on the format of the input arguments:
+
+    * If `v0` and `v1` are 1D, the angle is returned as a scalar and `out` is
+      ignored.
+    * If `v0` and `v1` are 2D, an array of angles between corresponding row
+      vectors are returned.
+    * If either `v0` and `v1` are 1D and 2D, an array of angles
+      between each row of the 2D vector and the 1D vector are returned.
+
+    Parameters
+    ----------
+    v : array_like
+        Direction vector [x, y, z].
+    point : array_like
+        Point(s) to compute angle to from vector `v`.
+    degrees : bool, optional
+        Return the resulting angles in degrees. If `False`, angles will be
+        returned in radians. Default is `True`.
+    out : ndarray, optional
+        Optional output array. Must be same `shape` and `dtype` as the expected
+        output if `out` was not specified.
+    dtype : dtype or str, optional
+        Data type for arrays, can either be 'float32' or 'float64'. If `None` is
+        specified, the data type is inferred by `out`. If `out` is not provided,
+        the default is 'float64'.
+
+    Returns
+    -------
+    ndarray
+        Distance between vectors `v0` and `v1`.
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    else:
+        dtype = np.dtype(out.dtype).type
+
+    v = np.asarray(v, dtype=dtype)
+    point = np.asarray(point, dtype=dtype)
+
+    if v.ndim == point.ndim == 2 or (v.ndim == 2 and point.ndim == 1):
+        angle = np.zeros((v.shape[0],), dtype=dtype) if out is None else out
+        u = np.sqrt(length(v, squared=True, dtype=dtype) *
+                    length(point, squared=True, dtype=dtype))
+        angle[:] = np.arccos(dot(v, point, dtype=dtype) / u)
+    elif v.ndim == 1 and point.ndim == 2:
+        u = np.sqrt(length(v, squared=True, dtype=dtype) *
+                    length(point, squared=True, dtype=dtype))
+        angle = np.arccos(dot(v, point, dtype=dtype) / u)
+    elif v.ndim == point.ndim == 1:
+        u = np.sqrt(length(v, squared=True, dtype=dtype) *
+                    length(point, squared=True, dtype=dtype))
+        angle = np.arccos(dot(v, point, dtype=dtype) / u)
+    else:
+        raise ValueError("Input arguments have invalid dimensions.")
+
+
+    return np.degrees(angle) if degrees else angle
+
+
 def surfaceNormal(tri, norm=False, out=None, dtype=None):
     """Compute the surface normal of a given triangle.
 
