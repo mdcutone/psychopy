@@ -56,7 +56,8 @@ input arguments should have matching types and `dtype` set accordingly.
 
 Most functions have an `out` argument, where one can specify an array to write
 values to. The value of `dtype` is ignored if `out` is provided, and all input
-arrays will be converted to match the `dtype` of `out` (if not already).
+arrays will be converted to match the `dtype` of `out` (if not already). This
+ensures that the type of the destination array is used.
 
 
 .. automodule:: psychopy.tools.mathtools
@@ -79,7 +80,7 @@ Overview
     surfaceNormal
     slerp
     quatToAxisAngle
-    quatFromAngleAxis
+    quatFromAxisAngle
     quatMagnitude
     multQuat
     invertQuat
@@ -109,7 +110,7 @@ Details
 .. autofunction:: surfaceNormal
 .. autofunction:: slerp
 .. autofunction:: quatToAxisAngle
-.. autofunction:: quatFromAngleAxis
+.. autofunction:: quatFromAxisAngle
 .. autofunction:: quatMagnitude
 .. autofunction:: multQuat
 .. autofunction:: invertQuat
