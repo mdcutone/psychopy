@@ -808,10 +808,6 @@ def createVAO(vertexBuffers, indexBuffer=None):
         elif attr == GL.GL_COLOR_ARRAY:
             GL.glColorPointer(vbo.size, vbo.dtype, 0, None)
             GL.glEnableClientState(GL.GL_COLOR_ARRAY)
-        elif isinstance(attr, int):  # generic attributes
-            GL.glVertexAttribPointer(
-                attr, vbo.size, GL.GL_FLOAT, GL.GL_FALSE, 0, None)
-            GL.glEnableVertexAttribArray(attr)
 
     if not hasVertexArray:
         # delete the VAO we created
@@ -1107,7 +1103,7 @@ def useLights(lights, setupOnly=False):
         if len(lights) > getIntegerv(GL.GL_MAX_LIGHTS):
             raise IndexError("Number of lights specified > GL_MAX_LIGHTS.")
 
-        GL.glEnable(GL.GL_NORMALIZE)
+        #GL.glEnable(GL.GL_NORMALIZE)
 
         for index, light in enumerate(lights):
             enumLight = GL.GL_LIGHT0 + index

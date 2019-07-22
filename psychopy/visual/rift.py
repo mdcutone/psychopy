@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Oculus Rift HMD support for PsychoPy.
 
-Copyright (C) 2018 - Matthew D. Cutone, The Centre for Vision Research, Toronto,
+Copyright (C) 2019 - Matthew D. Cutone, The Centre for Vision Research, Toronto,
 Ontario, Canada
 
 """
@@ -14,7 +14,7 @@ Ontario, Canada
 _HAS_PSYCHXR_ = True
 
 try:
-    import psychxr.libovr as ovr
+    import psychxr.libovr as libovr
 except ImportError:
     _HAS_PSYCHXR_ = False
 
@@ -30,60 +30,60 @@ import numpy as np
 reportNDroppedFrames = 5
 
 RIFT_CONTROLLER_TYPES = {
-    'Xbox': ovr.LIBOVR_CONTROLLER_TYPE_XBOX,
-    'Remote': ovr.LIBOVR_CONTROLLER_TYPE_REMOTE,
-    'Touch': ovr.LIBOVR_CONTROLLER_TYPE_TOUCH,
-    'LeftTouch': ovr.LIBOVR_CONTROLLER_TYPE_LTOUCH,
-    'RightTouch': ovr.LIBOVR_CONTROLLER_TYPE_RTOUCH,
-    "Object0": ovr.LIBOVR_CONTROLLER_TYPE_OBJECT0,
-    "Object1": ovr.LIBOVR_CONTROLLER_TYPE_OBJECT1,
-    "Object2": ovr.LIBOVR_CONTROLLER_TYPE_OBJECT2,
-    "Object3": ovr.LIBOVR_CONTROLLER_TYPE_OBJECT3
+    'Xbox': libovr.CONTROLLER_TYPE_XBOX,
+    'Remote': libovr.CONTROLLER_TYPE_REMOTE,
+    'Touch': libovr.CONTROLLER_TYPE_TOUCH,
+    'LeftTouch': libovr.CONTROLLER_TYPE_LTOUCH,
+    'RightTouch': libovr.CONTROLLER_TYPE_RTOUCH,
+    "Object0": libovr.CONTROLLER_TYPE_OBJECT0,
+    "Object1": libovr.CONTROLLER_TYPE_OBJECT1,
+    "Object2": libovr.CONTROLLER_TYPE_OBJECT2,
+    "Object3": libovr.CONTROLLER_TYPE_OBJECT3
 }
 
 RIFT_BUTTON_TYPES = {
-    "A": ovr.LIBOVR_BUTTON_A,
-    "B": ovr.LIBOVR_BUTTON_B,
-    "RThumb": ovr.LIBOVR_BUTTON_RTHUMB,
-    "RShoulder": ovr.LIBOVR_BUTTON_RSHOULDER,
-    "X": ovr.LIBOVR_BUTTON_X,
-    "Y": ovr.LIBOVR_BUTTON_Y,
-    "LThumb": ovr.LIBOVR_BUTTON_LTHUMB,
-    "LShoulder": ovr.LIBOVR_BUTTON_LSHOULDER,
-    "Up": ovr.LIBOVR_BUTTON_UP,
-    "Down": ovr.LIBOVR_BUTTON_DOWN,
-    "Left": ovr.LIBOVR_BUTTON_LEFT,
-    "Right": ovr.LIBOVR_BUTTON_RIGHT,
-    "Enter": ovr.LIBOVR_BUTTON_ENTER,
-    "Back": ovr.LIBOVR_BUTTON_BACK,
-    "VolUp": ovr.LIBOVR_BUTTON_VOLUP,
-    "VolDown": ovr.LIBOVR_BUTTON_VOLDOWN,
-    "Home": ovr.LIBOVR_BUTTON_HOME,
+    "A": libovr.BUTTON_A,
+    "B": libovr.BUTTON_B,
+    "RThumb": libovr.BUTTON_RTHUMB,
+    "RShoulder": libovr.BUTTON_RSHOULDER,
+    "X": libovr.BUTTON_X,
+    "Y": libovr.BUTTON_Y,
+    "LThumb": libovr.BUTTON_LTHUMB,
+    "LShoulder": libovr.BUTTON_LSHOULDER,
+    "Up": libovr.BUTTON_UP,
+    "Down": libovr.BUTTON_DOWN,
+    "Left": libovr.BUTTON_LEFT,
+    "Right": libovr.BUTTON_RIGHT,
+    "Enter": libovr.BUTTON_ENTER,
+    "Back": libovr.BUTTON_BACK,
+    "VolUp": libovr.BUTTON_VOLUP,
+    "VolDown": libovr.BUTTON_VOLDOWN,
+    "Home": libovr.BUTTON_HOME,
 }
 
 RIFT_TRACKED_DEVICE_TYPES = {
-    "HMD" : ovr.LIBOVR_TRACKED_DEVICE_TYPE_HMD,
-    "LTouch": ovr.LIBOVR_TRACKED_DEVICE_TYPE_LTOUCH,
-    "RTouch": ovr.LIBOVR_TRACKED_DEVICE_TYPE_RTOUCH,
-    "Touch": ovr.LIBOVR_TRACKED_DEVICE_TYPE_TOUCH,
-    "Object0": ovr.LIBOVR_TRACKED_DEVICE_TYPE_OBJECT0,
-    "Object1": ovr.LIBOVR_TRACKED_DEVICE_TYPE_OBJECT1,
-    "Object2": ovr.LIBOVR_TRACKED_DEVICE_TYPE_OBJECT2,
-    "Object3": ovr.LIBOVR_TRACKED_DEVICE_TYPE_OBJECT3
+    "HMD" : libovr.TRACKED_DEVICE_TYPE_HMD,
+    "LTouch": libovr.TRACKED_DEVICE_TYPE_LTOUCH,
+    "RTouch": libovr.TRACKED_DEVICE_TYPE_RTOUCH,
+    "Touch": libovr.TRACKED_DEVICE_TYPE_TOUCH,
+    "Object0": libovr.TRACKED_DEVICE_TYPE_OBJECT0,
+    "Object1": libovr.TRACKED_DEVICE_TYPE_OBJECT1,
+    "Object2": libovr.TRACKED_DEVICE_TYPE_OBJECT2,
+    "Object3": libovr.TRACKED_DEVICE_TYPE_OBJECT3
 }
 
 RIFT_TRACKING_ORIGIN_TYPE = {
-    "floor": ovr.LIBOVR_TRACKING_ORIGIN_FLOOR_LEVEL,
-    "eye": ovr.LIBOVR_TRACKING_ORIGIN_EYE_LEVEL
+    "floor": libovr.TRACKING_ORIGIN_FLOOR_LEVEL,
+    "eye": libovr.TRACKING_ORIGIN_EYE_LEVEL
 }
 
 RIFT_PERF_HUD_MODES = {
-    'PerfSummary': ovr.LIBOVR_PERF_HUD_PERF_SUMMARY,
-    'Off': ovr.LIBOVR_PERF_HUD_OFF}
+    'PerfSummary': libovr.PERF_HUD_PERF_SUMMARY,
+    'Off': libovr.PERF_HUD_OFF}
 
 RIFT_BOUNDARY_TYPE = {
-    'PlayArea': ovr.LIBOVR_BOUNDARY_PLAY_AREA,
-    'Outer': ovr.LIBOVR_BOUNDARY_OUTER
+    'PlayArea': libovr.BOUNDARY_PLAY_AREA,
+    'Outer': libovr.BOUNDARY_OUTER
 }
 
 class LibOVRError(Exception):
@@ -204,30 +204,30 @@ class Rift(window.Window):
                                "exiting.")
 
         # check if the background service is running and an HMD is connected
-        if not ovr.isOculusServiceRunning():
+        if not libovr.isOculusServiceRunning():
             raise RuntimeError("HMD service is not available or started, " +
                                "exiting.")
 
-        if not ovr.isHmdConnected():
+        if not libovr.isHmdConnected():
             raise RuntimeError("Cannot find any connected HMD, check " +
                                "connections and try again.")
 
         # create a VR session, do some initial configuration
-        initResult = ovr.initialize()
-        if ovr.failure(initResult):
-            _, msg = ovr.getLastErrorInfo()
+        initResult = libovr.initialize()
+        if libovr.failure(initResult):
+            _, msg = libovr.getLastErrorInfo()
             raise LibOVRError(msg)
 
-        if ovr.failure(ovr.create()):
-            _, msg = ovr.getLastErrorInfo()
+        if libovr.failure(libovr.create()):
+            _, msg = libovr.getLastErrorInfo()
             raise LibOVRError(msg)
 
         # update session status object
-        _, status = ovr.getSessionStatus()
+        _, status = libovr.getSessionStatus()
         self._sessionStatus = status
 
         # get HMD information
-        self._hmdInfo = ovr.getHmdInfo()
+        self._hmdInfo = libovr.getHmdInfo()
 
         # configure the internal render descriptors based on the requested
         # viewing parameters.
@@ -252,15 +252,15 @@ class Rift(window.Window):
 
         # pass the FOVs to PsychXR
         for eye, fov in enumerate(eyeFovs):
-            ovr.setEyeRenderFov(eye, fov)
+            libovr.setEyeRenderFov(eye, fov)
 
-        ovr.setHeadLocked(headLocked)  # enable head locked mode
-        ovr.setHighQuality(highQuality)  # enable high quality mode
+        libovr.setHeadLocked(headLocked)  # enable head locked mode
+        libovr.setHighQuality(highQuality)  # enable high quality mode
 
         # Compute texture sizes for render buffers, these are reported by the
         # LibOVR SDK based on the FOV settings specified above.
-        texSizeLeft = ovr.calcEyeBufferSize(ovr.LIBOVR_EYE_LEFT)
-        texSizeRight = ovr.calcEyeBufferSize(ovr.LIBOVR_EYE_RIGHT)
+        texSizeLeft = libovr.calcEyeBufferSize(libovr.EYE_LEFT)
+        texSizeRight = libovr.calcEyeBufferSize(libovr.EYE_RIGHT)
 
         # we are using a shared texture, so we need to combine dimensions
         if not self._monoscopic:
@@ -292,12 +292,12 @@ class Rift(window.Window):
             leftViewport = (0, 0, texSizeLeft[0], texSizeLeft[1])
             rightViewport = (0, 0, texSizeRight[0], texSizeRight[1])
 
-        ovr.setEyeRenderViewport(ovr.LIBOVR_EYE_LEFT, leftViewport)
+        libovr.setEyeRenderViewport(libovr.EYE_LEFT, leftViewport)
         logging.info(
             'Set left eye viewport to: x={}, y={}, w={}, h={}.'.format(
                 *leftViewport))
 
-        ovr.setEyeRenderViewport(ovr.LIBOVR_EYE_RIGHT, rightViewport)
+        libovr.setEyeRenderViewport(libovr.EYE_RIGHT, rightViewport)
         logging.info(
             'Set right eye viewport to: x={}, y={}, w={}, h={}.'.format(
                 *rightViewport))
@@ -330,7 +330,7 @@ class Rift(window.Window):
         # disable v-sync since the HMD runs at a different frequency
         kwargs['waitBlanking'] = False
 
-        # force checkTiming off and quad-buffer stereo
+        # force checkTiming and quad-buffer stereo off
         kwargs["checkTiming"] = False
         kwargs["stereo"] = False
         kwargs['useFBO'] = True
@@ -341,10 +341,7 @@ class Rift(window.Window):
         self._allowHmdRendering = False
 
         # VR pose data, updated every frame
-        self._headPoseState = (ovr.LibOVRPoseState(), 0)
-        self._leftHandPoseState = (ovr.LibOVRPoseState(), 0)
-        self._rightHandPoseState = (ovr.LibOVRPoseState(), 0)
-        self._calibratedOrigin = ovr.LibOVRPose()
+        self._trackingState = libovr.LibOVRTrackingState()
 
         # set the tracking origin type
         self.trackingOriginType = trackingOriginType
@@ -397,25 +394,25 @@ class Rift(window.Window):
             HUD mode to use.
 
         """
-        result = ovr.setInt(ovr.LIBOVR_PERF_HUD_MODE, RIFT_PERF_HUD_MODES[mode])
+        result = libovr.setInt(libovr.PERF_HUD_MODE, RIFT_PERF_HUD_MODES[mode])
         logging.info("Performance HUD mode set to '{}'.".format(mode))
 
     def hidePerfHud(self):
         """Hide the performance HUD."""
-        result = ovr.setInt(ovr.LIBOVR_PERF_HUD_MODE, ovr.LIBOVR_PERF_HUD_OFF)
+        result = libovr.setInt(libovr.PERF_HUD_MODE, libovr.PERF_HUD_OFF)
         logging.info('Performance HUD disabled.')
 
     @property
     def userHeight(self):
         """Get user height in meters (`float`)."""
-        return ovr.getFloat(ovr.LIBOVR_KEY_PLAYER_HEIGHT,
-                            ovr.LIBOVR_DEFAULT_PLAYER_HEIGHT)
+        return libovr.getFloat(libovr.KEY_PLAYER_HEIGHT,
+                               libovr.DEFAULT_PLAYER_HEIGHT)
 
     @property
     def eyeHeight(self):
         """Eye height in meters (`float`)."""
-        return ovr.getFloat(ovr.LIBOVR_KEY_EYE_HEIGHT,
-                            ovr.LIBOVR_DEFAULT_EYE_HEIGHT)
+        return libovr.getFloat(libovr.KEY_EYE_HEIGHT,
+                               libovr.DEFAULT_EYE_HEIGHT)
 
     @property
     def eyeToNoseDistance(self):
@@ -436,13 +433,13 @@ class Rift(window.Window):
 
         """
         eyeToNoseDist = np.zeros((2,), dtype=np.float32)
-        result = ovr.getFloatArray(ovr.LIBOVR_KEY_EYE_TO_NOSE_DISTANCE,
-                                   eyeToNoseDist)
+        result = libovr.getFloatArray(libovr.KEY_EYE_TO_NOSE_DISTANCE,
+                                      eyeToNoseDist)
 
         return eyeToNoseDist
 
     @property
-    def interAxialSeparation(self):
+    def iod(self):
         """Inter-axial separation in meters (`float`).
 
         Value is applied to the poses in :py:class:`~Rift.hmdToEyePoses`.
@@ -451,12 +448,12 @@ class Rift(window.Window):
         if self.hmdToEyePoses is not None:
             return -self.hmdToEyePoses[0].pos[0] + self.hmdToEyePoses[1].pos[0]
 
-    @interAxialSeparation.setter
-    def interAxialSeparation(self, value):
+    @iod.setter
+    def iod(self, value):
         if self.hmdToEyePoses is not None:
             halfIAS = value / 2.0
-            self.hmdToEyePoses = [ovr.LibOVRPose((halfIAS, 0.0, 0.0)),
-                                  ovr.LibOVRPose((-halfIAS, 0.0, 0.0))]
+            self.hmdToEyePoses = [libovr.LibOVRPose((halfIAS, 0.0, 0.0)),
+                                  libovr.LibOVRPose((-halfIAS, 0.0, 0.0))]
             logging.info(
                 'Inter-axial separation set to {} meters.'.format(value))
 
@@ -514,8 +511,8 @@ class Rift(window.Window):
         display.
 
         """
-        return [ovr.getPixelsPerTanAngleAtCenter(ovr.LIBOVR_EYE_LEFT),
-                ovr.getPixelsPerTanAngleAtCenter(ovr.LIBOVR_EYE_RIGHT)]
+        return [libovr.getPixelsPerTanAngleAtCenter(libovr.EYE_LEFT),
+                libovr.getPixelsPerTanAngleAtCenter(libovr.EYE_RIGHT)]
 
     def tanAngleToNDC(self, horzTan, vertTan):
         """Convert tan angles to the normalized device coordinates for the
@@ -536,16 +533,16 @@ class Rift(window.Window):
 
         """
         if self.buffer == 'left':
-            return ovr.getTanAngleToRenderTargetNDC(
-                ovr.LIBOVR_EYE_LEFT, (horzTan, vertTan))
+            return libovr.getTanAngleToRenderTargetNDC(
+                libovr.EYE_LEFT, (horzTan, vertTan))
         elif self.buffer == 'right':
-            return ovr.getTanAngleToRenderTargetNDC(
-                ovr.LIBOVR_EYE_LEFT, (horzTan, vertTan))
+            return libovr.getTanAngleToRenderTargetNDC(
+                libovr.EYE_LEFT, (horzTan, vertTan))
 
     @property
     def trackerCount(self):
         """Number of attached trackers."""
-        return ovr.getTrackerCount()
+        return libovr.getTrackerCount()
 
     def getTrackerInfo(self, trackerIdx):
         """Get tracker information.
@@ -566,11 +563,20 @@ class Rift(window.Window):
             Raised when `trackerIdx` out of range.
 
         """
-        if 0 <= trackerIdx < ovr.getTrackerCount():
-            return ovr.getTrackerInfo(trackerIdx)
+        if 0 <= trackerIdx < libovr.getTrackerCount():
+            return libovr.getTrackerInfo(trackerIdx)
         else:
             raise IndexError(
                 "Tracker index '{}' out of range.".format(trackerIdx))
+
+    @property
+    def headLocked(self):
+        """`True` if head locking is enabled."""
+        return libovr.isHeadLocked()
+
+    @headLocked.setter
+    def headLocked(self, value):
+        libovr.setHeadLocked(value)
 
     @property
     def trackingOriginType(self):
@@ -579,22 +585,22 @@ class Rift(window.Window):
         Valid tracking origin types are 'floor' and 'eye'.
 
         """
-        originType = ovr.getTrackingOriginType()
+        originType = libovr.getTrackingOriginType()
 
-        if originType == ovr.LIBOVR_TRACKING_ORIGIN_FLOOR_LEVEL:
+        if originType == libovr.TRACKING_ORIGIN_FLOOR_LEVEL:
             return 'floor'
-        elif originType == ovr.LIBOVR_TRACKING_ORIGIN_EYE_LEVEL:
+        elif originType == libovr.TRACKING_ORIGIN_EYE_LEVEL:
             return 'eye'
         else:
             raise ValueError("LibOVR returned unknown tracking origin type.")
 
     @trackingOriginType.setter
     def trackingOriginType(self, value):
-        ovr.setTrackingOriginType(RIFT_TRACKING_ORIGIN_TYPE[value])
+        libovr.setTrackingOriginType(RIFT_TRACKING_ORIGIN_TYPE[value])
 
     def recenterTrackingOrigin(self):
         """Recenter the tracking origin using the current head position."""
-        ovr.recenterTrackingOrigin()
+        libovr.recenterTrackingOrigin()
 
     def specifyTrackingOrigin(self, pose):
         """Specify a tracking origin.
@@ -605,7 +611,7 @@ class Rift(window.Window):
             Tracking origin pose.
 
         """
-        ovr.specifyTrackingOrigin(pose)
+        libovr.specifyTrackingOrigin(pose)
 
     def specifyTrackingOriginPosOri(self, pos=(0., 0., 0.), ori=(0., 0., 0., 1.)):
         """Specify a tracking origin using a pose and orientation.
@@ -618,11 +624,33 @@ class Rift(window.Window):
             Quaternion specifying orientation (x, y, z, w).
 
         """
-        ovr.specifyTrackingOrigin(ovr.LibOVRPose(pos, ori))
+        libovr.specifyTrackingOrigin(libovr.LibOVRPose(pos, ori))
 
     def clearShouldRecenterFlag(self):
         """Clear the 'shouldRecenter' status flag at the API level."""
-        ovr.clearShouldRecenterFlag()
+        libovr.clearShouldRecenterFlag()
+
+    def testBoundary(self, deviceType, bounadryType='PlayArea'):
+        """Test if tracked devices are colliding with the play area boundary."""
+
+        if isinstance(deviceType, (list, tuple,)):
+            deviceBits = 0x00000000
+            for device in deviceType:
+                deviceBits |= RIFT_TRACKED_DEVICE_TYPES[device]
+        elif isinstance(deviceType, str):
+            deviceBits = RIFT_TRACKED_DEVICE_TYPES[deviceType]
+        elif isinstance(deviceType, int):
+            deviceBits = deviceType
+        else:
+            raise TypeError("Invalid type specified for `deviceType`.")
+
+        result, testResult = libovr.testBoundary(
+            deviceBits, RIFT_BOUNDARY_TYPE[bounadryType])
+
+        if libovr.failure(result):
+            raise RuntimeError('Failed to get boundary test result')
+
+        return testResult
 
     def getDevicePose(self, deviceName, absTime, latencyMarker=False):
         """Get the pose of a tracked device.
@@ -644,11 +672,11 @@ class Rift(window.Window):
             Pose state object. `None` if device tracking was lost.
 
         """
-        deviceStatus, devicePose = ovr.getDevicePoses(
+        deviceStatus, devicePose = libovr.getDevicePoses(
             [RIFT_TRACKED_DEVICE_TYPES[deviceName]], absTime, latencyMarker)
 
         # check if tracking was lost
-        if deviceStatus == ovr.LIBOVR_ERROR_LOST_TRACKING:
+        if deviceStatus == libovr.ERROR_LOST_TRACKING:
             return None
 
         return devicePose[0]
@@ -705,12 +733,7 @@ class Rift(window.Window):
         # Get the current tracking state structure, estimated poses for the
         # head and hands are stored here. The latency marker for computing
         # motion-to-photon latency is set when this function is called.
-        ts, calibratedOrigin = ovr.getTrackingState(absTime)
-
-        self._headPoseState = ts[ovr.LIBOVR_TRACKED_DEVICE_TYPE_HMD]
-        self._leftHandPoseState = ts[ovr.LIBOVR_TRACKED_DEVICE_TYPE_LTOUCH]
-        self._rightHandPoseState = ts[ovr.LIBOVR_TRACKED_DEVICE_TYPE_RTOUCH]
-        self._calibratedOrigin = calibratedOrigin
+        self._trackingState = libovr.getTrackingState(absTime)
 
     @property
     def hmdToEyePoses(self):
@@ -734,12 +757,12 @@ class Rift(window.Window):
         positive X value and the right negative.
 
         """
-        return [ovr.getHmdToEyePose(i) for i in range(ovr.LIBOVR_EYE_COUNT)]
+        return [libovr.getHmdToEyePose(i) for i in range(libovr.EYE_COUNT)]
 
     @hmdToEyePoses.setter
     def hmdToEyePoses(self, value):
         for eye, pose in enumerate(value):
-            ovr.setHmdToEyePose(eye, pose)
+            libovr.setHmdToEyePose(eye, pose)
 
     @property
     def headPosTracked(self):
@@ -750,9 +773,9 @@ class Rift(window.Window):
         :py:class:`~Rift.updateTrackingState` call.
 
         """
-        status = self._headPoseState[1]
-        return ovr.LIBOVR_STATUS_POSITION_TRACKED == (
-                status & ovr.LIBOVR_STATUS_POSITION_TRACKED)
+        status = self._trackingState.statusFlags
+        return libovr.STATUS_POSITION_TRACKED == (
+                status & libovr.STATUS_POSITION_TRACKED)
 
     @property
     def headOriTracked(self):
@@ -762,9 +785,9 @@ class Rift(window.Window):
         :py:class:`~Rift.updateTrackingState` call.
 
         """
-        status = self._headPoseState[1]
-        return ovr.LIBOVR_STATUS_ORIENTATION_TRACKED == (
-                status & ovr.LIBOVR_STATUS_ORIENTATION_TRACKED)
+        status = self._trackingState.statusFlags
+        return libovr.STATUS_ORIENTATION_TRACKED == (
+                status & libovr.STATUS_ORIENTATION_TRACKED)
 
     @property
     def trackedHeadPose(self):
@@ -778,7 +801,7 @@ class Rift(window.Window):
         be accessed through the ``_headPoseState`` private attribute.
 
         """
-        return self._headPoseState[0].pose
+        return self._trackingState.headPose.thePose
 
     @property
     def trackedHandPoses(self):
@@ -790,7 +813,7 @@ class Rift(window.Window):
         the time passed to that function.
 
         """
-        return self._leftHandPoseState[0].pose, self._rightHandPoseState[0].pose
+        return [self._trackingState.handPoses[i].thePose for i in range(libovr.EYE_COUNT)]
 
     @property
     def calibrtedOrigin(self):
@@ -799,7 +822,7 @@ class Rift(window.Window):
         The pose reflects the last :py:class:`~Rift.updateTrackingState` call.
 
         """
-        return self._calibratedOrigin
+        return self._trackingState.calibratedOrigin
 
     def calcEyePoses(self, headPose=None):
         """Calculate eye poses.
@@ -818,17 +841,17 @@ class Rift(window.Window):
         if not self._allowHmdRendering:
             return
 
-        ovr.calcEyePoses(self.trackedHeadPose if headPose is None else headPose)
+        libovr.calcEyePoses(self.trackedHeadPose if headPose is None else headPose)
 
         # Calculate eye poses, this needs to be called every frame.
         # apply additional transformations to eye poses
         if not self._monoscopic:
             for eye, matrix in enumerate(self._viewMatrix):
                 # compute each eye's transformation matrix from returned poses
-                ovr.getEyeViewMatrix(eye, matrix)
+                libovr.getEyeViewMatrix(eye, matrix)
         else:
             # view matrix derived from head position when in monoscopic mode
-            self._viewMatrix = self.trackedHeadPose.getTransformMatrix()
+            self._viewMatrix = self.trackedHeadPose.getViewMatrix()
 
         self._startHmdFrame()
 
@@ -837,58 +860,58 @@ class Rift(window.Window):
         """Eye poses to use when rendering (`LibOVRPose`, `LibOVRPose`).
 
         """
-        return [ovr.getEyeRenderPose(i) for i in range(ovr.LIBOVR_EYE_COUNT)]
+        return [libovr.getEyeRenderPose(i) for i in range(libovr.EYE_COUNT)]
 
     @eyePoses.setter
     def eyePoses(self, value):
-        ovr.setEyeRenderPose(ovr.LIBOVR_EYE_LEFT, value[0])
-        ovr.setEyeRenderPose(ovr.LIBOVR_EYE_RIGHT, value[1])
+        libovr.setEyeRenderPose(libovr.EYE_LEFT, value[0])
+        libovr.setEyeRenderPose(libovr.EYE_RIGHT, value[1])
 
         # Calculate eye poses, this needs to be called every frame.
         # apply additional transformations to eye poses
         if not self._monoscopic:
             for eye, matrix in enumerate(self._viewMatrix):
                 # compute each eye's transformation matrix from returned poses
-                ovr.getEyeViewMatrix(eye, matrix)
+                libovr.getEyeViewMatrix(eye, matrix)
         else:
             # view matrix derived from head position when in monoscopic mode
             self._viewMatrix = self.trackedHeadPose.getTransformMatrix()
 
     @property
     def shouldQuit(self):
-        """True if the user requested the application should quit through the
+        """`True` if the user requested the application should quit through the
         headset's interface.
         """
         return self._sessionStatus.shouldQuit
 
     @property
     def isVisible(self):
-        """True if the app has focus in the HMD and is visible to the viewer.
+        """`True` if the app has focus in the HMD and is visible to the viewer.
         """
         return self._sessionStatus.isVisible
 
     @property
     def hmdMounted(self):
-        """True if the HMD is mounted on the user's head.
+        """`True` if the HMD is mounted on the user's head.
         """
         return self._sessionStatus.hmdMounted
 
     @property
     def hmdPresent(self):
-        """True if the HMD is present, otherwise False.
+        """`True` if the HMD is present.
         """
         return self._sessionStatus.hmdPresent
 
     @property
     def shouldRecenter(self):
-        """True if the user requested the origin be re-centered through the
+        """`True` if the user requested the origin be re-centered through the
         headset's interface.
         """
         return self._sessionStatus.shouldRecenter
 
     @property
     def hasInputFocus(self):
-        """True if the application currently has input focus.
+        """`True` if the application currently has input focus.
         """
         return self._sessionStatus.hasInputFocus
 
@@ -910,20 +933,23 @@ class Rift(window.Window):
 
         """
         # create a texture swap chain for both eye textures
-        result = ovr.createTextureSwapChainGL(ovr.LIBOVR_TEXTURE_SWAP_CHAIN0,
-                                              self._swapTextureSize[0],
-                                              self._swapTextureSize[1])
-        if ovr.success(result):
+        result = libovr.createTextureSwapChainGL(
+            libovr.TEXTURE_SWAP_CHAIN0,
+            self._swapTextureSize[0],
+            self._swapTextureSize[1])
+
+        if libovr.success(result):
             logging.info(
                 'Created texture swap chain with dimensions {w}x{h}.'.format(
-                    w=self._swapTextureSize[0], h=self._swapTextureSize[1]))
+                    w=self._swapTextureSize[0],
+                    h=self._swapTextureSize[1]))
         else:
-            _, msg = ovr.getLastErrorInfo()
+            _, msg = libovr.getLastErrorInfo()
             raise LibOVRError(msg)
 
         # assign the same swap chain to both eyes
-        for eye in range(ovr.LIBOVR_EYE_COUNT):
-            ovr.setEyeColorTextureSwapChain(eye, ovr.LIBOVR_TEXTURE_SWAP_CHAIN0)
+        for eye in range(libovr.EYE_COUNT):
+            libovr.setEyeColorTextureSwapChain(eye, libovr.TEXTURE_SWAP_CHAIN0)
 
         # Use MSAA if more than one sample is specified. If enabled, a render
         # buffer will be created.
@@ -962,10 +988,15 @@ class Rift(window.Window):
             GL.glGenRenderbuffers(1, ctypes.byref(rb_color_msaa_id))
             GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, rb_color_msaa_id)
             GL.glRenderbufferStorageMultisample(
-                GL.GL_RENDERBUFFER, self._samples, GL.GL_RGBA8,
-                int(self._swapTextureSize[0]), int(self._swapTextureSize[1]))
+                GL.GL_RENDERBUFFER,
+                self._samples,
+                GL.GL_RGBA8,
+                int(self._swapTextureSize[0]),
+                int(self._swapTextureSize[1]))
             GL.glFramebufferRenderbuffer(
-                GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0, GL.GL_RENDERBUFFER,
+                GL.GL_FRAMEBUFFER,
+                GL.GL_COLOR_ATTACHMENT0,
+                GL.GL_RENDERBUFFER,
                 rb_color_msaa_id)
             GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, 0)
 
@@ -973,13 +1004,20 @@ class Rift(window.Window):
             GL.glGenRenderbuffers(1, ctypes.byref(rb_depth_msaa_id))
             GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, rb_depth_msaa_id)
             GL.glRenderbufferStorageMultisample(
-                GL.GL_RENDERBUFFER, self._samples, GL.GL_DEPTH24_STENCIL8,
-                int(self._swapTextureSize[0]), int(self._swapTextureSize[1]))
+                GL.GL_RENDERBUFFER,
+                self._samples,
+                GL.GL_DEPTH24_STENCIL8,
+                int(self._swapTextureSize[0]),
+                int(self._swapTextureSize[1]))
             GL.glFramebufferRenderbuffer(
-                GL.GL_FRAMEBUFFER, GL.GL_DEPTH_ATTACHMENT, GL.GL_RENDERBUFFER,
+                GL.GL_FRAMEBUFFER,
+                GL.GL_DEPTH_ATTACHMENT,
+                GL.GL_RENDERBUFFER,
                 rb_depth_msaa_id)
             GL.glFramebufferRenderbuffer(
-                GL.GL_FRAMEBUFFER, GL.GL_STENCIL_ATTACHMENT, GL.GL_RENDERBUFFER,
+                GL.GL_FRAMEBUFFER,
+                GL.GL_STENCIL_ATTACHMENT,
+                GL.GL_RENDERBUFFER,
                 rb_depth_msaa_id)
 
             GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, 0)
@@ -1029,12 +1067,12 @@ class Rift(window.Window):
             self._mirrorRes = self.__dict__['size']
 
         mirrorW, mirrorH = self._mirrorRes
-        if ovr.success(ovr.createMirrorTexture(mirrorW, mirrorH)):
+        if libovr.success(libovr.createMirrorTexture(mirrorW, mirrorH)):
             logging.info(
                 'Created mirror texture with dimensions {w} x {h}'.format(
                     w=mirrorW, h=mirrorH))
         else:
-            _, msg = ovr.getLastErrorInfo()
+            _, msg = libovr.getLastErrorInfo()
             raise LibOVRError(msg)
 
         GL.glDisable(GL.GL_TEXTURE_2D)
@@ -1065,16 +1103,19 @@ class Rift(window.Window):
         GL.glFramebufferTexture2D(
             GL.GL_DRAW_FRAMEBUFFER,
             GL.GL_COLOR_ATTACHMENT0,
-            GL.GL_TEXTURE_2D, self.frameTexture, 0)
+            GL.GL_TEXTURE_2D,
+            self.frameTexture,
+            0)
 
         # blit the texture
         fbo_w, fbo_h = self._swapTextureSize
         GL.glViewport(0, 0, fbo_w, fbo_h)
         GL.glScissor(0, 0, fbo_w, fbo_h)
-        GL.glBlitFramebuffer(0, 0, fbo_w, fbo_h,
-                             0, 0, fbo_w, fbo_h,  # flips texture
-                             GL.GL_COLOR_BUFFER_BIT,
-                             GL.GL_NEAREST)
+        GL.glBlitFramebuffer(
+            0, 0, fbo_w, fbo_h,
+            0, 0, fbo_w, fbo_h,  # flips texture
+            GL.GL_COLOR_BUFFER_BIT,
+            GL.GL_NEAREST)
 
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
 
@@ -1101,9 +1142,10 @@ class Rift(window.Window):
         self.buffer = 'mono'
         GL.glEnable(GL.GL_SCISSOR_TEST)
 
-        viewPort = ovr.getEyeRenderViewport(ovr.LIBOVR_EYE_LEFT)  # mono mode
+        viewPort = libovr.getEyeRenderViewport(libovr.EYE_LEFT)  # mono mode
         GL.glViewport(*viewPort)
         GL.glScissor(*viewPort)
+        GL.glDepthMask(GL.GL_TRUE)
 
         if clear:
             self.setColor(self.color)  # clear the texture to the window color
@@ -1163,16 +1205,18 @@ class Rift(window.Window):
         GL.glEnable(GL.GL_SCISSOR_TEST)
 
         if buffer == 'left':
-            viewPort = ovr.getEyeRenderViewport(ovr.LIBOVR_EYE_LEFT)
+            viewPort = libovr.getEyeRenderViewport(libovr.EYE_LEFT)
             GL.glViewport(*viewPort)
             GL.glScissor(*viewPort)
         elif buffer == 'right':
-            viewPort = ovr.getEyeRenderViewport(ovr.LIBOVR_EYE_RIGHT)
+            viewPort = libovr.getEyeRenderViewport(libovr.EYE_RIGHT)
             GL.glViewport(*viewPort)
             GL.glScissor(*viewPort)
 
         if clear:
             self.setColor(self.color)  # clear the texture to the window color
+            GL.glClearDepth(1.0)
+            GL.glDepthMask(GL.GL_TRUE)
             GL.glClear(
                 GL.GL_COLOR_BUFFER_BIT |
                 GL.GL_DEPTH_BUFFER_BIT |
@@ -1189,7 +1233,7 @@ class Rift(window.Window):
         GL.glEnable(GL.GL_BLEND)
 
     def predictedDisplayTime(self):
-        """Get the predicted time a frame will be displayed.
+        """Get the predicted time the next frame will be displayed.
 
         Returns
         -------
@@ -1201,7 +1245,7 @@ class Rift(window.Window):
 
 
         """
-        return ovr.getPredictedDisplayTime(self._frameIndex)
+        return libovr.getPredictedDisplayTime(self._frameIndex)
 
     def timeInSeconds(self):
         """Absolute time in seconds.
@@ -1212,16 +1256,16 @@ class Rift(window.Window):
             Time in seconds.
 
         """
-        return ovr.timeInSeconds()
+        return libovr.timeInSeconds()
 
     @property
     def viewMatrix(self):
         """Get the view matrix for the current buffer."""
         if not self._monoscopic:
             if self.buffer == 'left':
-                return self._viewMatrix[ovr.LIBOVR_EYE_LEFT]
+                return self._viewMatrix[libovr.EYE_LEFT]
             elif self.buffer == 'right':
-                return self._viewMatrix[ovr.LIBOVR_EYE_RIGHT]
+                return self._viewMatrix[libovr.EYE_RIGHT]
         else:
             return self._viewMatrix
 
@@ -1230,9 +1274,9 @@ class Rift(window.Window):
         """Get the projection matrix for the current buffer."""
         if not self._monoscopic:
             if self.buffer == 'left':
-                return self._projectionMatrix[ovr.LIBOVR_EYE_LEFT]
+                return self._projectionMatrix[libovr.EYE_LEFT]
             elif self.buffer == 'right':
-                return self._projectionMatrix[ovr.LIBOVR_EYE_RIGHT]
+                return self._projectionMatrix[libovr.EYE_RIGHT]
         else:
             return self._projectionMatrix
 
@@ -1240,8 +1284,13 @@ class Rift(window.Window):
     def isBoundaryVisible(self):
         """True if the VR boundary is visible.
         """
-        result, is_visible = ovr.getBoundaryVisible()
+        result, is_visible = libovr.getBoundaryVisible()
         return bool(is_visible)
+
+    @property
+    def boundaryClosetDistance(self):
+        """Distance to the closest point of the boundary."""
+        return self._boundaryTestResult.closestDistance
 
     def getBoundaryDimensions(self, boundaryType='PlayArea'):
         """Get boundary dimensions.
@@ -1257,7 +1306,7 @@ class Rift(window.Window):
             Dimensions of the boundary meters [x, y, z].
 
         """
-        result, dims = ovr.getBoundaryDimensions(
+        result, dims = libovr.getBoundaryDimensions(
             RIFT_BOUNDARY_TYPE[boundaryType])
 
         return dims
@@ -1265,7 +1314,7 @@ class Rift(window.Window):
     @property
     def connectedControllers(self):
         """Connected controller types (`list` of `str`)"""
-        controllers = ovr.getConnectedControllerTypes()
+        controllers = libovr.getConnectedControllerTypes()
         ctrlKeys = {val: key for key, val in RIFT_CONTROLLER_TYPES.items()}
 
         return [ctrlKeys[ctrl] for ctrl in controllers]
@@ -1289,14 +1338,14 @@ class Rift(window.Window):
 
         """
         if controllers is None:
-            toPoll = ovr.getConnectedControllerTypes()
+            toPoll = libovr.getConnectedControllerTypes()
         elif isinstance(controllers, (list, tuple,)):
             toPoll = [RIFT_CONTROLLER_TYPES[ctrl] for ctrl in controllers]
         else:
             raise TypeError("Argument 'controllers' must be iterable type.")
 
         for i in toPoll:
-            result, t_sec = ovr.updateInputState(i)
+            result, t_sec = libovr.updateInputState(i)
             self.controllerPollTimes[i] = t_sec
 
     def _waitToBeginHmdFrame(self):
@@ -1307,20 +1356,20 @@ class Rift(window.Window):
             self._allowHmdRendering = True
 
         # update session status
-        result, status = ovr.getSessionStatus()
+        result, status = libovr.getSessionStatus()
         self._sessionStatus = status
 
         # Wait for the buffer to be freed by the compositor, this is like
         # waiting for v-sync.
-        result = ovr.waitToBeginFrame(self._frameIndex)
-        #if result == ovr.LIBOVR_SUCCESS_NOT_VISIBLE:
+        result = libovr.waitToBeginFrame(self._frameIndex)
+        #if result == ovr.SUCCESS_NOT_VISIBLE:
         #    pass
         self.updateInputState()  # poll controller states
 
         # update the tracking state
         if self.autoUpdatePoses:
             # get the current frame time
-            absTime = ovr.getPredictedDisplayTime(self._frameIndex)
+            absTime = libovr.getPredictedDisplayTime(self._frameIndex)
             # Get the current tracking state structure, estimated poses for the
             # head and hands are stored here. The latency marker for computing
             # motion-to-photon latency is set when this function is called.
@@ -1337,12 +1386,12 @@ class Rift(window.Window):
 
         """
         # begin frame
-        ovr.beginFrame(self._frameIndex)
+        libovr.beginFrame(self._frameIndex)
         # get the next available buffer texture in the swap chain
-        result, swapChainIdx = ovr.getTextureSwapChainCurrentIndex(
-            ovr.LIBOVR_TEXTURE_SWAP_CHAIN0)
-        result, colorTextureId = ovr.getTextureSwapChainBufferGL(
-            ovr.LIBOVR_TEXTURE_SWAP_CHAIN0, swapChainIdx)
+        result, swapChainIdx = libovr.getTextureSwapChainCurrentIndex(
+            libovr.TEXTURE_SWAP_CHAIN0)
+        result, colorTextureId = libovr.getTextureSwapChainBufferGL(
+            libovr.TEXTURE_SWAP_CHAIN0, swapChainIdx)
         self.frameTexture = colorTextureId
 
         # If mono mode, we want to configure the render framebuffer at this
@@ -1370,21 +1419,21 @@ class Rift(window.Window):
             self._resolveMSAA()
 
             # commit current texture buffer to the swap chain
-            ovr.commitTextureSwapChain(ovr.LIBOVR_TEXTURE_SWAP_CHAIN0)
+            libovr.commitTextureSwapChain(libovr.TEXTURE_SWAP_CHAIN0)
 
             # Call end_frame and increment the frame index, no more rendering to
             # HMD's view texture at this point.
-            result = ovr.endFrame(self._frameIndex)
+            result, _ = libovr.endFrame(self._frameIndex)
 
-            if ovr.failure(result):
-                if result == ovr.LIBOVR_ERROR_DISPLAY_LOST:  # display lost!
-                    ovr.destroyMirrorTexture()
-                    ovr.destroyTextureSwapChain(ovr.LIBOVR_TEXTURE_SWAP_CHAIN0)
-                    ovr.destroy()
-                    ovr.shutdown()
+            if libovr.failure(result):
+                if result == libovr.ERROR_DISPLAY_LOST:  # display lost!
+                    libovr.destroyMirrorTexture()
+                    libovr.destroyTextureSwapChain(libovr.TEXTURE_SWAP_CHAIN0)
+                    libovr.destroy()
+                    libovr.shutdown()
                     self.close()
 
-                _, msg = ovr.getLastErrorInfo()
+                _, msg = libovr.getLastErrorInfo()
                 raise LibOVRError(msg)
 
             self._frameIndex += 1  # increment frame index
@@ -1438,9 +1487,9 @@ class Rift(window.Window):
         if flipThisFrame:
             self._prepareFBOrender()
             # need blit the framebuffer object to the actual back buffer
-            result, mirrorTexId = ovr.getMirrorTexture()
-            if ovr.failure(result):
-                _, msg = ovr.getLastErrorInfo()
+            result, mirrorTexId = libovr.getMirrorTexture()
+            if libovr.failure(result):
+                _, msg = libovr.getLastErrorInfo()
                 raise LibOVRError(msg)
 
             # unbind the framebuffer as the render target
@@ -1557,15 +1606,15 @@ class Rift(window.Window):
 
         if not self._monoscopic:
             if self.buffer == 'left':
-                GL.glMultMatrixf(
-                    self._viewMatrix[0].T.flatten().ctypes.data_as(
+                GL.glMultTransposeMatrixf(
+                    self._viewMatrix[0].flatten().ctypes.data_as(
                         ctypes.POINTER(ctypes.c_float)))
             elif self.buffer == 'right':
-                GL.glMultMatrixf(
-                    self._viewMatrix[1].T.flatten().ctypes.data_as(
+                GL.glMultTransposeMatrixf(
+                    self._viewMatrix[1].flatten().ctypes.data_as(
                         ctypes.POINTER(ctypes.c_float)))
         else:
-            GL.glMultMatrixf(self._viewMatrix.ctypes.data_as(
+            GL.glMultTransposeMatrixf(self._viewMatrix.ctypes.data_as(
                         ctypes.POINTER(ctypes.c_float)))
 
     def multiplyProjectionMatrixGL(self):
@@ -1579,16 +1628,17 @@ class Rift(window.Window):
 
         if not self._monoscopic:
             if self.buffer == 'left':
-                GL.glMultMatrixf(
-                    self._projectionMatrix[0].T.flatten().ctypes.data_as(
+                GL.glMultTransposeMatrixf(
+                    self._projectionMatrix[0].flatten().ctypes.data_as(
                         ctypes.POINTER(ctypes.c_float)))
             elif self.buffer == 'right':
-                GL.glMultMatrixf(
-                    self._projectionMatrix[1].T.flatten().ctypes.data_as(
+                GL.glMultTransposeMatrixf(
+                    self._projectionMatrix[1].flatten().ctypes.data_as(
                         ctypes.POINTER(ctypes.c_float)))
         else:
-            GL.glMultMatrixf(self._projectionMatrix.T.flatten().ctypes.data_as(
-                        ctypes.POINTER(ctypes.c_float)))
+            GL.glMultTransposeMatrixf(
+                self._projectionMatrix.flatten().ctypes.data_as(
+                    ctypes.POINTER(ctypes.c_float)))
 
     def setRiftView(self, clearDepth=True):
         """Set head-mounted display view. Gets the projection and view matrices
@@ -1643,19 +1693,19 @@ class Rift(window.Window):
         render descriptor configuration.
         """
         if not self._monoscopic:
-            ovr.getEyeProjectionMatrix(
-                ovr.LIBOVR_EYE_LEFT,
+            libovr.getEyeProjectionMatrix(
+                libovr.EYE_LEFT,
                 self._nearClip,
                 self._farClip,
                 self._projectionMatrix[0])
-            ovr.getEyeProjectionMatrix(
-                ovr.LIBOVR_EYE_RIGHT,
+            libovr.getEyeProjectionMatrix(
+                libovr.EYE_RIGHT,
                 self._nearClip,
                 self._farClip,
                 self._projectionMatrix[1])
         else:
-            ovr.getEyeProjectionMatrix(
-                ovr.LIBOVR_EYE_LEFT,
+            libovr.getEyeProjectionMatrix(
+                libovr.EYE_LEFT,
                 self._nearClip,
                 self._farClip,
                 self._projectionMatrix)
@@ -1686,7 +1736,7 @@ class Rift(window.Window):
             :py:class:`~Rift.updateInputState` or :py:class:`~Rift.flip` call.
 
         """
-        return ovr.getThumbstickValues(controller, deadzone)
+        return libovr.getThumbstickValues(controller, deadzone)
 
     def getIndexTriggerValues(self, controller='Xbox', deadzone=False):
         """Get the values of the index triggers.
@@ -1714,8 +1764,8 @@ class Rift(window.Window):
             or :py:class:`~Rift.flip` call.
 
         """
-        return ovr.getIndexTriggerValues(RIFT_CONTROLLER_TYPES[controller],
-                                         deadzone)
+        return libovr.getIndexTriggerValues(RIFT_CONTROLLER_TYPES[controller],
+                                            deadzone)
 
     def getHandTriggerValues(self, controller='Touch', deadzone=False):
         """Get the values of the hand triggers.
@@ -1743,8 +1793,8 @@ class Rift(window.Window):
             or :py:class:`~Rift.flip` call.
 
         """
-        return ovr.getHandTriggerValues(RIFT_CONTROLLER_TYPES[controller],
-                                        deadzone)
+        return libovr.getHandTriggerValues(RIFT_CONTROLLER_TYPES[controller],
+                                           deadzone)
 
     def getButtons(self, buttons, controller='Xbox', testState='continuous'):
         """Get button states from a controller.
@@ -1793,7 +1843,7 @@ class Rift(window.Window):
 
         """
         if isinstance(buttons, str):  # single value
-            _, state = ovr.getButton(
+            _, state = libovr.getButton(
                 RIFT_CONTROLLER_TYPES[controller],
                 RIFT_BUTTON_TYPES[buttons],
                 testState)
@@ -1802,13 +1852,13 @@ class Rift(window.Window):
             buttonBits = 0x00000000
             for buttonName in buttons:
                 buttonBits |= RIFT_BUTTON_TYPES[buttonName]
-            _, state = ovr.getButton(
+            _, state = libovr.getButton(
                 RIFT_CONTROLLER_TYPES[controller],
-                buttons,
+                buttonBits,
                 testState)
             return state, self.controllerPollTimes[controller]
         elif isinstance(buttons, int):  # using enums directly
-            _, state = ovr.getButton(
+            _, state = libovr.getButton(
                 RIFT_CONTROLLER_TYPES[controller],
                 buttons,
                 testState)
@@ -1839,7 +1889,7 @@ class Rift(window.Window):
             this range are clamped.
 
         """
-        ovr.setControllerVibration(
+        libovr.setControllerVibration(
             RIFT_CONTROLLER_TYPES[controller],
             frequency,
             amplitude)
@@ -1857,7 +1907,7 @@ class Rift(window.Window):
             Name of the controller to stop vibrating.
 
         """
-        ovr.setControllerVibration(
+        libovr.setControllerVibration(
             RIFT_CONTROLLER_TYPES[controller], 'off', 0.0)
 
     # def getTouches(self, touchNames, stateMode='continuous'):
@@ -1898,4 +1948,4 @@ def createPose(pos=(0., 0., 0.), ori=(0., 0., 0., 1.)):
         Object representing a rigid body pose for use with LibOVR.
 
     """
-    return ovr.LibOVRPose(pos, ori)
+    return libovr.LibOVRPose(pos, ori)
