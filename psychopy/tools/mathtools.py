@@ -244,8 +244,8 @@ def dot(v0, v1, out=None, dtype=None):
       is ignored.
     * If `v0` and `v1` are 2D, a 1D array of dot products between corresponding
       row vectors are returned.
-    * If `v0` is 1D and `v1` is 2D, an array of dot products between `v0` and
-      each row of `v1` is returned.
+    * If either `v0` is 1D and `v1` are 1D and 2D, an array of dot products
+      between each row of the 2D vector and the 1D vector are returned.
 
     Parameters
     ----------
@@ -296,10 +296,10 @@ def cross(v0, v1, out=None, dtype=None):
     The behavior of this function depends on the dimensions of the inputs:
 
     * If `v0` and `v1` are 1D, the cross product is returned as 1D vector.
-    * If `v0` and `v1` are 2D, a 1D array of cross products between
+    * If `v0` and `v1` are 2D, a 2D array of cross products between
       corresponding row vectors are returned.
-    * If `v0` is 1D and `v1` is 2D, an array of cross products between `v0` and
-      each row of `v1` are returned.
+    * If either `v0` is 1D and `v1` are 1D and 2D, an array of cross products
+      between each row of the 2D vector and the 1D vector are returned.
 
     Parameters
     ----------
@@ -520,8 +520,8 @@ def distance(v0, v1, out=None, dtype=None):
       ignored.
     * If `v0` and `v1` are 2D, an array of distances between corresponding row
       vectors are returned.
-    * If `v0` is 1D and `v1` is 2D, an array of distances from `v0` to each row
-      of `v1` are returned.
+    * If either `v0` is 1D and `v1` are 1D and 2D, an array of distances
+      between each row of the 2D vector and the 1D vector are returned.
 
     Parameters
     ----------
@@ -738,7 +738,7 @@ def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
     return toReturn
 
 
-def quatToAxisAngle(q, degrees=False, dtype=None):
+def quatToAxisAngle(q, degrees=True, dtype=None):
     """Convert a quaternion to `axis` and `angle` representation.
 
     This allows you to use quaternions to set the orientation of stimuli that
@@ -749,7 +749,7 @@ def quatToAxisAngle(q, degrees=False, dtype=None):
     q : tuple, list or ndarray of float
         Quaternion in form [x, y, z, w] where w is real and x, y, z
         are imaginary components.
-    degrees : bool
+    degrees : bool, optional
         Indicate `angle` is to be returned in degrees, otherwise `angle` will be
         returned in radians.
     dtype : dtype or str, optional
@@ -791,7 +791,7 @@ def quatToAxisAngle(q, degrees=False, dtype=None):
     return axis, np.degrees(angle) if degrees else angle
 
 
-def quatFromAxisAngle(axis, angle, degrees=False, dtype=None):
+def quatFromAxisAngle(axis, angle, degrees=True, dtype=None):
     """Create a quaternion to represent a rotation about `axis` vector by
     `angle`.
 
@@ -1464,12 +1464,18 @@ def concatenate(matrices, out=None, dtype=None):
 
     You can put the created matrix in the OpenGL matrix stack as shown below.
     Note that the matrix must have a 32-bit floating-point data type and needs
-    to be loaded transposed::
+    to be loaded transposed since OpenGL takes matrices in column-major order::
 
         GL.glMatrixMode(GL.GL_MODELVIEW)
+
+        # pyglet
         MV = np.asarray(MV, dtype='float32')  # must be 32-bit float!
         ptrMV = MV.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
         GL.glLoadTransposeMatrixf(ptrMV)
+
+        # PyOpenGL
+        MV = np.asarray(MV, dtype='float32')
+        GL.glLoadTransposeMatrixf(MV)
 
     Furthermore, you can go from model-space to homogeneous clip-space by
     concatenating the projection, view, and model matrices::
