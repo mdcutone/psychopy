@@ -689,14 +689,14 @@ def slerp(q0, q1, t, shortest=True, out=None, dtype=None):
         degPerSec = 10.0  # rotate a stimulus at 10 degrees per second
 
         # initial orientation, axis rotates in the Z direction
-        qr = quatFromAxisAngle(0.0, [0., 0., -1.], degrees=True)
+        qr = quatFromAxisAngle([0., 0., -1.], 0.0, degrees=True)
         # amount to rotate every second
-        qv = quatFromAxisAngle(degPerSec, [0., 0., -1.], degrees=True)
+        qv = quatFromAxisAngle([0., 0., -1.], degPerSec, degrees=True)
 
         # ---- within main experiment loop ----
         # `frameTime` is the time elapsed in seconds from last `slerp`.
         qr = multQuat(qr, slerp((0., 0., 0., 1.), qv, degPerSec * frameTime))
-        angle, _ = quatToAxisAngle(qr)  # discard axis, only need angle
+        _, angle = quatToAxisAngle(qr)  # discard axis, only need angle
 
         # myStim is a GratingStim or anything with an 'ori' argument which
         # accepts angle in degrees
@@ -768,15 +768,15 @@ def quatToAxisAngle(q, degrees=False, dtype=None):
     Using a quaternion to rotate a stimulus a fixed angle each frame::
 
         # initial orientation, axis rotates in the Z direction
-        qr = quatFromAxisAngle(0.0, [0., 0., -1.], degrees=True)
+        qr = quatFromAxisAngle([0., 0., -1.], 0.0, degrees=True)
         # rotation per-frame, here it's 0.1 degrees per frame
-        qf = quatFromAxisAngle(0.1, [0., 0., -1.], degrees=True)
+        qf = quatFromAxisAngle([0., 0., -1.], 0.1, degrees=True)
 
         # ---- within main experiment loop ----
         # myStim is a GratingStim or anything with an 'ori' argument which
         # accepts angle in degrees
         qr = multQuat(qr, qf)  # cumulative rotation
-        angle, _ = quatToAxisAngle(qr)  # discard axis, only need angle
+        _, angle = quatToAxisAngle(qr)  # discard axis, only need angle
         myStim.ori = angle
         myStim.draw()
 
@@ -820,7 +820,7 @@ def quatFromAxisAngle(axis, angle, degrees=False, dtype=None):
 
         axis = [0., 0., -1.]  # rotate about -Z axis
         angle = 90.0  # angle in degrees
-        ori = quatFromAxisAngle(angle, axis,  degrees=True)  # using degrees!
+        ori = quatFromAxisAngle(axis, angle, degrees=True)  # using degrees!
 
     """
     dtype = np.float64 if dtype is None else np.dtype(dtype).type
@@ -925,8 +925,8 @@ def multQuat(q0, q1, out=None, dtype=None):
     --------
     Combine the orientations of two quaternions::
 
-        a = quatFromAxisAngle(45.0, degrees=True)
-        b = quatFromAxisAngle(90.0, degrees=True)
+        a = quatFromAxisAngle([0, 0, -1], 45.0, degrees=True)
+        b = quatFromAxisAngle([0, 0, -1], 90.0, degrees=True)
         c = multQuat(a, b)  # rotates 135 degrees about -Z axis
 
     """
@@ -987,7 +987,7 @@ def invertQuat(q, out=None, dtype=None):
 
         angle = 90.0
         axis = [0., 0., -1.]
-        q = quatFromAxisAngle(angle, axis, degrees=True)
+        q = quatFromAxisAngle(axis, angle, degrees=True)
         qinv = invertQuat(q)
         qr = multQuat(q, qinv)
         qi = np.array([0., 0., 0., 1.])  # identity quaternion
@@ -1059,8 +1059,8 @@ def applyQuat(q, points, out=None, dtype=None):
 
         axis = [0., 0., -1.]
         angle = -90.0
-        rotMat = rotationMatrix(angle, axis)[:3, :3]  # rotation sub-matrix only
-        rotQuat = quatFromAxisAngle(angle, axis, degrees=True)
+        rotMat = rotationMatrix(axis, angle)[:3, :3]  # rotation sub-matrix only
+        rotQuat = quatFromAxisAngle(axis, angle, degrees=True)
         points = [[1., 0., 0.], [0., -1., 0.]]
         isClose = np.allclose(applyMatrix(rotMat, points),  # True
                               applyQuat(rotQuat, points))
@@ -1445,7 +1445,7 @@ def concatenate(matrices, out=None, dtype=None):
     transform model-space coordinates to eye-space::
 
         # stimulus pose as quaternion and vector
-        stimOri = quatFromAxisAngle(-45.0, [0., 0., -1.])
+        stimOri = quatFromAxisAngle([0., 0., -1.], -45.0)
         stimPos = [0., 1.5, -5.]
 
         # create model matrix
@@ -1646,7 +1646,7 @@ def transform(pos, ori, points, out=None, dtype=None):
     Transform points by a position coordinate and orientation quaternion::
 
         # rigid body pose
-        ori = quatFromAxisAngle(90.0, [0., 0., -1.], degrees=True)
+        ori = quatFromAxisAngle([0., 0., -1.], 90.0, degrees=True)
         pos = [0., 1.5, -3.]
         # points to transform
         points = np.array([[0., 1., 0., 1.], [-1., 0., 0., 1.]])  # [x, y, z, 1]
