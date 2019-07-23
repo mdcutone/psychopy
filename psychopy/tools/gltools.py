@@ -1324,13 +1324,15 @@ def loadObjFile(objFile):
     #
     objVAOs = {}
     for group, elements in materialGroups.items():
+        ebo = createVBO(
+            elements,
+            dtype=GL.GL_UNSIGNED_INT,
+            target=GL.GL_ELEMENT_ARRAY_BUFFER)
         objVAOs[group] = createVAO((
             (GL.GL_VERTEX_ARRAY, posVBO),
             (GL.GL_TEXTURE_COORD_ARRAY, texVBO),
             (GL.GL_NORMAL_ARRAY, normVBO)),
-            createVBO(elements,
-                      dtype=GL.GL_UNSIGNED_INT,
-                      target=GL.GL_ELEMENT_ARRAY_BUFFER))
+            ebo)
 
     return WavefrontObj(matLibPath, objVAOs, posVBO, texVBO, normVBO, dict())
 

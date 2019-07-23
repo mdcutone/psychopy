@@ -513,52 +513,184 @@ class ObjStim(MeshStimMixin):
             raise FileNotFoundError(
                 "Cannot find *.obj file '{}'".format(self.objFile))
 
-        self.win.backend.setCurrent()
+        self.win.backend.setCurrent()  # must be current
+        self.objVAOs = {}
+        self.vao = None
+        self._vertexData = None
+        self.useShaders = useShaders
+
         # load the OBJ file
-        self._objInfo = gltools.loadObjFile(self.objFile)
+        self.mtlFile = None
+        self._loadObjFile(self.objFile, loadMtl)
+
+    @property
+    def vertices(self):
+        """Array of loaded vertices."""
+        return self._vertexData[:, :3]
+
+    @property
+    def texCoords(self):
+        """Array of loaded texture coordinates."""
+        return self._vertexData[:, 3:5]
+
+    @property
+    def normals(self):
+        """Array of loaded vertex normals."""
+        return self._vertexData[:, 5:]
+
+    @property
+    def materials(self):
+        """Materials associated with this model."""
+        return self._mtllibInfo
+
+    @materials.setter
+    def materials(self, value):
+        self._mtllibInfo = value
+
+    def _loadObjFile(self, objFile, loadMtl):
+        """Load and obj file and create vertex buffers."""
+        # open the file, read it into memory
+        with open(objFile, 'r') as f:
+            objBuffer = StringIO(f.read())
+
+        nVertices = nTextureCoords = nNormals = nFaces = nObjects = nMaterials = 0
+        mtlFile = None
+        # first pass, examine the file
+        for line in objBuffer.readlines():
+            if line.startswith('v '):
+                nVertices += 1
+            elif line.startswith('vt '):
+                nTextureCoords += 1
+            elif line.startswith('vn '):
+                nNormals += 1
+            elif line.startswith('f '):
+                nFaces += 1
+            elif line.startswith('o '):
+                nObjects += 1
+            elif line.startswith('usemtl '):
+                nMaterials += 1
+            elif line.startswith('mtllib '):
+                mtlFile = line.strip()[7:]
+
+        # error check
+        if nVertices == 0:
+            raise RuntimeError(
+                "Failed to load OBJ file, file contains no vertices.")
+
+        objBuffer.seek(0)  # reset file position
+
+        # attribute data lists
+        positionDefs = []
+        texCoordDefs = []
+        normalDefs = []
+
+        # attribute lists to upload
+        vertexAttrList = []
+        texCoordAttrList = []
+        normalAttrList = []
+
+        # store vertex attributes in dictionaries for easy re-mapping if needed
+        vertexAttrs = OrderedDict()
+        vertexIndices = OrderedDict()
+
+        # group faces by material, each one will get its own VAO
+        materialGroups = OrderedDict()
+
+        # parse attributes
+        vertexIdx = faceIdx = 0
+        materialGroup = None
+        for line in objBuffer.readlines():
+            line = line.strip()
+            if line.startswith('v '):  # new vertex position
+                positionDefs.append(tuple(map(float, line[2:].split(' '))))
+            elif line.startswith('vt '):  # new vertex texture coordinate
+                texCoordDefs.append(tuple(map(float, line[3:].split(' '))))
+            elif line.startswith('vn '):  # new vertex normal
+                normalDefs.append(tuple(map(float, line[3:].split(' '))))
+            elif line.startswith('f '):
+                faceDef = []
+                for attrs in line[2:].split(' '):
+                    if attrs not in vertexAttrs.keys():
+                        p, t, n = map(int, attrs.split('/'))
+                        vertexAttrList.append(positionDefs[p - 1])
+                        texCoordAttrList.append(texCoordDefs[t - 1])
+                        normalAttrList.append(normalDefs[n - 1])
+                        vertexIndices[attrs] = vertexIdx
+                        vertexIdx += 1
+                    faceDef.append(vertexIndices[attrs])
+                materialGroups[materialGroup].extend(faceDef)
+            elif line.startswith('usemtl '):
+                materialGroup = line[7:]
+                if materialGroup not in materialGroups.keys():
+                    materialGroups[materialGroup] = []
+
+        # Vertex attributes are interleaved like this in the VBO
+        # [v0, v1, v2, t0, t1, n0, n1, n2, ... ]
+        #
+        self._vertexData = np.hstack(
+            (np.asarray(vertexAttrList, dtype=np.float32),
+             np.asarray(texCoordAttrList, dtype=np.float32),
+             np.asarray(normalAttrList, dtype=np.float32)))
+
+        # create a VBO with the interleaved vertex data, loading data to VRAM
+        self.vboId = GL.GLuint()
+        GL.glGenBuffers(1, ctypes.byref(self.vboId))
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vboId)
+        GL.glBufferData(
+            GL.GL_ARRAY_BUFFER,
+            self._vertexData.size * ctypes.sizeof(GL.GLfloat),
+            self._vertexData.ctypes.data_as(ctypes.POINTER(GL.GLfloat)),
+            GL.GL_STATIC_DRAW)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
+
+        # create a VAO and EBO for each material
+        for group, elements in materialGroups.items():
+            # create an element buffer object
+            elements = np.asarray(elements, dtype=np.uint32)
+            eboId = GL.GLuint()
+            GL.glGenBuffers(1, ctypes.byref(eboId))
+            GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, eboId)
+            GL.glBufferData(
+                GL.GL_ELEMENT_ARRAY_BUFFER,
+                elements.size * ctypes.sizeof(GL.GLuint),  # total buffer size
+                elements.ctypes.data_as(ctypes.POINTER(GL.GLuint)),
+                GL.GL_STATIC_DRAW)
+            GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, 0)
+
+            # factory for VAOs
+            vaoId = GL.GLuint()
+            GL.glGenVertexArrays(1, ctypes.byref(vaoId))
+            GL.glBindVertexArray(vaoId)
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vboId)
+            byte_offset = 8 * ctypes.sizeof(GL.GLfloat)
+            GL.glVertexPointer(3, GL.GL_FLOAT, byte_offset, 0)
+            GL.glEnableClientState(GL.GL_VERTEX_ARRAY)
+            GL.glTexCoordPointer(
+                2, GL.GL_FLOAT, byte_offset, 3 * ctypes.sizeof(GL.GLfloat))
+            GL.glEnableClientState(GL.GL_TEXTURE_COORD_ARRAY)
+            GL.glNormalPointer(
+                GL.GL_FLOAT, byte_offset, 5 * ctypes.sizeof(GL.GLfloat))
+            GL.glEnableClientState(GL.GL_NORMAL_ARRAY)
+            GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, eboId)  # element array
+            GL.glBindVertexArray(0)
+
+            self.objVAOs[group] = (vaoId, len(elements))
 
         # load the *.MTL file if requested, otherwise it must be specified later
         # before rendering
-        if loadMtl and self._objInfo.mtlFile is not None:
+        if loadMtl and mtlFile is not None:
             # path might be relative but not in CWD, try to resolve the path
-            if os.path.isabs(self.objFile) and not os.path.isabs(
-                    self._objInfo.mtlFile):
+            if os.path.isabs(objFile) and not os.path.isabs(mtlFile):
                 mtlPath = os.path.join(
-                    os.path.split(self.objFile)[0], self._objInfo.mtlFile)
+                    os.path.split(objFile)[0], mtlFile)
             else:
-                mtlPath = self._objInfo.mtlFile
+                mtlPath = mtlFile
 
             if os.path.isfile(mtlPath):
                 self._mtllibInfo = gltools.loadMtlFile(mtlPath)
             else:
                 raise FileNotFoundError(
                     "Cannot find *.mtl file '{}'".format(mtlPath))
-
-        self.vao = None
-        self.useShaders = useShaders
-
-    # @property
-    # def verticies(self):
-    #     """Array of loaded vertices."""
-    #     return self._vertexAttrs[:, :3]  # vertex data slice
-    #
-    # @property
-    # def texCoords(self):
-    #     """Array of loaded texture coordinates."""
-    #     return self._vertexAttrs[:, 2:5]  # vertex data slice
-    #
-    # @property
-    # def normals(self):
-    #     """Array of loaded vertex normals."""
-    #     return self._vertexAttrs[:, 5:]  # vertex data slice
-
-    @property
-    def materials(self):
-        return self._mtllibInfo
-
-    @materials.setter
-    def materials(self, value):
-        self._mtllibInfo = value
 
     def draw(self, win=None):
         """Render the object.
@@ -579,11 +711,14 @@ class ObjStim(MeshStimMixin):
         self._prepareDraw()
 
         # draw the model
-        for group, vao in self._objInfo.drawGroups.items():
+        for group, vao in self.objVAOs.items():
             gltools.useMaterial(self._mtllibInfo[group])
-            gltools.drawVAO(vao)
+            GL.glBindVertexArray(vao[0])
+            GL.glDrawElements(GL.GL_TRIANGLES, vao[1], GL.GL_UNSIGNED_INT, None)
+            GL.glBindVertexArray(0)
 
         # disable materials
-        #gltools.useMaterial(None)
+        gltools.useMaterial(None)
 
         self._endDraw()
+
