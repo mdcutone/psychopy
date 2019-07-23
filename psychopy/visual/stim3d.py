@@ -6,7 +6,7 @@
 # Distributed under the terms of the GNU General Public License (GPL).
 
 from __future__ import absolute_import, print_function
-from psychopy.tools import gltools
+from psychopy.tools import gltools, mathtools
 from psychopy.visual import shaders, basevisual
 from psychopy.tools.attributetools import (attributeSetter, logAttrib,
                                            setAttribute)
@@ -24,14 +24,19 @@ import math
 
 
 vert_prog = """
-void main() {
-}
-
-"""
+    void main() {
+            gl_FrontColor = gl_Color;
+            gl_TexCoord[0] = gl_MultiTexCoord0;
+            gl_TexCoord[1] = gl_MultiTexCoord1;
+            gl_TexCoord[2] = gl_MultiTexCoord2;
+            gl_Position =  ftransform();
+    }
+    """
 
 frag_prog = """
-void main() {
-}
+    void main() {
+        gl_FragColor = gl_Color;
+    }
 """
 
 prog = shaders.compileProgram(vert_prog, frag_prog)
