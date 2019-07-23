@@ -400,7 +400,7 @@ class MeshStimMixin(RigidBodyPoseMixin):
         GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glDepthFunc(self.depthFunc)
 
-        GL.glDisable(GL.GL_BLEND)
+        GL.glEnable(GL.GL_BLEND)
 
         # get the model matrix
         M = self.thePose.matrix.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
