@@ -24,19 +24,52 @@ import math
 
 
 vert_prog = """
-    void main() {
-            gl_FrontColor = gl_Color;
-            gl_TexCoord[0] = gl_MultiTexCoord0;
-            gl_TexCoord[1] = gl_MultiTexCoord1;
-            gl_TexCoord[2] = gl_MultiTexCoord2;
-            gl_Position =  ftransform();
-    }
-    """
+varying vec3 N;
+varying vec3 v;
 
+void main(void)  
+{     
+    v = vec3(gl_ModelViewMatrix * gl_Vertex);       
+    N = normalize(gl_NormalMatrix * gl_Normal);
+
+    gl_FrontColor = gl_Color;
+    gl_TexCoord[0] = gl_MultiTexCoord0;
+    gl_TexCoord[1] = gl_MultiTexCoord1;
+    gl_TexCoord[2] = gl_MultiTexCoord2;
+    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;  
+}
+          
+"""
+
+#
 frag_prog = """
-    void main() {
-        gl_FragColor = gl_Color;
-    }
+varying vec3 N;
+varying vec3 v;  
+
+uniform sampler2D texture0;
+
+void main (void)  
+{  
+   vec3 L = normalize(gl_LightSource[0].position.xyz - v);   
+   vec3 E = normalize(-v); // we are in Eye Coordinates, so EyePos is (0,0,0)  
+   vec3 R = normalize(-reflect(L,N));  
+ 
+   //calculate Ambient Term:  
+   vec4 Iamb = clamp(gl_FrontLightProduct[0].ambient * texture2D(texture0, gl_TexCoord[0].st), 0.0, 1.0);
+
+   //calculate Diffuse Term:  
+   vec4 Idiff = gl_FrontLightProduct[0].diffuse * max(dot(N,L), 0.0);
+   Idiff = clamp(Idiff * texture2D(texture0, gl_TexCoord[0].st), 0.0, 1.0);     
+   
+   // calculate Specular Term:
+   vec4 Ispec = gl_FrontLightProduct[0].specular 
+                * pow(max(dot(R,E),0.0), 0.3 * gl_FrontMaterial.shininess);
+   Ispec = clamp(Ispec, 0.0, 1.0); 
+
+   // write Total Color:  
+   gl_FragColor = Iamb + Idiff + Ispec;     
+}
+          
 """
 
 prog = shaders.compileProgram(vert_prog, frag_prog)
@@ -667,15 +700,24 @@ class ObjStim(MeshStimMixin):
             GL.glGenVertexArrays(1, ctypes.byref(vaoId))
             GL.glBindVertexArray(vaoId)
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vboId)
-            byte_offset = 8 * ctypes.sizeof(GL.GLfloat)
-            GL.glVertexPointer(3, GL.GL_FLOAT, byte_offset, 0)
-            GL.glEnableClientState(GL.GL_VERTEX_ARRAY)
-            GL.glTexCoordPointer(
-                2, GL.GL_FLOAT, byte_offset, 3 * ctypes.sizeof(GL.GLfloat))
-            GL.glEnableClientState(GL.GL_TEXTURE_COORD_ARRAY)
-            GL.glNormalPointer(
-                GL.GL_FLOAT, byte_offset, 5 * ctypes.sizeof(GL.GLfloat))
-            GL.glEnableClientState(GL.GL_NORMAL_ARRAY)
+            byte_offset = 8 * ctypes.sizeof(GL.GLfloat)  # sizeof vertex data
+
+            # set attribute pointers to buffer data
+            GL.glVertexAttribPointer(  # vertex
+                0, 3, GL.GL_FLOAT, GL.GL_FALSE, byte_offset, 0)
+
+            GL.glVertexAttribPointer(  # texture coord
+                8, 2, GL.GL_FLOAT, GL.GL_FALSE, byte_offset,
+                3 * ctypes.sizeof(GL.GLfloat))
+
+            GL.glVertexAttribPointer(  # normals
+                2, 3, GL.GL_FLOAT, GL.GL_FALSE, byte_offset,
+                5 * ctypes.sizeof(GL.GLfloat))
+
+            GL.glEnableVertexAttribArray(0)
+            GL.glEnableVertexAttribArray(2)
+            GL.glEnableVertexAttribArray(8)
+
             GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, eboId)  # element array
             GL.glBindVertexArray(0)
 
@@ -698,7 +740,7 @@ class ObjStim(MeshStimMixin):
                     "Cannot find *.mtl file '{}'".format(mtlPath))
 
     def draw(self, win=None):
-        """Render the object.
+        """Draw the object.
 
         Parameters
         ----------
@@ -714,13 +756,24 @@ class ObjStim(MeshStimMixin):
             win._setCurrent()
 
         self._prepareDraw()
+        MVP = self.win.projectionMatrix.ctypes.data_as(ctypes.POINTER(GL.GLfloat))
 
         # draw the model
         for group, vao in self.objVAOs.items():
+
+            #mvpLoc = GL.glGetUniformLocation(prog, b"MVP")
+
+            #GL.glUseProgram(prog)
             gltools.useMaterial(self._mtllibInfo[group])
+            #texId = self._mtllibInfo[group].textures[GL.GL_TEXTURE0].id
             GL.glBindVertexArray(vao[0])
+            #texLoc = GL.glGetUniformLocation(prog, b"texture0")
+
+            #GL.glUniformMatrix4fv
+            #GL.glUniform1ui(texLoc, texId)
             GL.glDrawElements(GL.GL_TRIANGLES, vao[1], GL.GL_UNSIGNED_INT, None)
             GL.glBindVertexArray(0)
+            #GL.glUseProgram(0)
 
         # disable materials
         gltools.useMaterial(None)

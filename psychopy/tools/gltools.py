@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from PIL import Image
 import numpy as np
 import os
+from psychopy.visual import shaders
 
 # -----------------------------------
 # Framebuffer Objects (FBO) Functions
