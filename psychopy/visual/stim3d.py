@@ -50,11 +50,17 @@ uniform sampler2D texture0;
 
 void main (void)  
 {  
-   vec3 L = normalize(gl_LightSource[0].position.xyz - v);   
-   vec3 E = normalize(-v); // we are in Eye Coordinates, so EyePos is (0,0,0)  
+    vec3 L;
+    
+    if (gl_LightSource[0].position.w == 0.0) {  // is directional?
+        L = normalize(-gl_LightSource[0].position.xyz);
+    } else {
+        L = normalize(gl_LightSource[0].position.xyz - v); 
+    }
+    
+   vec3 E = normalize(-v);
    vec3 R = normalize(-reflect(L,N));  
  
-   //calculate Ambient Term:  
    vec4 Iamb = clamp(gl_FrontLightProduct[0].ambient * texture2D(texture0, gl_TexCoord[0].st), 0.0, 1.0);
 
    //calculate Diffuse Term:  
@@ -83,14 +89,18 @@ class RigidBodyPose(object):
 
     """
     def __init__(self, pos=(0., 0., 0.), ori=(0., 0., 0., 1.)):
+        self._pos = np.zeros((3,), dtype=np.float32)
+        self._ori = np.zeros((4,), dtype=np.float32)
+
         # transformation matrices
         self._R = np.identity(4, dtype=np.float32)
         self._T = np.identity(4, dtype=np.float32)
         self._M = np.identity(4, dtype=np.float32)
 
-        self._pos = np.zeros((3,), dtype=np.float32)
-        self._ori = np.zeros((4,), dtype=np.float32)
+        # cache this, adds to much overhead to create on the fly
+        self._ptrM = self._M.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
+        # only update the matrix when changes are made
         self._updateTranslationMatrix = False
         self._updateRotationMatrix = False
         self._updateModelMatrix = False
@@ -126,7 +136,7 @@ class RigidBodyPose(object):
 
     @property
     def posOri(self):
-        """Position and orientation."""
+        """Combined position and orientation."""
         return self._pos, self._ori
 
     @posOri.setter
@@ -135,7 +145,10 @@ class RigidBodyPose(object):
         self._ori[:] = value[1]
 
     def __mul__(self, other):
-        """Multiplication operator `*` for rigid body poses."""
+        """Multiplication operator `*` for rigid body poses. This puts the
+        second operand into the reference frame of the first.
+
+        """
         p = other.ori
         # multiply the quaternions of the poses
         to_return = RigidBodyPose()
@@ -187,7 +200,7 @@ class RigidBodyPose(object):
         """
         pass
 
-    def angleTo(self, p, degrees=True):
+    def getAngleTo(self, p, degrees=True):
         """Get the relative angle to a point from this pose's forward direction.
 
         Parameters
@@ -202,6 +215,17 @@ class RigidBodyPose(object):
         -------
         float
             Angle between forward vector of this pose and point `p`.
+
+        """
+        pass
+
+    def invert(self):
+        """Get the inverse of this rigid body pose.
+
+        Returns
+        -------
+        RigidBodyPose
+            Inverse of this rigid body pose.
 
         """
         pass
@@ -239,9 +263,22 @@ class RigidBodyPose(object):
         """Interpolate this pose."""
         pass
 
-    @property
-    def matrix(self):
-        """4x4 homogeneous transformation matrix from this pose."""
+    def getModelMatrix(self, inverse=False, out=None):
+        """Construct a 4x4 homogeneous transformation matrix from this pose.
+
+        Parameters
+        ----------
+        inverse : bool
+            Return the inverse matrix.
+        out : ndarray, optional
+            Optional 4x4 array to write values to.
+
+        Returns
+        -------
+        ndarray
+            4x4 homogeneous transformation matrix (row-major).
+
+        """
         if not self._updateModelMatrix:
             return self._M
 
@@ -255,8 +292,7 @@ class RigidBodyPose(object):
 
         # rotation matrix
         if self._updateRotationMatrix:
-            a = self._ori[3]
-            b, c, d = self._ori[:3]
+            b, c, d, a = self._ori[:]
 
             a2 = a * a
             b2 = b * b
@@ -294,29 +330,6 @@ class RigidBodyPose(object):
         self._updateModelMatrix = False
 
         return self._M
-
-    @property
-    def inverseMatrix(self):
-        """4x4 homogeneous inverse transformation matrix from this pose."""
-        return 1
-
-    def getMatrix(self, inverse=False, out=None):
-        """Construct a 4x4 homogeneous transformation matrix from this pose.
-
-        Parameters
-        ----------
-        inverse : bool
-            Return the inverse matrix.
-        out : ndarray, optional
-            Optional 4x4 array to write values to.
-
-        Returns
-        -------
-        ndarray
-            4x4 homogeneous transformation matrix (row-major).
-
-        """
-        pass
 
     def distanceTo(self, p):
         """Distance from the position of this pose to `p`."""
@@ -500,8 +513,25 @@ class CornerStim(MeshStimMixin):
         self._endDraw()
 
 
-class ObjStim(MeshStimMixin):
+class ObjMeshStim(MeshStimMixin):
     """Class for loading and presenting 3D stimuli in the Wavefront OBJ format.
+
+    Vertex positions, texture coordinates, and normals are loaded and packed
+    into a single vertex buffer object (VBO). Vertex array objects (VAO) are
+    created for each material with an index buffer referencing vertices assigned
+    that material in the VBO. For maximum performance, keep the number of
+    materials per object as low as possible, as switching between VAOs has some
+    overhead.
+
+    Material attributes are read from the material library file (*.MTL)
+    associated with the *.OBJ file. This file will be automatically searched for
+    and read during loading. Afterwards you can edit material properties by
+    accessing the data structure of the `materials` attribute.
+
+    Keep in mind that OBJ shapes are rigid bodies, the mesh itself cannot be
+    deformed during runtime. However, meshes can be positioned and rotated as
+    desired by manipulating the `RigidBodyPose` instance accessed through the
+    `thePose` attribute.
 
     Warnings
     --------
@@ -509,7 +539,6 @@ class ObjStim(MeshStimMixin):
         of any time-critical routines!
 
     """
-
     def __init__(self,
                  win,
                  objFile,
@@ -525,13 +554,13 @@ class ObjStim(MeshStimMixin):
         ----------
         win : :class:`~psychopy.visual.Window`
             The :class:`~psychopy.visual.Window` object in which the stimulus
-            will be rendered by default. (required)
+            will be rendered by default.
+        objFile : str
+            Path to the *.OBJ file.
         pos : array_like
             Position vector [x, y, z].
         ori : array_like
             Orientation quaternion [x, y, z, w].
-        objFile : str
-            Path to the *.OBJ file.
         loadMtl : bool
             Load the material library (if any) referenced by the *.OBJ file. If
             the file is referenced by a relative path, and 'objFile' was
@@ -543,7 +572,7 @@ class ObjStim(MeshStimMixin):
             value is ignored if loadMtl=False.
 
         """
-        super(ObjStim, self).__init__(win, pos, ori)
+        super(ObjMeshStim, self).__init__(win, pos, ori)
 
         # check if the *.OBJ file exists
         self.objFile = objFile
@@ -585,90 +614,99 @@ class ObjStim(MeshStimMixin):
     def materials(self, value):
         self._mtllibInfo = value
 
+    def _loadMtlFile(self, mtlFile):
+        """Load a *.MTL file and create material data structure."""
+        pass
+
     def _loadObjFile(self, objFile, loadMtl):
-        """Load and obj file and create vertex buffers."""
+        """Load and *.OBJ file and create vertex buffers."""
         # open the file, read it into memory
         with open(objFile, 'r') as f:
             objBuffer = StringIO(f.read())
 
-        nVertices = nTextureCoords = nNormals = nFaces = nObjects = nMaterials = 0
+        # unsorted attribute data lists
+        positionDefs = []
+        texCoordDefs = []
+        normalDefs = []
+        vertexAttrs = OrderedDict()
+        faceDefs = {}
+        materialFaces = {}
+
+        nVertices = nTextureCoords = nNormals = nFaces = nMaterials = 0
         mtlFile = None
-        # first pass, examine the file
+        vertexIdx = 0
+        materialGroup = None
+        # first pass, examine the file and load up vertex attributes
         for line in objBuffer.readlines():
+            line = line.strip()  # clean up like
             if line.startswith('v '):
+                positionDefs.append(tuple(map(float, line[2:].split(' '))))
                 nVertices += 1
             elif line.startswith('vt '):
+                texCoordDefs.append(tuple(map(float, line[3:].split(' '))))
                 nTextureCoords += 1
             elif line.startswith('vn '):
+                normalDefs.append(tuple(map(float, line[3:].split(' '))))
                 nNormals += 1
             elif line.startswith('f '):
+                faceAttrs = []
+                for attrs in line[2:].split(' '):  # triangle vertex attrs
+                    if attrs not in vertexAttrs.keys():  # new face
+                        vertexAttrs[attrs] = vertexIdx
+                        vertexIdx += 1
+                    faceAttrs.append(vertexAttrs[attrs])
+                faceDefs[nFaces] = faceAttrs
+                materialFaces[materialGroup].append(nFaces)
                 nFaces += 1
-            elif line.startswith('o '):
-                nObjects += 1
+            elif line.startswith('o '):  # ignored for now
+                pass
             elif line.startswith('usemtl '):
+                materialGroup = line[7:]
+                if materialGroup not in materialFaces.keys():
+                    materialFaces[materialGroup] = []
                 nMaterials += 1
             elif line.startswith('mtllib '):
                 mtlFile = line.strip()[7:]
 
-        # error check
-        if nVertices == 0:
+        # at the very least, we need vertices and facedefs
+        if nVertices == 0 or nFaces == 0:
             raise RuntimeError(
                 "Failed to load OBJ file, file contains no vertices.")
 
-        objBuffer.seek(0)  # reset file position
+        # Indicate if file has any texture coordinates of normals. If not, the
+        # size of the storage buffer will be reduced and vertex pointers and
+        # strides adjusted.
+        hasTexCoords = nTextureCoords > 0
+        hasNormals = nNormals > 0
 
-        # attribute data lists
-        positionDefs = []
-        texCoordDefs = []
-        normalDefs = []
+        objBuffer.seek(0)  # reset file position
 
         # attribute lists to upload
         vertexAttrList = []
-        texCoordAttrList = []
-        normalAttrList = []
 
-        # store vertex attributes in dictionaries for easy re-mapping if needed
-        vertexAttrs = OrderedDict()
-        vertexIndices = OrderedDict()
+        # build arrays to pass to VBO
+        for attrs, idx in vertexAttrs.items():
+            attr = attrs.split('/')
+            attrData = []
+            if len(attr) > 1:  # vertices and texture coords only
+                p = int(attr[0])
+                attrData.extend(positionDefs[p - 1])
+                if attr[1] != '':  # texcoord field not empty
+                    if hasTexCoords:
+                        t = int(attr[1])
+                        attrData.extend(texCoordDefs[t - 1])
+                else:
+                    attrData.extend([0., 0.])
+            if len(attr) > 2:  # has normals too
+                if hasNormals:
+                    n = int(attr[2])
+                    attrData.extend(normalDefs[n - 1])
+                else:
+                    attrData.extend([0., 0., 0.])
 
-        # group faces by material, each one will get its own VAO
-        materialGroups = OrderedDict()
+            vertexAttrList.append(attrData)
 
-        # parse attributes
-        vertexIdx = faceIdx = 0
-        materialGroup = None
-        for line in objBuffer.readlines():
-            line = line.strip()
-            if line.startswith('v '):  # new vertex position
-                positionDefs.append(tuple(map(float, line[2:].split(' '))))
-            elif line.startswith('vt '):  # new vertex texture coordinate
-                texCoordDefs.append(tuple(map(float, line[3:].split(' '))))
-            elif line.startswith('vn '):  # new vertex normal
-                normalDefs.append(tuple(map(float, line[3:].split(' '))))
-            elif line.startswith('f '):
-                faceDef = []
-                for attrs in line[2:].split(' '):
-                    if attrs not in vertexAttrs.keys():
-                        p, t, n = map(int, attrs.split('/'))
-                        vertexAttrList.append(positionDefs[p - 1])
-                        texCoordAttrList.append(texCoordDefs[t - 1])
-                        normalAttrList.append(normalDefs[n - 1])
-                        vertexIndices[attrs] = vertexIdx
-                        vertexIdx += 1
-                    faceDef.append(vertexIndices[attrs])
-                materialGroups[materialGroup].extend(faceDef)
-            elif line.startswith('usemtl '):
-                materialGroup = line[7:]
-                if materialGroup not in materialGroups.keys():
-                    materialGroups[materialGroup] = []
-
-        # Vertex attributes are interleaved like this in the VBO
-        # [v0, v1, v2, t0, t1, n0, n1, n2, ... ]
-        #
-        self._vertexData = np.hstack(
-            (np.asarray(vertexAttrList, dtype=np.float32),
-             np.asarray(texCoordAttrList, dtype=np.float32),
-             np.asarray(normalAttrList, dtype=np.float32)))
+        self._vertexData = np.asarray(vertexAttrList, dtype=np.float32)
 
         # create a VBO with the interleaved vertex data, loading data to VRAM
         self.vboId = GL.GLuint()
@@ -682,16 +720,20 @@ class ObjStim(MeshStimMixin):
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
 
         # create a VAO and EBO for each material
-        for group, elements in materialGroups.items():
+        for materialName, materialFaceDefs in materialFaces.items():
+            eboList = []
+            for i in materialFaceDefs:
+                eboList.extend(faceDefs[i])
+
             # create an element buffer object
-            elements = np.asarray(elements, dtype=np.uint32)
+            eboArray = np.asarray(eboList, dtype=np.uint32)
             eboId = GL.GLuint()
             GL.glGenBuffers(1, ctypes.byref(eboId))
             GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, eboId)
             GL.glBufferData(
                 GL.GL_ELEMENT_ARRAY_BUFFER,
-                elements.size * ctypes.sizeof(GL.GLuint),  # total buffer size
-                elements.ctypes.data_as(ctypes.POINTER(GL.GLuint)),
+                eboArray.size * ctypes.sizeof(GL.GLuint),  # total buffer size
+                eboArray.ctypes.data_as(ctypes.POINTER(GL.GLuint)),
                 GL.GL_STATIC_DRAW)
             GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, 0)
 
@@ -700,28 +742,38 @@ class ObjStim(MeshStimMixin):
             GL.glGenVertexArrays(1, ctypes.byref(vaoId))
             GL.glBindVertexArray(vaoId)
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vboId)
-            byte_offset = 8 * ctypes.sizeof(GL.GLfloat)  # sizeof vertex data
+
+            # compute VBO vertex stride
+            stride = 3 * ctypes.sizeof(GL.GLfloat)
+            stride += 2 * ctypes.sizeof(GL.GLfloat) if hasTexCoords else 0
+            stride += 3 * ctypes.sizeof(GL.GLfloat) if hasNormals else 0
 
             # set attribute pointers to buffer data
             GL.glVertexAttribPointer(  # vertex
-                0, 3, GL.GL_FLOAT, GL.GL_FALSE, byte_offset, 0)
-
-            GL.glVertexAttribPointer(  # texture coord
-                8, 2, GL.GL_FLOAT, GL.GL_FALSE, byte_offset,
-                3 * ctypes.sizeof(GL.GLfloat))
-
-            GL.glVertexAttribPointer(  # normals
-                2, 3, GL.GL_FLOAT, GL.GL_FALSE, byte_offset,
-                5 * ctypes.sizeof(GL.GLfloat))
-
+                0, 3, GL.GL_FLOAT, GL.GL_FALSE, stride, 0)
             GL.glEnableVertexAttribArray(0)
-            GL.glEnableVertexAttribArray(2)
-            GL.glEnableVertexAttribArray(8)
+
+            if hasTexCoords:
+                GL.glVertexAttribPointer(  # texture coord
+                    8, 2, GL.GL_FLOAT, GL.GL_FALSE, stride,
+                    3 * ctypes.sizeof(GL.GLfloat))
+                GL.glEnableVertexAttribArray(8)
+
+            if hasNormals:
+                if hasTexCoords:
+                    GL.glVertexAttribPointer(  # normals
+                        2, 3, GL.GL_FLOAT, GL.GL_FALSE, stride,
+                        5 * ctypes.sizeof(GL.GLfloat))
+                else:
+                    GL.glVertexAttribPointer(
+                        2, 3, GL.GL_FLOAT, GL.GL_FALSE, stride,
+                        3 * ctypes.sizeof(GL.GLfloat))
+                GL.glEnableVertexAttribArray(2)
 
             GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, eboId)  # element array
             GL.glBindVertexArray(0)
 
-            self.objVAOs[group] = (vaoId, len(elements))
+            self.objVAOs[materialName] = (vaoId, len(eboArray))
 
         # load the *.MTL file if requested, otherwise it must be specified later
         # before rendering
@@ -756,24 +808,23 @@ class ObjStim(MeshStimMixin):
             win._setCurrent()
 
         self._prepareDraw()
-        MVP = self.win.projectionMatrix.ctypes.data_as(ctypes.POINTER(GL.GLfloat))
 
         # draw the model
         for group, vao in self.objVAOs.items():
 
             #mvpLoc = GL.glGetUniformLocation(prog, b"MVP")
 
-            #GL.glUseProgram(prog)
+            GL.glUseProgram(prog)
             gltools.useMaterial(self._mtllibInfo[group])
-            #texId = self._mtllibInfo[group].textures[GL.GL_TEXTURE0].id
+            texId = self._mtllibInfo[group].textures[GL.GL_TEXTURE0].id
             GL.glBindVertexArray(vao[0])
-            #texLoc = GL.glGetUniformLocation(prog, b"texture0")
+            texLoc = GL.glGetUniformLocation(prog, b"texture0")
 
             #GL.glUniformMatrix4fv
-            #GL.glUniform1ui(texLoc, texId)
+            GL.glUniform1ui(texLoc, texId)
             GL.glDrawElements(GL.GL_TRIANGLES, vao[1], GL.GL_UNSIGNED_INT, None)
             GL.glBindVertexArray(0)
-            #GL.glUseProgram(0)
+            GL.glUseProgram(0)
 
         # disable materials
         gltools.useMaterial(None)
