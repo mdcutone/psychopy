@@ -73,8 +73,8 @@ def extendArr(inArray, newSize):
 
 
 def makeRadialMatrix(matrixSize):
-    """Generate a square matrix where each element val is
-    its distance from the centre of the matrix
+    """Generate a square modelMatrix where each element val is
+    its distance from the centre of the modelMatrix
     """
     oneStep = old_div(2.0, (matrixSize - 1))
     # NB need to add one step length because

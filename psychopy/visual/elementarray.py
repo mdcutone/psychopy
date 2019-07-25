@@ -584,8 +584,8 @@ class ElementArrayStim(MinimalStim, TextureMixin):
 
         radians = 0.017453292519943295
 
-        # so we can do matrix rotation of coords we need shape=[n*4,3]
-        # but we'll convert to [n,4,3] after matrix math
+        # so we can do modelMatrix rotation of coords we need shape=[n*4,3]
+        # but we'll convert to [n,4,3] after modelMatrix math
         verts = numpy.zeros([self.nElements * 4, 3], 'd')
         wx = -self.sizes[:, 0] * numpy.cos(self.oris[:] * radians) / 2
         wy = self.sizes[:, 0] * numpy.sin(self.oris[:] * radians) / 2

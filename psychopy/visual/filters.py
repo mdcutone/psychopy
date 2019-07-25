@@ -31,7 +31,7 @@ def makeGrating(res,
 
     :Parameters:
         res: integer
-            the size of the resulting matrix on both dimensions (e.g 256)
+            the size of the resulting modelMatrix on both dimensions (e.g 256)
         ori: float or int (default=0.0)
             the orientation of the grating in degrees
         cycles:float or int (default=1.0)
@@ -82,19 +82,19 @@ def makeGrating(res,
 
 
 def maskMatrix(matrix, shape='circle', radius=1.0, center=(0.0, 0.0)):
-    """Make and apply a mask to an input matrix (e.g. a grating)
+    """Make and apply a mask to an input modelMatrix (e.g. a grating)
 
     :Parameters:
-         matrix:  a square numpy array
+         modelMatrix:  a square numpy array
              array to which the mask should be applied
          shape:  'circle','gauss','ramp' (linear gradient from center)
              shape of the mask
          radius:  float
              scale factor to be applied to the mask (circle with radius of
-             [1,1] will extend just to the edge of the matrix). Radius can
+             [1,1] will extend just to the edge of the modelMatrix). Radius can
              be asymmetric, e.g. [1.0,2.0] will be wider than it is tall.
          center:  2x1 tuple or list (default=[0.0,0.0])
-             the centre of the mask in the matrix ([1,1] is top-right
+             the centre of the mask in the modelMatrix ([1,1] is top-right
              corner, [-1,-1] is bottom-left)
     """
     # NB makeMask now returns a value -1:1
@@ -105,25 +105,25 @@ def maskMatrix(matrix, shape='circle', radius=1.0, center=(0.0, 0.0)):
 
 def makeMask(matrixSize, shape='circle', radius=1.0, center=(0.0, 0.0),
              range=(-1, 1), fringeWidth=0.2):
-    """Returns a matrix to be used as an alpha mask (circle,gauss,ramp).
+    """Returns a modelMatrix to be used as an alpha mask (circle,gauss,ramp).
 
     :Parameters:
             matrixSize: integer
-                the size of the resulting matrix on both dimensions (e.g 256)
+                the size of the resulting modelMatrix on both dimensions (e.g 256)
             shape:  'circle','gauss','ramp' (linear gradient from center),
                 'raisedCosine' (the edges are blurred by a raised cosine)
                 shape of the mask
             radius:  float
                 scale factor to be applied to the mask (circle with radius of
-                [1,1] will extend just to the edge of the matrix). Radius can
+                [1,1] will extend just to the edge of the modelMatrix). Radius can
                 asymmetric, e.g. [1.0,2.0] will be wider than it is tall.
             center:  2x1 tuple or list (default=[0.0,0.0])
-                the centre of the mask in the matrix ([1,1] is top-right
+                the centre of the mask in the modelMatrix ([1,1] is top-right
                 corner, [-1,-1] is bottom-left)
             fringeWidth: float (0-1)
                 The proportion of the raisedCosine that is being blurred.
             range: 2x1 tuple or list (default=[-1,1])
-                The minimum and maximum value in the mask matrix
+                The minimum and maximum value in the mask modelMatrix
     """
     rad = makeRadialMatrix(matrixSize, center, radius)
     if shape == 'ramp':
@@ -179,18 +179,18 @@ def makeMask(matrixSize, shape='circle', radius=1.0, center=(0.0, 0.0),
 
 
 def makeRadialMatrix(matrixSize, center=(0.0, 0.0), radius=1.0):
-    """Generate a square matrix where each element val is
-    its distance from the centre of the matrix
+    """Generate a square modelMatrix where each element val is
+    its distance from the centre of the modelMatrix
 
     :Parameters:
         matrixSize: integer
-            the size of the resulting matrix on both dimensions (e.g 256)
+            the size of the resulting modelMatrix on both dimensions (e.g 256)
         radius:  float
             scale factor to be applied to the mask (circle with radius of
-            [1,1] will extend just to the edge of the matrix). Radius can
+            [1,1] will extend just to the edge of the modelMatrix). Radius can
             be asymmetric, e.g. [1.0,2.0] will be wider than it is tall.
         center:  2x1 tuple or list (default=[0.0,0.0])
-            the centre of the mask in the matrix ([1,1] is top-right
+            the centre of the mask in the modelMatrix ([1,1] is top-right
             corner, [-1,-1] is bottom-left)
     """
     if type(radius) in [int, float]:
@@ -257,7 +257,7 @@ def getRMScontrast(matrix):
 def conv2d(smaller, larger):
     """Convolve a pair of 2d numpy matrices.
 
-    Uses fourier transform method, so faster if larger matrix
+    Uses fourier transform method, so faster if larger modelMatrix
     has dimensions of size 2**n
 
     Actually right now the matrices must be the same size (will sort out

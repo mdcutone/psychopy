@@ -224,8 +224,8 @@ class Monitor(object):
         self.currentCalib['levelsPost'] = levels
 
     def setDKL_RGB(self, dkl_rgb):
-        """Sets the DKL->RGB conversion matrix for a chromatically
-        calibrated monitor (matrix is a 3x3 num array).
+        """Sets the DKL->RGB conversion modelMatrix for a chromatically
+        calibrated monitor (modelMatrix is a 3x3 num array).
         """
         self.currentCalib['dkl_rgb'] = dkl_rgb
 
@@ -236,8 +236,8 @@ class Monitor(object):
         self.currentCalib['spectraRGB'] = rgb
 
     def setLMS_RGB(self, lms_rgb):
-        """Sets the LMS->RGB conversion matrix for a chromatically
-        calibrated monitor (matrix is a 3x3 num array).
+        """Sets the LMS->RGB conversion modelMatrix for a chromatically
+        calibrated monitor (modelMatrix is a 3x3 num array).
         """
         self.currentCalib['lms_rgb'] = lms_rgb
         self.setPsychopyVersion(__version__)
@@ -375,9 +375,9 @@ class Monitor(object):
             return None, None
 
     def getDKL_RGB(self, RECOMPUTE=False):
-        """Returns the DKL->RGB conversion matrix. If one has been saved
+        """Returns the DKL->RGB conversion modelMatrix. If one has been saved
         this will be returned. Otherwise, if power spectra are available
-        for the monitor a matrix will be calculated.
+        for the monitor a modelMatrix will be calculated.
         """
         if not 'dkl_rgb' in self.currentCalib:
             RECOMPUTE = True
@@ -391,10 +391,10 @@ class Monitor(object):
             return self.currentCalib['dkl_rgb']
 
     def getLMS_RGB(self, recompute=False):
-        """Returns the LMS->RGB conversion matrix.
+        """Returns the LMS->RGB conversion modelMatrix.
         If one has been saved this will be returned.
         Otherwise (if power spectra are available for the
-        monitor) a matrix will be calculated.
+        monitor) a modelMatrix will be calculated.
         """
         if not 'lms_rgb' in self.currentCalib:
             recompute = True
@@ -783,7 +783,7 @@ class GammaCalculator(object):
         return SSQ
 
 def makeDKL2RGB(nm, powerRGB):
-    """Creates a 3x3 DKL->RGB conversion matrix from the spectral input powers
+    """Creates a 3x3 DKL->RGB conversion modelMatrix from the spectral input powers
     """
     interpolateCones = interpolate.interp1d(wavelength_5nm,
                                             cones_SmithPokorny)
@@ -824,7 +824,7 @@ def makeDKL2RGB(nm, powerRGB):
 
 
 def makeLMS2RGB(nm, powerRGB):
-    """Creates a 3x3 LMS->RGB conversion matrix from the spectral input powers
+    """Creates a 3x3 LMS->RGB conversion modelMatrix from the spectral input powers
     """
 
     interpolateCones = interpolate.interp1d(wavelength_5nm,
@@ -840,11 +840,11 @@ def makeXYZ2RGB(red_xy,
                 blue_xy,
                 whitePoint_xy=(0.3127, 0.329),
                 reverse=False):
-    """Create a linear sRGB conversion matrix.
+    """Create a linear sRGB conversion modelMatrix.
 
-    Returns a matrix to convert CIE-XYZ (1931) tristimulus values to linear sRGB
+    Returns a modelMatrix to convert CIE-XYZ (1931) tristimulus values to linear sRGB
     given CIE-xy (1931) primaries and white point. By default, the returned
-    matrix transforms CIE-XYZ to linear sRGB coordinates. Use 'reverse=True' to
+    modelMatrix transforms CIE-XYZ to linear sRGB coordinates. Use 'reverse=True' to
     get the inverse transformation. The chromaticity coordinates of the
     display's phosphor 'guns' are usually measured with a spectrophotometer.
 
@@ -861,10 +861,10 @@ def makeXYZ2RGB(red_xy,
         Chromaticity coordinate (CIE-xy) of the white point, default is D65.
     :param reverse:
         Return the inverse transform XYZ -> sRGB
-    :return: 3x3 conversion matrix
+    :return: 3x3 conversion modelMatrix
 
     """
-    # convert CIE-xy chromaticity coordinates to xyY and put them into a matrix
+    # convert CIE-xy chromaticity coordinates to xyY and put them into a modelMatrix
     mat_xyY_primaries = np.asmatrix((
         (red_xy[0], red_xy[1], 1.0 - red_xy[0] - red_xy[1]),
         (green_xy[0], green_xy[1], 1.0 - green_xy[0] - green_xy[1]),
@@ -880,11 +880,11 @@ def makeXYZ2RGB(red_xy,
             )
         )
     ).T
-    # compute the final matrix (sRGB -> XYZ)
+    # compute the final modelMatrix (sRGB -> XYZ)
     to_return = mat_xyY_primaries * np.diag(
         (np.linalg.inv(mat_xyY_primaries) * whtp_XYZ).A1)
 
-    if not reverse:  # for XYZ -> sRGB conversion matrix (we usually want this!)
+    if not reverse:  # for XYZ -> sRGB conversion modelMatrix (we usually want this!)
         return np.linalg.inv(to_return)
 
     return to_return

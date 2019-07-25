@@ -150,7 +150,7 @@ def deg2cm(degrees, monitor, correctFlat=False):
     points are equal distance from the eye. This means that each "degree"
     will be the same size irrespective of its position.
 
-    If `correctFlat == True` then the `degrees` argument must be an Nx2 matrix
+    If `correctFlat == True` then the `degrees` argument must be an Nx2 modelMatrix
     for X and Y values (the two cannot be calculated separately in this case).
 
     With `correctFlat == True` the positions may look strange because more

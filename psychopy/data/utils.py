@@ -477,7 +477,7 @@ def bootStraps(dat, n=1):
         dat = np.array([dat])
 
     nTrials = dat.shape[1]
-    # initialise a matrix to store output
+    # initialise a modelMatrix to store output
     resamples = np.zeros(dat.shape + (n,), dat.dtype)
     rand = np.random.rand
     for stimulusN in range(dat.shape[0]):

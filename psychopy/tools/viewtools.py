@@ -68,13 +68,13 @@ def computeFrustum(scrWidth,
       Offsets in the X-direction must be applied +/- eyeOffset to account for
       inter-ocular separation. A transformation in the Z-direction must be
       applied to accountfor screen distance. These offsets MUST be applied to
-      the GL_MODELVIEW matrix, not the GL_PROJECTION matrix! Doing so may break
+      the GL_MODELVIEW modelMatrix, not the GL_PROJECTION modelMatrix! Doing so may break
       lighting calculations.
 
     Examples
     --------
 
-    Creating a frustum and setting a window's projection matrix::
+    Creating a frustum and setting a window's projection modelMatrix::
 
         scrWidth = 0.5  # screen width in meters
         scrAspect = win.size[0] / win.size[1]
@@ -89,19 +89,19 @@ def computeFrustum(scrWidth,
 
     Off-axis frustums for stereo rendering::
 
-        # compute view matrix for each eye, these value usually don't change
+        # compute view modelMatrix for each eye, these value usually don't change
         eyeOffset = (-0.035, 0.035)  # +/- IOD / 2.0
         scrDist = 0.50  # 50cm
         scrWidth = 0.53  # 53cm
         scrAspect = 1.778
         leftFrustum = viewtools.computeFrustum(scrWidth, scrAspect, scrDist, eyeOffset[0])
         rightFrustum = viewtools.computeFrustum(scrWidth, scrAspect, scrDist, eyeOffset[1])
-        # make sure your view matrix accounts for the screen distance and eye offsets!
+        # make sure your view modelMatrix accounts for the screen distance and eye offsets!
 
     Using computed view frustums with a window::
 
         win.projectionMatrix = viewtools.perspectiveProjectionMatrix(*frustum)
-        # generate a view matrix looking ahead with correct viewing distance,
+        # generate a view modelMatrix looking ahead with correct viewing distance,
         # origin is at the center of the screen. Assumes eye is centered with
         # the screen.
         eyePos = [0.0, 0.0, scrDist]
@@ -153,7 +153,7 @@ def generalizedPerspectiveProjection(posBottomLeft,
     Returns
     -------
     tuple
-        The 4x4 projection and view matrix.
+        The 4x4 projection and view modelMatrix.
 
     See Also
     --------
@@ -225,11 +225,11 @@ def generalizedPerspectiveProjection(posBottomLeft,
     bottom = float(np.dot(vu, va) * nearOverDist)
     top = float(np.dot(vu, vc) * nearOverDist)
 
-    # projection matrix to return
+    # projection modelMatrix to return
     projMat = perspectiveProjectionMatrix(
         left, right, bottom, top, nearClip, farClip)
 
-    # view matrix to return, first compute the rotation component
+    # view modelMatrix to return, first compute the rotation component
     rotMat = np.zeros((4, 4), np.float32)
     rotMat[0, :3] = vr
     rotMat[1, :3] = vu
@@ -243,7 +243,7 @@ def generalizedPerspectiveProjection(posBottomLeft,
 
 
 def orthoProjectionMatrix(left, right, bottom, top, nearClip, farClip):
-    """Compute an orthographic projection matrix with provided frustum
+    """Compute an orthographic projection modelMatrix with provided frustum
     parameters.
 
     Parameters
@@ -264,16 +264,16 @@ def orthoProjectionMatrix(left, right, bottom, top, nearClip, farClip):
     Returns
     -------
     ndarray
-        4x4 projection matrix
+        4x4 projection modelMatrix
 
     See Also
     --------
-    perspectiveProjectionMatrix : Compute a perspective projection matrix.
+    perspectiveProjectionMatrix : Compute a perspective projection modelMatrix.
 
     Notes
     -----
 
-    * The returned matrix is row-major. Values are floats with 32-bits of
+    * The returned modelMatrix is row-major. Values are floats with 32-bits of
       precision stored as a contiguous (C-order) array.
 
     """
@@ -290,7 +290,7 @@ def orthoProjectionMatrix(left, right, bottom, top, nearClip, farClip):
 
 
 def perspectiveProjectionMatrix(left, right, bottom, top, nearClip, farClip):
-    """Compute an perspective projection matrix with provided frustum
+    """Compute an perspective projection modelMatrix with provided frustum
     parameters. The frustum can be asymmetric.
 
     Parameters
@@ -311,16 +311,16 @@ def perspectiveProjectionMatrix(left, right, bottom, top, nearClip, farClip):
     Returns
     -------
     ndarray
-        4x4 projection matrix
+        4x4 projection modelMatrix
 
     See Also
     --------
-    orthoProjectionMatrix : Compute a orthographic projection matrix.
+    orthoProjectionMatrix : Compute a orthographic projection modelMatrix.
 
     Notes
     -----
 
-    * The returned matrix is row-major. Values are floats with 32-bits of
+    * The returned modelMatrix is row-major. Values are floats with 32-bits of
       precision stored as a contiguous (C-order) array.
 
     """
@@ -337,9 +337,9 @@ def perspectiveProjectionMatrix(left, right, bottom, top, nearClip, farClip):
 
 
 def lookAt(eyePos, centerPos, upVec=(0.0, 1.0, 0.0)):
-    """Create a transformation matrix to orient a view towards some point. Based
+    """Create a transformation modelMatrix to orient a view towards some point. Based
     on the same algorithm as 'gluLookAt'. This does not generate a projection
-    matrix, but rather the matrix to transform the observer's view in the scene.
+    modelMatrix, but rather the modelMatrix to transform the observer's view in the scene.
 
     For more information see:
     https://www.khronos.org/registry/OpenGL-Refpages/gl2.1/xhtml/gluLookAt.xml
@@ -356,12 +356,12 @@ def lookAt(eyePos, centerPos, upVec=(0.0, 1.0, 0.0)):
     Returns
     -------
     ndarray
-        4x4 view matrix
+        4x4 view modelMatrix
 
     Notes
     -----
 
-    * The returned matrix is row-major. Values are floats with 32-bits of
+    * The returned modelMatrix is row-major. Values are floats with 32-bits of
       precision stored as a contiguous (C-order) array.
 
     """
@@ -397,9 +397,9 @@ def pointToNdc(wcsPos, viewMatrix, projectionMatrix):
     wcsPos : tuple, list or ndarray
         3x1 position vector(s) (xyz) in world space coordinates
     viewMatrix : ndarray
-        4x4 view matrix
+        4x4 view modelMatrix
     projectionMatrix : ndarray
-        4x4 projection matrix
+        4x4 projection modelMatrix
 
     Returns
     -------

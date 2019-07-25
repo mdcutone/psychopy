@@ -47,7 +47,7 @@ class PsiObject(object):
         self.r = array(list(range(2)))
         self.delta = delta
         
-        # Change x,a,b,r arrays to matrix computation compatible orthogonal 4D arrays
+        # Change x,a,b,r arrays to modelMatrix computation compatible orthogonal 4D arrays
         # ALWAYS use the order for P(r|lambda,x); i.e. [r,a,b,x]
         self._r = self.r.reshape((self.r.size,1,1,1))
         self._alpha = self.alpha.reshape((1,self.alpha.size,1,1))

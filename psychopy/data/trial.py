@@ -465,7 +465,7 @@ class TrialHandler(_BaseTrialHandler):
         return lines
 
     def _createOutputArrayData(self, dataOut):
-        """This just creates the dataOut part of the output matrix.
+        """This just creates the dataOut part of the output modelMatrix.
         It is called by _createOutputArray() which creates the header
         line and adds the stimOut columns
         """
@@ -707,7 +707,7 @@ class TrialHandler(_BaseTrialHandler):
             # remove the final orphaned tab character
             f.write(nextLine[:-1] + '\n')
 
-        # write the data matrix:
+        # write the data modelMatrix:
         for trial in dataOut:
             nextLine = ''
             for prmName in header:
@@ -1605,7 +1605,7 @@ class TrialHandlerExt(TrialHandler):
             self.getExp().addData(thisType, value)
 
     def _createOutputArrayData(self, dataOut):
-        """This just creates the dataOut part of the output matrix.
+        """This just creates the dataOut part of the output modelMatrix.
         It is called by _createOutputArray() which creates the header
         line and adds the stimOut columns
         """
@@ -1889,7 +1889,7 @@ class TrialHandlerExt(TrialHandler):
         # write a header row:
         if not matrixOnly:
             f.write(delim.join(header) + '\n')
-        # write the data matrix:
+        # write the data modelMatrix:
         for trial in dataOut:
             line = delim.join([str(trial[prm]) for prm in header])
             f.write(line + '\n')

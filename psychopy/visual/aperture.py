@@ -170,7 +170,7 @@ class Aperture(MinimalStim, ContainerMixin):
                 self._shape.draw()
                 GL.glDisable(GL.GL_ALPHA_TEST)
             else:
-                # draw without push/pop matrix
+                # draw without push/pop modelMatrix
                 self._shape.draw(keepMatrix=True)
 
             if self.inverted:

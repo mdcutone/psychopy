@@ -161,7 +161,7 @@ class SimpleImageStim(MinimalStim, WindowMixin):
         if win is None:
             win = self.win
         self._selectWindow(win)
-        # push the projection matrix and set to orthorgaphic
+        # push the projection modelMatrix and set to orthorgaphic
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glPushMatrix()
         GL.glLoadIdentity()
@@ -191,7 +191,7 @@ class SimpleImageStim(MinimalStim, WindowMixin):
         # GL.glDrawPixelsub(GL.GL_RGB, self.imArr)
         GL.glDrawPixels(self.size[0], self.size[1],
                         self.internalFormat, self.dataType, self._imStr)
-        # return to 3D mode (go and pop the projection matrix)
+        # return to 3D mode (go and pop the projection modelMatrix)
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glPopMatrix()
         GL.glMatrixMode(GL.GL_MODELVIEW)

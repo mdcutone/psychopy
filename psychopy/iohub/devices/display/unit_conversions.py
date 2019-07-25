@@ -152,7 +152,7 @@ def saToDist(eye2dsply, saH, saV):
     return distV, distH
 
 #-------------------------------------
-# Old code using matrix multiplication to convert between screen pix and
+# Old code using modelMatrix multiplication to convert between screen pix and
 # experiment software coord system...
 
 #        if coord_type=='pix':
@@ -165,7 +165,7 @@ def saToDist(eye2dsply, saH, saV):
 #        x1,y1,x2,y2=self.getBounds()
 #        print2err('getBounds: ',self.getBounds(),  )
 #
-#        bounds_matrix=np.matrix([[x1,y1,1,0],[-y1,x1,0,1],[x2,y2,1,0],[-y2,x2,0,1]])
+#        bounds_matrix=np.modelMatrix([[x1,y1,1,0],[-y1,x1,0,1],[x2,y2,1,0],[-y2,x2,0,1]])
 #
 #        cx1=None
 #        cy1=None
@@ -277,7 +277,7 @@ def saToDist(eye2dsply, saH, saV):
 ##                cy2=0.0
 #
 #        if cx1 is not None and cy1 is not None  and cx2 is not None and cy2 is not None :
-#            coord_matrix=np.matrix( [[cx1],[cy1],[cx2],[cy2]] )
+#            coord_matrix=np.modelMatrix( [[cx1],[cy1],[cx2],[cy2]] )
 #            abcd = np.linalg.solve(bounds_matrix, coord_matrix)
 #            a,b,c,d=np.array(abcd)[:,0]
 #            #print2err('abcd: {0}\n a={1}, b={2} , c={3}, d={4}'.format(abcd,a,b,c,d))

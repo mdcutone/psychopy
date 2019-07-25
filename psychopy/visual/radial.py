@@ -455,7 +455,7 @@ class RadialStim(GratingStim):
     def _updateVerticesBase(self):
         """Update the base vertices if angular resolution changes.
 
-        These will be multiplied by the size and rotation matrix before
+        These will be multiplied by the size and rotation modelMatrix before
         rendering.
         """
         # triangles = [trisX100, verticesX3, xyX2]

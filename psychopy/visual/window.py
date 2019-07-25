@@ -709,7 +709,7 @@ class Window(object):
         """A default resize event handler.
 
         This default handler updates the GL viewport to cover the entire
-        window and sets the ``GL_PROJECTION`` matrix to be orthogonal in
+        window and sets the ``GL_PROJECTION`` modelMatrix to be orthogonal in
         window space.  The bottom-left corner is (0, 0) and the top-right
         corner is the width and height of the :class:`~psychopy.visual.Window`
         in pixels.
@@ -856,7 +856,7 @@ class Window(object):
             GL.glScissor(0, 0, self.size[0], self.size[1])
             GL.glEnable(GL.GL_SCISSOR_TEST)
 
-            # clear the projection and modelview matrix for FBO blit
+            # clear the projection and modelview modelMatrix for FBO blit
             GL.glMatrixMode(GL.GL_PROJECTION)
             GL.glLoadIdentity()
             GL.glOrtho(-1, 1, -1, 1, -1, 1)
@@ -1136,7 +1136,7 @@ class Window(object):
 
     @property
     def projectionMatrix(self):
-        """Projection matrix defined as a 4x4 numpy array."""
+        """Projection modelMatrix defined as a 4x4 numpy array."""
         return self._projectionMatrix
 
     @projectionMatrix.setter
@@ -1145,7 +1145,7 @@ class Window(object):
 
     @property
     def viewMatrix(self):
-        """View matrix defined as a 4x4 numpy array."""
+        """View modelMatrix defined as a 4x4 numpy array."""
         return self._viewMatrix
 
     @viewMatrix.setter
@@ -1153,7 +1153,7 @@ class Window(object):
         self._viewMatrix = numpy.asarray(value, numpy.float32)
 
     def setPerspectiveView(self, applyTransform=True, **kwargs):
-        """Set the projection and view matrix to render with perspective.
+        """Set the projection and view modelMatrix to render with perspective.
 
         Matrices are computed using values specified in the monitor
         configuration with the scene origin on the screen plane. Calculations
@@ -1210,7 +1210,7 @@ class Window(object):
         OpenGL functions. Subsequent drawing operations will be affected until
         :py:attr:`~Window.flip()` is called.
 
-        All transformations in ``GL_PROJECTION`` and ``GL_MODELVIEW`` matrix
+        All transformations in ``GL_PROJECTION`` and ``GL_MODELVIEW`` modelMatrix
         stacks will be cleared (set to identity) prior to applying.
 
         Parameters

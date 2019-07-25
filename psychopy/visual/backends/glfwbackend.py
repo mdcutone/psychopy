@@ -606,7 +606,7 @@ def _onResize(width, height):
     """A default resize event handler.
 
     This default handler updates the GL viewport to cover the entire
-    window and sets the ``GL_PROJECTION`` matrix to be orthogonal in
+    window and sets the ``GL_PROJECTION`` modelMatrix to be orthogonal in
     window space.  The bottom-left corner is (0, 0) and the top-right
     corner is the width and height of the :class:`~psychopy.visual.Window`
     in pixels.

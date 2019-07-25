@@ -1000,7 +1000,7 @@ class BitsPlusPlus(object):
         ``psychopy.visual.Window()`` since this will automatically
         draw the LUT as part of the screen refresh.
         """
-        # push the projection matrix and set to orthographic
+        # push the projection modelMatrix and set to orthographic
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glPushMatrix()
         GL.glLoadIdentity()
@@ -1024,7 +1024,7 @@ class BitsPlusPlus(object):
                         self._HEADandLUTstr)
         # GL.glDrawPixels(524,1, GL.GL_RGB,GL.GL_UNSIGNED_BYTE,
         #    self._HEADandLUTstr)
-        # return to 3D mode (go and pop the projection matrix)
+        # return to 3D mode (go and pop the projection modelMatrix)
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glPopMatrix()
         GL.glMatrixMode(GL.GL_MODELVIEW)
@@ -1036,7 +1036,7 @@ class BitsPlusPlus(object):
         since this will automatically draw the 
         reset code as part of the screen refresh.
         """
-        #push the projection matrix and set to orthographic
+        #push the projection modelMatrix and set to orthographic
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glPushMatrix()
         GL.glLoadIdentity()
@@ -1057,7 +1057,7 @@ class BitsPlusPlus(object):
         GL.glDrawPixels(len(self._HEADandClock),1,
             GL.GL_RGB,GL.GL_UNSIGNED_BYTE,
             self._HEADandClockstr)
-        #return to 3D mode (go and pop the projection matrix)
+        #return to 3D mode (go and pop the projection modelMatrix)
         GL.glMatrixMode( GL.GL_PROJECTION )
         GL.glPopMatrix()
         GL.glMatrixMode( GL.GL_MODELVIEW )
@@ -1074,7 +1074,7 @@ class BitsPlusPlus(object):
         if sendStr == None:
             sendStr = self._HEADandTrigStr
         
-        #push the projection matrix and set to orthographic
+        #push the projection modelMatrix and set to orthographic
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glPushMatrix()
         GL.glLoadIdentity()

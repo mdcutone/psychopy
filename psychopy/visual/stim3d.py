@@ -240,12 +240,12 @@ class RigidBodyPose(object):
         pass
 
     @property
-    def matrix(self):
-        """4x4 homogeneous transformation matrix from this pose."""
+    def modelMatrix(self):
+        """4x4 homogeneous transformation modelMatrix from this pose."""
         if not self._updateModelMatrix:
             return self._M
 
-        # translation matrix
+        # translation modelMatrix
         if self._updateTranslationMatrix:
             self._T.fill(0.0)
             np.fill_diagonal(self._T, 1.0)
@@ -253,7 +253,7 @@ class RigidBodyPose(object):
 
             self._updateTranslationMatrix = False
 
-        # rotation matrix
+        # rotation modelMatrix
         if self._updateRotationMatrix:
             a = self._ori[3]
             b, c, d = self._ori[:3]
@@ -270,7 +270,7 @@ class RigidBodyPose(object):
             bd = b * d
             cd = c * d
 
-            # no need to clear the matrix, all values are set
+            # no need to clear the modelMatrix, all values are set
             u = np.float32(2.0)
             self._R[0, 0] = a2 + b2 - c2 - d2
             self._R[1, 0] = u * (bc + ad)
@@ -296,24 +296,24 @@ class RigidBodyPose(object):
         return self._M
 
     @property
-    def inverseMatrix(self):
-        """4x4 homogeneous inverse transformation matrix from this pose."""
+    def inverseModelMatrix(self):
+        """4x4 homogeneous inverse transformation modelMatrix from this pose."""
         return 1
 
-    def getMatrix(self, inverse=False, out=None):
-        """Construct a 4x4 homogeneous transformation matrix from this pose.
+    def getModelMatrix(self, inverse=False, out=None):
+        """Construct a 4x4 homogeneous transformation modelMatrix from this pose.
 
         Parameters
         ----------
         inverse : bool
-            Return the inverse matrix.
+            Return the inverse modelMatrix.
         out : ndarray, optional
             Optional 4x4 array to write values to.
 
         Returns
         -------
         ndarray
-            4x4 homogeneous transformation matrix (row-major).
+            4x4 homogeneous transformation modelMatrix (row-major).
 
         """
         pass
@@ -361,7 +361,7 @@ class RigidBodyPoseMixin(object):
 
             * `pos` - Position vector [x, y, z].
             * `ori` - Orientation quaternion [x, y, z, w].
-            * `matrix` - Pose transformations as a 4x4 matrix (row-order).
+            * `modelMatrix` - Pose transformations as a 4x4 modelMatrix (row-order).
 
         Returned data must be Numpy arrays with type `ndarray`. Other than the
         above attributes, classes may differ greatly in terms of features which
@@ -435,8 +435,8 @@ class MeshStimMixin(RigidBodyPoseMixin):
 
         GL.glEnable(GL.GL_BLEND)
 
-        # get the model matrix
-        M = self.thePose.matrix.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        # get the model modelMatrix
+        M = self.thePose.modelMatrix.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
         GL.glPushMatrix()
         GL.glMultTransposeMatrixf(M)

@@ -55,7 +55,7 @@ while not stopApp:
         M = ovrMatrix4f.translation(triangle_origin)
 
         GL.glPushMatrix()
-        GL.glMultMatrixf(M.ctypes)  # multiply the scene by the matrix
+        GL.glMultMatrixf(M.ctypes)  # multiply the scene by the modelMatrix
         GL.glBegin(GL.GL_TRIANGLES)
         GL.glColor3f(1, 0, 0)
         GL.glVertex3f(-1.0, -1.0, 0.0)

@@ -847,10 +847,10 @@ class Rift(window.Window):
         # apply additional transformations to eye poses
         if not self._monoscopic:
             for eye, matrix in enumerate(self._viewMatrix):
-                # compute each eye's transformation matrix from returned poses
+                # compute each eye's transformation modelMatrix from returned poses
                 libovr.getEyeViewMatrix(eye, matrix)
         else:
-            # view matrix derived from head position when in monoscopic mode
+            # view modelMatrix derived from head position when in monoscopic mode
             self._viewMatrix = self.trackedHeadPose.getViewMatrix()
 
         self._startHmdFrame()
@@ -871,10 +871,10 @@ class Rift(window.Window):
         # apply additional transformations to eye poses
         if not self._monoscopic:
             for eye, matrix in enumerate(self._viewMatrix):
-                # compute each eye's transformation matrix from returned poses
+                # compute each eye's transformation modelMatrix from returned poses
                 libovr.getEyeViewMatrix(eye, matrix)
         else:
-            # view matrix derived from head position when in monoscopic mode
+            # view modelMatrix derived from head position when in monoscopic mode
             self._viewMatrix = self.trackedHeadPose.getTransformMatrix()
 
     @property
@@ -1260,7 +1260,7 @@ class Rift(window.Window):
 
     @property
     def viewMatrix(self):
-        """Get the view matrix for the current buffer."""
+        """Get the view modelMatrix for the current buffer."""
         if not self._monoscopic:
             if self.buffer == 'left':
                 return self._viewMatrix[libovr.EYE_LEFT]
@@ -1271,7 +1271,7 @@ class Rift(window.Window):
 
     @property
     def projectionMatrix(self):
-        """Get the projection matrix for the current buffer."""
+        """Get the projection modelMatrix for the current buffer."""
         if not self._monoscopic:
             if self.buffer == 'left':
                 return self._projectionMatrix[libovr.EYE_LEFT]
@@ -1592,8 +1592,8 @@ class Rift(window.Window):
         return now
 
     def multiplyViewMatrixGL(self):
-        """Multiply the local eye pose transformation matrix obtained from the
-        SDK using ``glMultMatrixf``. The matrix used depends on the current eye
+        """Multiply the local eye pose transformation modelMatrix obtained from the
+        SDK using ``glMultMatrixf``. The modelMatrix used depends on the current eye
         buffer set by :func:`setBuffer`.
 
         Returns
@@ -1618,8 +1618,8 @@ class Rift(window.Window):
                         ctypes.POINTER(ctypes.c_float)))
 
     def multiplyProjectionMatrixGL(self):
-        """Multiply the current projection matrix obtained from the SDK using
-        ``glMultMatrixf``. The matrix used depends on the current eye buffer set
+        """Multiply the current projection modelMatrix obtained from the SDK using
+        ``glMultMatrixf``. The modelMatrix used depends on the current eye buffer set
         by :func:`setBuffer`.
 
         """

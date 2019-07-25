@@ -1085,7 +1085,7 @@ def createLight(params=()):
 
 def useLights(lights, setupOnly=False):
     """Use specified lights in successive rendering operations. All lights will
-    be transformed using the present modelview matrix.
+    be transformed using the present modelview modelMatrix.
 
     Parameters
     ----------

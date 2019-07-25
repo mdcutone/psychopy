@@ -218,7 +218,7 @@ class _BaseTrialHandler(_ComparisonMixin):
         with openOutputFile(fileName=fileName, append=appendFile,
                             fileCollisionMethod=fileCollisionMethod,
                             encoding=encoding) as f:
-            # loop through lines in the data matrix
+            # loop through lines in the data modelMatrix
             for line in dataArray:
                 for cellN, entry in enumerate(line):
                     # surround in quotes to prevent effect of delimiter
@@ -351,7 +351,7 @@ class _BaseTrialHandler(_ComparisonMixin):
             ws = wb.create_sheet()
             ws.title = sheetName
 
-        # loop through lines in the data matrix
+        # loop through lines in the data modelMatrix
         for lineN, line in enumerate(dataArray):
             if line is None:
                 continue
@@ -501,7 +501,7 @@ class DataHandler(_ComparisonMixin, dict):
 
     def addDataType(self, names, shape=None):
         """Add a new key to the data dictionary of particular shape if
-        specified (otherwise the shape of the trial matrix in the trial
+        specified (otherwise the shape of the trial modelMatrix in the trial
         handler. Data are initialised to be zero everywhere. Not needed
         by user: appropriate types will be added during initialisation
         and as each xtra type is needed.

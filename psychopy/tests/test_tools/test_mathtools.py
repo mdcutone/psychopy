@@ -9,7 +9,7 @@ import pytest
 
 @pytest.mark.mathtools
 def test_rotationMatrix():
-    """Test rotation matrix composition."""
+    """Test rotation modelMatrix composition."""
     # identity check
     R = rotationMatrix(0., [0., 0., -1.])
     assert np.allclose(R, np.identity(4))
@@ -48,8 +48,8 @@ def test_multQuat():
 
 @pytest.mark.mathtools
 def test_matrixFromQuat():
-    """Test if a matrix created using `matrixFromQuat` is equivalent to a
-    rotation matrix created by `rotationMatrix`.
+    """Test if a modelMatrix created using `matrixFromQuat` is equivalent to a
+    rotation modelMatrix created by `rotationMatrix`.
 
     """
     # test if quaternion conversions give the same rotation matrices
@@ -59,10 +59,10 @@ def test_matrixFromQuat():
     angles = np.random.uniform(0.0, 360.0, (N,))  # random angles
 
     for i in range(N):
-        # create a quaternion and convert it to a rotation matrix
+        # create a quaternion and convert it to a rotation modelMatrix
         q = quatFromAxisAngle(axes[i, :], angles[i], degrees=True)
         qr = quatToMatrix(q)
-        # create a rotation matrix directly
+        # create a rotation modelMatrix directly
         rm = rotationMatrix(angles[i], axes[i, :])
         # check if they are close
         assert np.allclose(qr, rm)
@@ -81,14 +81,14 @@ def test_invertQuat():
     qidt = np.array([0., 0., 0., 1.])  # identity quaternion
 
     for i in range(N):
-        # create a quaternion and convert it to a rotation matrix
+        # create a quaternion and convert it to a rotation modelMatrix
         q = quatFromAxisAngle(axes[i, :], angles[i], degrees=True)
         qinv = invertQuat(q)
         assert np.allclose(multQuat(q, qinv), qidt)  # is identity?
 
 
 def test_transform():
-    """Test if `transform` gives the same results as a matrix."""
+    """Test if `transform` gives the same results as a modelMatrix."""
     np.random.seed(123456)
     N = 1000
     axes = np.random.uniform(-1.0, 1.0, (N, 3,))  # random axes

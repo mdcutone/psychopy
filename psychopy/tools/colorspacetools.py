@@ -59,7 +59,7 @@ def unpackColors(colors):  # used internally, not exported by __all__
 def srgbTF(rgb, reverse=False, **kwargs):
     """Apply sRGB transfer function (or gamma) to linear RGB values.
 
-    Input values must have been transformed using a conversion matrix derived
+    Input values must have been transformed using a conversion modelMatrix derived
     from sRGB primaries relative to D65.
 
     Parameters
@@ -145,9 +145,9 @@ def cielab2rgb(lab,
     values.
 
     CIE L*a*b* are first transformed into CIE XYZ (1931) color space, then the
-    RGB conversion is applied. By default, the sRGB conversion matrix is used
+    RGB conversion is applied. By default, the sRGB conversion modelMatrix is used
     with a reference D65 white point. You may specify your own RGB conversion
-    matrix and white point (in CIE XYZ) appropriate for your display.
+    modelMatrix and white point (in CIE XYZ) appropriate for your display.
 
     Parameters
     ----------
@@ -157,18 +157,18 @@ def cielab2rgb(lab,
         coordinate.
     whiteXYZ : tuple, list or ndarray
         1-D vector coordinate of the white point in CIE-XYZ color space. Must be
-        the same white point needed by the conversion matrix. The default
+        the same white point needed by the conversion modelMatrix. The default
         white point is D65 if None is specified, defined as X, Y, Z = 0.9505,
         1.0000, 1.0890.
     conversionMatrix : tuple, list or ndarray
-        3x3 conversion matrix to transform CIE-XYZ to RGB values. The default
-        matrix is sRGB with a D65 white point if None is specified. Note that
+        3x3 conversion modelMatrix to transform CIE-XYZ to RGB values. The default
+        modelMatrix is sRGB with a D65 white point if None is specified. Note that
         values must be gamma corrected to appear correctly according to the sRGB
         standard.
     transferFunc : pyfunc or None
         Signature of the transfer function to use. If None, values are kept as
         linear RGB (it's assumed your display is gamma corrected via the
-        hardware CLUT). The TF must be appropriate for the conversion matrix
+        hardware CLUT). The TF must be appropriate for the conversion modelMatrix
         supplied (default is sRGB). Additional arguments to 'transferFunc' can
         be passed by specifying them as keyword arguments. Gamma functions that
         come with PsychoPy are 'srgbTF' and 'rec709TF', see their docs for more
@@ -198,7 +198,7 @@ def cielab2rgb(lab,
     lab, orig_shape, orig_dim = unpackColors(lab)
 
     if conversionMatrix is None:
-        # XYZ -> sRGB conversion matrix, assumes D65 white point
+        # XYZ -> sRGB conversion modelMatrix, assumes D65 white point
         # mdc - computed using makeXYZ2RGB with sRGB primaries
         conversionMatrix = numpy.asmatrix([
             [3.24096994, -1.53738318, -0.49861076],
@@ -236,7 +236,7 @@ def cielab2rgb(lab,
     xyz_array[:, 1] *= wht_y
     xyz_array[:, 2] *= wht_z
 
-    # convert to sRGB using the specified conversion matrix
+    # convert to sRGB using the specified conversion modelMatrix
     rgb_out = numpy.asarray(numpy.dot(xyz_array, conversionMatrix.T))
 
     # apply sRGB gamma correction if requested
@@ -272,18 +272,18 @@ def cielch2rgb(lch,
         coordinate. The hue angle *h is expected in degrees.
     whiteXYZ : tuple, list or ndarray
         1-D vector coordinate of the white point in CIE-XYZ color space. Must be
-        the same white point needed by the conversion matrix. The default
+        the same white point needed by the conversion modelMatrix. The default
         white point is D65 if None is specified, defined as X, Y, Z = 0.9505,
         1.0000, 1.0890
     conversionMatrix : tuple, list or ndarray
-        3x3 conversion matrix to transform CIE-XYZ to RGB values. The default
-        matrix is sRGB with a D65 white point if None is specified. Note that
+        3x3 conversion modelMatrix to transform CIE-XYZ to RGB values. The default
+        modelMatrix is sRGB with a D65 white point if None is specified. Note that
         values must be gamma corrected to appear correctly according to the sRGB
         standard.
     transferFunc : pyfunc or None
         Signature of the transfer function to use. If None, values are kept as
         linear RGB (it's assumed your display is gamma corrected via the
-        hardware CLUT). The TF must be appropriate for the conversion matrix
+        hardware CLUT). The TF must be appropriate for the conversion modelMatrix
         supplied. Additional arguments to 'transferFunc' can be passed by
         specifying them as keyword arguments. Gamma functions that come with
         PsychoPy are 'srgbTF' and 'rec709TF', see their docs for more
@@ -326,10 +326,10 @@ def cielch2rgb(lch,
 def dkl2rgb(dkl, conversionMatrix=None):
     """Convert from DKL color space (Derrington, Krauskopf & Lennie) to RGB.
 
-    Requires a conversion matrix, which will be generated from generic
+    Requires a conversion modelMatrix, which will be generated from generic
     Sony Trinitron phosphors if not supplied (note that this will not be
     an accurate representation of the color space unless you supply a
-    conversion matrix).
+    conversion modelMatrix).
 
     usage::
 
@@ -345,7 +345,7 @@ def dkl2rgb(dkl, conversionMatrix=None):
             [1.0000, -0.3900, 0.2094],  # G
             [1.0000, 0.0180, -1.0000]])  # B
         logging.warning('This monitor has not been color-calibrated. '
-                        'Using default DKL conversion matrix.')
+                        'Using default DKL conversion modelMatrix.')
 
     if len(dkl.shape) == 3:
         dkl_NxNx3 = dkl
@@ -452,10 +452,10 @@ def hsv2rgb(hsv_Nx3):
 def lms2rgb(lms_Nx3, conversionMatrix=None):
     """Convert from cone space (Long, Medium, Short) to RGB.
 
-    Requires a conversion matrix, which will be generated from generic
+    Requires a conversion modelMatrix, which will be generated from generic
     Sony Trinitron phosphors if not supplied (note that you will not get
     an accurate representation of the color space unless you supply a
-    conversion matrix)
+    conversion modelMatrix)
 
     usage::
 
@@ -474,7 +474,7 @@ def lms2rgb(lms_Nx3, conversionMatrix=None):
             [-0.03976551, -0.14253782, 1.18230333]])  # B
 
         logging.warning('This monitor has not been color-calibrated. '
-                        'Using default LMS conversion matrix.')
+                        'Using default LMS conversion modelMatrix.')
     else:
         cones_to_rgb = conversionMatrix
 
@@ -490,7 +490,7 @@ def rgb2dklCart(picture, conversionMatrix=None):
     # Find the original dimensions of the picture
     origShape = picture.shape
 
-    # this is the inversion of the dkl2rgb conversion matrix
+    # this is the inversion of the dkl2rgb conversion modelMatrix
     if conversionMatrix is None:
         conversionMatrix = numpy.asarray([
             # LUMIN->    %L-M->        L+M-S
@@ -498,11 +498,11 @@ def rgb2dklCart(picture, conversionMatrix=None):
             [0.78737943, -0.55586618, -0.23151325],
             [0.26562825, 0.63933074, -0.90495899]])
         logging.warning('This monitor has not been color-calibrated. '
-                        'Using default DKL conversion matrix.')
+                        'Using default DKL conversion modelMatrix.')
     else:
         conversionMatrix = numpy.linalg.inv(conversionMatrix)
 
-    # Reshape the picture so that it can multiplied by the conversion matrix
+    # Reshape the picture so that it can multiplied by the conversion modelMatrix
     red = picture[:, :, 0]
     green = picture[:, :, 1]
     blue = picture[:, :, 2]
@@ -511,7 +511,7 @@ def rgb2dklCart(picture, conversionMatrix=None):
                          green.reshape([-1]),
                          blue.reshape([-1])])
 
-    # Multiply the picture by the conversion matrix
+    # Multiply the picture by the conversion modelMatrix
     dkl = numpy.dot(conversionMatrix, dkl)
 
     # Reshape the picture so that it's back to it's original shape
@@ -522,10 +522,10 @@ def rgb2dklCart(picture, conversionMatrix=None):
 def rgb2lms(rgb_Nx3, conversionMatrix=None):
     """Convert from RGB to cone space (LMS).
 
-    Requires a conversion matrix, which will be generated from generic
+    Requires a conversion modelMatrix, which will be generated from generic
     Sony Trinitron phosphors if not supplied (note that you will not get
     an accurate representation of the color space unless you supply a
-    conversion matrix)
+    conversion modelMatrix)
 
     usage::
 
@@ -544,7 +544,7 @@ def rgb2lms(rgb_Nx3, conversionMatrix=None):
             [-0.03976551, -0.14253782, 1.18230333]])  # B
 
         logging.warning('This monitor has not been color-calibrated. '
-                        'Using default LMS conversion matrix.')
+                        'Using default LMS conversion modelMatrix.')
     else:
         cones_to_rgb = conversionMatrix
     rgb_to_cones = numpy.linalg.inv(cones_to_rgb)

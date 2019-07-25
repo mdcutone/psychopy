@@ -180,7 +180,7 @@ class ColorCAL(object):
         valstrip = val.strip(b'\n\r>')
         vals = valstrip.split(b',')
         ok = (vals[0] == 'OK00')
-        # transform raw x,y,z by calibration matrix
+        # transform raw x,y,z by calibration modelMatrix
         xyzRaw = numpy.array([vals[1].strip(), vals[2].strip(), vals[3].strip()], dtype=float)
         X, Y, Z = numpy.dot(self.calibMatrix, xyzRaw)
         self.ok, self.lastLum = ok, Y
@@ -274,7 +274,7 @@ class ColorCAL(object):
         return True
 
     def getCalibMatrix(self):
-        """Get the calibration matrix from the device, needed for transforming
+        """Get the calibration modelMatrix from the device, needed for transforming
         measurements into real-world values.
 
         This is normally retrieved during __init__ and stored as

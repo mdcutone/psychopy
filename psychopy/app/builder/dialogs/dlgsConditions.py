@@ -456,7 +456,7 @@ class DlgConditions(wx.Dialog):
         """
         # put things inside a border:
         if wx.version()[0] == '2':
-            # data matrix on top, buttons below
+            # data modelMatrix on top, buttons below
             self.border = wx.FlexGridSizer(2, 1)
         elif wx.version()[0] == '3':
             self.border = wx.FlexGridSizer(4)
