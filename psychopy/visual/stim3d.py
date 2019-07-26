@@ -94,7 +94,15 @@ class RigidBodyPose(object):
     """Class for representing rigid body poses in 3D space.
 
     The pose of rigid bodies are represented by a position vector [x, y, z] and
-    orientation quaternion [x, y, z, w].
+    orientation quaternion [x, y, z, w]. Poses are mainly used to define the
+    spatial configuration of objects and stimuli in the scene.
+
+    Parameters
+    ----------
+    pos : array_like
+        Position vector (x, y, z).
+    ori : array_like
+        Orientation quaternion vector (x, y, z, w).
 
     """
     def __init__(self, pos=(0., 0., 0.), ori=(0., 0., 0., 1.)):
@@ -153,6 +161,28 @@ class RigidBodyPose(object):
         self._pos[:] = value[0]
         self._ori[:] = value[1]
 
+    def clear(self):
+        """Clear all transformation stored in this pose. This zeros `pos` and
+        sets `ori` to and identity quaternion.
+
+        """
+        self._ori[:3].fill(0.0)
+        self._ori[3] = 1.0
+        self._pos.fill(0.0)
+
+        # Clear matrices here, this is much faster than computing matrices only
+        # for them to return identity when getMatrix is called.
+        self._T.fill(0.0)
+        np.fill_diagonal(self._T, 1.0)
+        self._R.fill(0.0)
+        np.fill_diagonal(self._R, 1.0)
+        self._M.fill(0.0)
+        np.fill_diagonal(self._M, 1.0)
+
+        self._updateTranslationMatrix = False
+        self._updateRotationMatrix = False
+        self._updateModelMatrix = False
+
     def __mul__(self, other):
         """Multiplication operator `*` for rigid body poses. This puts the
         second operand into the reference frame of the first.
@@ -190,10 +220,22 @@ class RigidBodyPose(object):
         tuple
             Orientation axis [ax, ay, az] and angle.
 
-        """
-        pass
+        Examples
+        --------
+        Get the axis of rotation and angle in radians of a `RigidBodyPose`::
 
-    def setOriAxisAngle(self, axis, angle, degrees=True):
+            axis, angle = myPose.getOriAxisAngle(degrees=False)
+
+        """
+        dtype = np.dtype(self._ori.dtype).type
+
+        v = np.sqrt(np.sum(np.square(self._ori[:3])))
+        axis = self._ori[:3] / v
+        angle = dtype(2.0) * np.arctan2(v, self._ori[3])
+
+        return axis, np.degrees(angle) if degrees else degrees
+
+    def setOriAxisAngle(self, axis, angle, acc=False, degrees=True):
         """Set the orientation of this pose using an axis and angle.
 
         Parameters
@@ -202,12 +244,57 @@ class RigidBodyPose(object):
             Vector defining the rotation axis in world space [ax, ay, az].
         angle : float
             Angle to rotate about `axis`.
+        acc : bool, optional
+            Accumulate rotations. If `True` the new rotation will be combined with
+            the pose's current rotation. If `False`, the specified rotation will
+            overwrite the current rotation.
         degrees : bool, optional
             Angle is specified as degrees if `True`, else the angle is in
             radians.
 
+        Examples
+        --------
+        Set the orientation of a pose using an axis and angle::
+
+            axis = (0., 0., -1.)  # -Z is axis of rotation
+            angle = 90.0  # angle to rotate the rigid body about
+
+            myPose.setOriAxisAngle(axis, angle)
+
+        Rotate the rigid body about different axes, having their rotations
+        accumulate by setting `acc=True`::
+
+            myPose.setOriAxisAngle((1., 0., 0.), angleX)  # +X axis
+            myPose.setOriAxisAngle((0., 1., 0.), angleY, acc=True)  # +Y axis
+            myPose.setOriAxisAngle((0., 0., -1.), angleZ, acc=True)  # -Z axis
+
         """
-        pass
+        dtype = np.dtype(self._ori.dtype).type
+
+        if degrees:
+            halfRad = np.radians(angle, dtype=dtype) / dtype(2.0)
+        else:
+            halfRad = np.dtype(dtype).type(angle) / dtype(2.0)
+
+        # normalize input axis
+        norm = np.linalg.norm(np.asarray(axis, dtype=dtype))
+        axis /= norm
+        np.nan_to_num(axis, copy=False)  # fix NaNs
+
+        if not acc:
+            # overwrite rotation
+            np.multiply(axis, np.sin(halfRad), out=self._ori[:3])
+            self._ori[3] = np.cos(halfRad)
+        else:
+            # rotations are accumulated
+            q = self._ori.copy()
+            p = np.zeros((4,), dtype=dtype)
+            np.multiply(axis, np.sin(halfRad), out=p[:3])
+            p[3] = np.cos(halfRad)
+
+            # multiply the quaternions of the poses
+            self._ori[:3] = np.cross(q[:3], p[:3]) + q[:3] * p[3] + p[:3] * q[3]
+            self._ori[3] = q[3] * p[3] - q[:3].dot(p[:3])
 
     def getAngleTo(self, p, degrees=True):
         """Get the relative angle to a point from this pose's forward direction.
@@ -240,7 +327,7 @@ class RigidBodyPose(object):
         pass
 
     def transform(self, p):
-        """Transform points.
+        """Inverse transform a point.
 
         Parameters
         ----------
@@ -250,11 +337,10 @@ class RigidBodyPose(object):
         Returns
         -------
         ndarray
-            Transformed points `p`.
+            Transformed point `p`.
 
         """
-        pointIn = np.zeros((3,), dtype=np.float32)
-        pointIn[:] = p  # must be length 3
+        pointIn = np.asarray(p, dtype=np.float32)
 
         # rotate the point using the quaternion @ ori
         u = np.cross(self._ori[:3], pointIn) * np.float32(2.0)
@@ -265,8 +351,27 @@ class RigidBodyPose(object):
         return toReturn
 
     def inverseTransform(self, p):
-        """Inverse transform a points."""
-        pass
+        """Inverse transform a point.
+
+        Parameters
+        ----------
+        p : array_like
+            Points to transform.
+
+        Returns
+        -------
+        ndarray
+            Inverse transformed point `p`.
+
+        """
+        pointIn = np.asarray(p, dtype=np.float32)
+
+        # inverse rotate
+        pointIn -= self._pos
+        u = np.cross(self._ori[:3], pointIn) * np.float32(2.0)
+        toReturn = pointIn - self._ori[3] * u + np.cross(self._ori[:3], u)
+
+        return toReturn
 
     def interp(self, to, weight):
         """Interpolate this pose."""
@@ -345,7 +450,7 @@ class RigidBodyPose(object):
         pass
 
 
-class RigidBodyPoseMixin(object):
+class RigidBodyPoseMixin(basevisual.MinimalStim):
     """Mixin class for 3D stimuli whose poses are represented by a
     `RigidBodyPose` object or similar.
 
@@ -362,12 +467,13 @@ class RigidBodyPoseMixin(object):
         Orientation quaternion [x, y, z, w].
 
     """
-    def __init__(self, pos=(0., 0., 0.), ori=(0., 0., 0., 1.)):
+    def __init__(self, pos=(0., 0., 0.), ori=(0., 0., 0., 1.), *args, **kwargs):
         """
         Attributes
         ----------
         thePose : Rigid body pose object.
         """
+        super(RigidBodyPoseMixin, self).__init__(*args, **kwargs)
         self._thePose = RigidBodyPose(pos, ori)
 
     @property
@@ -379,11 +485,12 @@ class RigidBodyPoseMixin(object):
         (eg. `LibOVRPose` from PsychXR).
 
         At the very least, objects set as `thePose` must have the following
-        attributes essential for rendering stimuli:
+        attributes and methods essential for rendering stimuli:
 
             * `pos` - Position vector [x, y, z].
             * `ori` - Orientation quaternion [x, y, z, w].
-            * `matrix` - Pose transformations as a 4x4 matrix (row-order).
+            * `getModelMatrix()` - Get pose transformations as a 4x4 matrix
+              (row-order).
 
         Returned data must be Numpy arrays with type `ndarray`. Other than the
         above attributes, classes may differ greatly in terms of features which
@@ -410,6 +517,7 @@ class RigidBodyPoseMixin(object):
     @thePose.setter
     def thePose(self, value):
         self._thePose = value
+
 
 CULL_FACE = {
     'back': GL.GL_BACK,
@@ -458,7 +566,7 @@ class MeshStimMixin(RigidBodyPoseMixin):
         GL.glEnable(GL.GL_BLEND)
 
         # get the model matrix
-        M = self.thePose.matrix.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        M = self.thePose.getModelMatrix().ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
         GL.glPushMatrix()
         GL.glMultTransposeMatrixf(M)
@@ -546,6 +654,12 @@ class ObjMeshStim(MeshStimMixin):
     --------
         Loading an *.OBJ file is a slow process, be sure to do this outside
         of any time-critical routines!
+
+    Examples
+    --------
+    Loading an *.OBJ file from a disk location::
+
+        myObjStim = ObjMeshStim(win, '/path/to/file/model.obj')
 
     """
     def __init__(self,
