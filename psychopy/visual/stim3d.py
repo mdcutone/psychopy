@@ -14,6 +14,7 @@ from psychopy.tools.attributetools import (attributeSetter, logAttrib,
 import numpy as np
 import os.path
 import pyglet.gl as GL
+import string
 import OpenGL.GL
 import OpenGL.GL as GL2
 import pyglet.gl.glu as GLU
@@ -23,7 +24,7 @@ from collections import OrderedDict
 import math
 
 
-vert_prog = """
+phongVertSimple = """
 varying vec3 N;
 varying vec3 v;
 
@@ -34,51 +35,59 @@ void main(void)
 
     gl_FrontColor = gl_Color;
     gl_TexCoord[0] = gl_MultiTexCoord0;
-    gl_TexCoord[1] = gl_MultiTexCoord1;
-    gl_TexCoord[2] = gl_MultiTexCoord2;
     gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;  
 }
           
 """
 
-#
-frag_prog = """
+phongFragSimple = """
 varying vec3 N;
 varying vec3 v;  
 
 uniform sampler2D texture0;
 
+#define MAX_LIGHTS $nlights
+
 void main (void)  
 {  
     vec3 L;
+    vec4 acc = vec4(0.0, 0.0, 0.0, 0.0);
     
-    if (gl_LightSource[0].position.w == 0.0) {  // is directional?
-        L = normalize(-gl_LightSource[0].position.xyz);
-    } else {
-        L = normalize(gl_LightSource[0].position.xyz - v); 
-    }
-    
-   vec3 E = normalize(-v);
-   vec3 R = normalize(-reflect(L,N));  
- 
-   vec4 Iamb = clamp(gl_FrontLightProduct[0].ambient * texture2D(texture0, gl_TexCoord[0].st), 0.0, 1.0);
-
-   //calculate Diffuse Term:  
-   vec4 Idiff = gl_FrontLightProduct[0].diffuse * max(dot(N,L), 0.0);
-   Idiff = clamp(Idiff * texture2D(texture0, gl_TexCoord[0].st), 0.0, 1.0);     
-   
-   // calculate Specular Term:
-   vec4 Ispec = gl_FrontLightProduct[0].specular 
+    for (int i=0; i < MAX_LIGHTS; i++)
+    {
+        if (gl_LightSource[i].position.w == 0.0) {  // is directional?
+            L = normalize(-gl_LightSource[i].position.xyz);
+        } else {
+            L = normalize(gl_LightSource[i].position.xyz - v); 
+        }
+        
+        vec3 E = normalize(-v);
+        vec3 R = normalize(-reflect(L,N));  
+        
+        vec4 Iamb = clamp(gl_FrontLightProduct[i].ambient * texture2D(texture0, gl_TexCoord[0].st), 0.0, 1.0);
+        
+        //calculate Diffuse Term:  
+        vec4 Idiff = gl_FrontLightProduct[i].diffuse * max(dot(N,L), 0.0);
+        Idiff = clamp(Idiff * texture2D(texture0, gl_TexCoord[0].st), 0.0, 1.0);     
+        
+        // calculate Specular Term:
+        vec4 Ispec = gl_FrontLightProduct[i].specular 
                 * pow(max(dot(R,E),0.0), 0.3 * gl_FrontMaterial.shininess);
-   Ispec = clamp(Ispec, 0.0, 1.0); 
-
-   // write Total Color:  
-   gl_FragColor = Iamb + Idiff + Ispec;     
+        Ispec = clamp(Ispec, 0.0, 1.0); 
+        
+        // write Total Color:  
+        acc += Iamb + Idiff + Ispec;
+    }
+    gl_FragColor = acc; 
 }
           
 """
 
-prog = shaders.compileProgram(vert_prog, frag_prog)
+# compile simple lighting shaders
+_phongShaders = {}
+for i in range(8):
+    fragSrc = string.Template(phongFragSimple).substitute(nlights=i+1)
+    _phongShaders[i + 1] = shaders.compileProgram(phongVertSimple, fragSrc)
 
 
 class RigidBodyPose(object):
@@ -574,36 +583,23 @@ class ObjMeshStim(MeshStimMixin):
         """
         super(ObjMeshStim, self).__init__(win, pos, ori)
 
+        self._materialVAOs = {}
+        self._vertexData = None  # array for vertex data (read-only)
+        self.useShaders = useShaders
+
         # check if the *.OBJ file exists
         self.objFile = objFile
         if not os.path.isfile(self.objFile):
             raise FileNotFoundError(
                 "Cannot find *.obj file '{}'".format(self.objFile))
-
-        self.win.backend.setCurrent()  # must be current
-        self.objVAOs = {}
-        self.vao = None
-        self._vertexData = None
-        self.useShaders = useShaders
-
-        # load the OBJ file
         self.mtlFile = None
-        self._loadObjFile(self.objFile, loadMtl)
+        self._loadObjFile(self.objFile, loadMtl)  # load it
 
     @property
-    def vertices(self):
-        """Array of loaded vertices."""
-        return self._vertexData[:, :3]
-
-    @property
-    def texCoords(self):
-        """Array of loaded texture coordinates."""
-        return self._vertexData[:, 3:5]
-
-    @property
-    def normals(self):
-        """Array of loaded vertex normals."""
-        return self._vertexData[:, 5:]
+    def extents(self):
+        """Minimum and maximum extents of the model in each dimension.
+        """
+        return self._extents
 
     @property
     def materials(self):
@@ -664,14 +660,13 @@ class ObjMeshStim(MeshStimMixin):
                 materialGroup = line[7:]
                 if materialGroup not in materialFaces.keys():
                     materialFaces[materialGroup] = []
-                nMaterials += 1
             elif line.startswith('mtllib '):
                 mtlFile = line.strip()[7:]
 
         # at the very least, we need vertices and facedefs
         if nVertices == 0 or nFaces == 0:
             raise RuntimeError(
-                "Failed to load OBJ file, file contains no vertices.")
+                "Failed to load OBJ file, file contains no vertices or faces.")
 
         # Indicate if file has any texture coordinates of normals. If not, the
         # size of the storage buffer will be reduced and vertex pointers and
@@ -679,12 +674,8 @@ class ObjMeshStim(MeshStimMixin):
         hasTexCoords = nTextureCoords > 0
         hasNormals = nNormals > 0
 
-        objBuffer.seek(0)  # reset file position
-
-        # attribute lists to upload
-        vertexAttrList = []
-
         # build arrays to pass to VBO
+        vertexAttrList = []
         for attrs, idx in vertexAttrs.items():
             attr = attrs.split('/')
             attrData = []
@@ -708,7 +699,12 @@ class ObjMeshStim(MeshStimMixin):
 
         self._vertexData = np.asarray(vertexAttrList, dtype=np.float32)
 
+        # compute the extents of the model
+        verts = self._vertexData[:, :3]
+        self._extents = (verts.min(axis=0), verts.max(axis=0))
+
         # create a VBO with the interleaved vertex data, loading data to VRAM
+        self.win.backend.setCurrent()  # must be current
         self.vboId = GL.GLuint()
         GL.glGenBuffers(1, ctypes.byref(self.vboId))
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vboId)
@@ -773,7 +769,7 @@ class ObjMeshStim(MeshStimMixin):
             GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, eboId)  # element array
             GL.glBindVertexArray(0)
 
-            self.objVAOs[materialName] = (vaoId, len(eboArray))
+            self._materialVAOs[materialName] = (vaoId, len(eboArray))
 
         # load the *.MTL file if requested, otherwise it must be specified later
         # before rendering
@@ -791,8 +787,8 @@ class ObjMeshStim(MeshStimMixin):
                 raise FileNotFoundError(
                     "Cannot find *.mtl file '{}'".format(mtlPath))
 
-    def draw(self, win=None):
-        """Draw the object.
+    def draw(self, win=None, useLights=None):
+        """Render the 3D mesh to the scene.
 
         Parameters
         ----------
@@ -800,6 +796,8 @@ class ObjMeshStim(MeshStimMixin):
             The :class:`~psychopy.visual.Window` object in which the stimulus
             will be rendered to. The window must share a context with the
             window specified when instantiating the object.
+        useLights : list or tuple
+            List of lights to enable when rendering the model.
 
         """
         if win is None:
@@ -810,24 +808,16 @@ class ObjMeshStim(MeshStimMixin):
         self._prepareDraw()
 
         # draw the model
-        for group, vao in self.objVAOs.items():
-
-            #mvpLoc = GL.glGetUniformLocation(prog, b"MVP")
-
-            GL.glUseProgram(prog)
+        for group, vao in self._materialVAOs.items():
             gltools.useMaterial(self._mtllibInfo[group])
-            texId = self._mtllibInfo[group].textures[GL.GL_TEXTURE0].id
+            gltools.useLights(useLights)
             GL.glBindVertexArray(vao[0])
-            texLoc = GL.glGetUniformLocation(prog, b"texture0")
-
-            #GL.glUniformMatrix4fv
-            GL.glUniform1ui(texLoc, texId)
             GL.glDrawElements(GL.GL_TRIANGLES, vao[1], GL.GL_UNSIGNED_INT, None)
             GL.glBindVertexArray(0)
-            GL.glUseProgram(0)
 
         # disable materials
         gltools.useMaterial(None)
+        gltools.useLights(None)
 
         self._endDraw()
 
