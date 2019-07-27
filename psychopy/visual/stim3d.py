@@ -657,13 +657,18 @@ class ShaderProgram(object):
     code is text which is compiled then later executed when drawing geometric
     primitives (i.e. triangles). Shader programs are comprised of sub-programs
     for specific stages of the rendering pipeline. For instance, vertex shaders
-    process vertices, whose output is then passed to fragment shaders which
-    compute the color of those elements when rasterized.
+    are executed per-vertex, controlling aspects like position. The output of
+    the vertex shader passed to fragment shaders which is executed per-pixel to
+    control the color of faces and other elements when rasterized.
 
     This class accepts GLSL program sources as text (either loaded from a file
     or stored in memory), compiles/links them, and then makes the shader program
-    available for use. Afterwards, program inputs and variables can be accessed
-    and written to using class methods.
+    available for use. Afterwards, program inputs and uniform variables can be
+    accessed and written to using class methods. If the compiler encounters an
+    error in the source code, the log message from the compiler will be output
+    to the standard input for inspection. At the very least, you must specify
+    both a vertex and fragment shader sources when instantiating this class.
+    Optionally, a geometry shader source can be provide if desired.
 
     Parameters
     ----------
@@ -680,12 +685,13 @@ class ShaderProgram(object):
     """
     def __init__(self, vertSrc, fragSrc, geomSrc=None, bindAttrib=None):
         # compile shader sources
-        vertexShader = self._compile(vertSrc, GL.GL_VERTEX_SHADER)
-        fragmentShader = self._compile(fragSrc, GL.GL_FRAGMENT_SHADER)
+        vertexShader = ShaderProgram._compile(vertSrc, GL.GL_VERTEX_SHADER)
+        fragmentShader = ShaderProgram._compile(fragSrc, GL.GL_FRAGMENT_SHADER)
 
         geometryShader = None
         if geomSrc is not None:
-            geometryShader = self._compile(fragSrc, GL.GL_GEOMETRY_SHADER)
+            geometryShader = \
+                ShaderProgram._compile(fragSrc, GL.GL_GEOMETRY_SHADER)
 
         # attach shaders and link
         self._shaderProg = GL.glCreateProgram()
@@ -812,7 +818,8 @@ class ShaderProgram(object):
 
         self._bindAttrib = bindAttrib
 
-    def _compile(self, shaderSrc, shaderType):
+    @staticmethod
+    def _compile(shaderSrc, shaderType):
         """Compile a shader program.
 
         Parameters
