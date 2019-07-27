@@ -648,7 +648,22 @@ _SHADER_UNIFORM_SETTERS = {
 
 
 class ShaderProgram(object):
-    """Class for creating and using GLSL shader programs.
+    """Class for creating and using GLSL vertex, fragment, and geometry shader
+    programs.
+
+    GPU pipelines are programmable, controlling the output color at each pixel
+    fragment. The OpenGL Shading Language (GLSL) is used for creating these
+    shader programs for use with OpenGL (and by extension PsychoPy). GLSL source
+    code is text which is compiled then later executed when drawing geometric
+    primitives (i.e. triangles). Shader programs are comprised of sub-programs
+    for specific stages of the rendering pipeline. For instance, vertex shaders
+    process vertices, whose output is then passed to fragment shaders which
+    compute the color of those elements when rasterized.
+
+    This class accepts GLSL program sources as text (either loaded from a file
+    or stored in memory), compiles/links them, and then makes the shader program
+    available for use. Afterwards, program inputs and variables can be accessed
+    and written to using class methods.
 
     Parameters
     ----------
@@ -698,6 +713,9 @@ class ShaderProgram(object):
 
             GL.glDeleteShader(vertexShader)
             GL.glDeleteShader(fragmentShader)
+            if geometryShader is not None:
+                GL.glDeleteShader(self._shaderProg, GL.GLuint(geometryShader))
+
             GL.glDeleteProgram(self._shaderProg)
 
             print(logBuffer.value)
@@ -705,10 +723,14 @@ class ShaderProgram(object):
 
         GL.glDetachShader(self._shaderProg, GL.GLuint(vertexShader))
         GL.glDetachShader(self._shaderProg, GL.GLuint(fragmentShader))
+        if geometryShader is not None:
+            GL.glDetachShader(self._shaderProg, GL.GLuint(geometryShader))
 
         # no longer needed
         GL.glDeleteShader(vertexShader)
         GL.glDeleteShader(fragmentShader)
+        if geometryShader is not None:
+            GL.glDeleteShader(self._shaderProg, GL.GLuint(geometryShader))
 
         # get shader uniforms and attributes
         numActiveAttribs = GL.GLint()
@@ -940,7 +962,7 @@ class ShaderProgram(object):
 
     def useProgram(self):
         """Use a fragment shader for successive operations. This shader will be
-        active the next `glUseProgram` call.
+        active until the next `glUseProgram` call.
 
         """
         GL.glUseProgram(self._shaderProg)
