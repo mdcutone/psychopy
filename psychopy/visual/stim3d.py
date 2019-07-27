@@ -6,6 +6,7 @@
 # Distributed under the terms of the GNU General Public License (GPL).
 
 from __future__ import absolute_import, print_function
+from psychopy import logging
 from psychopy.tools import gltools, mathtools
 from psychopy.visual import shaders, basevisual
 from psychopy.tools.attributetools import (attributeSetter, logAttrib,
@@ -653,17 +654,27 @@ class ShaderProgram(object):
     ----------
     vertSrc, fragSrc : str
         GLSL vertex and fragment shader sources.
+    geomSrc : str, optional
+        Optional GLSL geometry shader source.
 
     """
-    def __init__(self, vertSrc, fragSrc):
+    def __init__(self, vertSrc, fragSrc, geomSrc=None):
         # compile shader sources
         vertexShader = self._compile(vertSrc, GL.GL_VERTEX_SHADER)
         fragmentShader = self._compile(fragSrc, GL.GL_FRAGMENT_SHADER)
 
+        geometryShader = None
+        if geomSrc is not None:
+            geometryShader = self._compile(fragSrc, GL.GL_GEOMETRY_SHADER)
+
         # attach shaders and link
         self._shaderProg = GL.glCreateProgram()
-        GL.glAttachShader(self._shaderProg, vertexShader)
-        GL.glAttachShader(self._shaderProg, fragmentShader)
+
+        GL.glAttachShader(self._shaderProg, GL.GLuint(vertexShader))
+        GL.glAttachShader(self._shaderProg, GL.GLuint(fragmentShader))
+        if geometryShader is not None:
+            GL.glAttachShader(self._shaderProg, GL.GLuint(geometryShader))
+
         GL.glLinkProgram(self._shaderProg)
 
         # check for errors
@@ -687,9 +698,8 @@ class ShaderProgram(object):
             print(logBuffer.value)
             raise RuntimeError("Shader linking failed, check log output.")
 
-        # check for errors
-        GL.glDetachShader(self._shaderProg, vertexShader)
-        GL.glDetachShader(self._shaderProg, fragmentShader)
+        GL.glDetachShader(self._shaderProg, GL.GLuint(vertexShader))
+        GL.glDetachShader(self._shaderProg, GL.GLuint(fragmentShader))
 
         GL.glDeleteShader(vertexShader)
         GL.glDeleteShader(fragmentShader)
@@ -706,18 +716,64 @@ class ShaderProgram(object):
             GL.GL_ACTIVE_UNIFORMS,
             ctypes.byref(numActiveUniforms))
 
-        # # store attribute locations for this shader program
-        # self._uniformLoc = {}
-        # if uniforms is not None:
-        #     for uniform in uniforms:
-        #         self._uniformLoc[uniform] = \
-        #             GL.glGetUniformLocation(self._shaderProg, uniform.encode())
-        #
-        # self._attribLoc = {}
-        # if attribs is not None:
-        #     for attrib in attribs:
-        #         self._attribLoc[attrib] = \
-        #             GL.glGetUniformLocation(self._shaderProg, attrib.encode())
+        # cache uniform locations to avoid looking them up before setting them
+        arraySize = GL.GLint()
+        nameLength = GL.GLsizei()
+
+        if numActiveUniforms.value > 0:
+            maxUniformLength = GL.GLint()
+            GL.glGetProgramiv(
+                self._shaderProg,
+                GL.GL_ACTIVE_UNIFORM_MAX_LENGTH,
+                ctypes.byref(maxUniformLength))
+
+            self._unifLoc = {}
+            for uniformIdx in range(numActiveUniforms.value):
+                unifType = GL.GLenum()
+                unifName = (GL.GLchar * maxUniformLength.value)()
+
+                GL.glGetActiveUniform(
+                    self._shaderProg,
+                    uniformIdx,
+                    maxUniformLength,
+                    ctypes.byref(nameLength),
+                    ctypes.byref(arraySize),
+                    ctypes.byref(unifType),
+                    unifName)
+
+                # get location
+                loc = GL.glGetUniformLocation(self._shaderProg, unifName)
+                # don't include if -1, these are internal types like 'gl_Vertex'
+                if loc != -1:
+                    self._unifLoc[unifName.value.decode('UTF-8')] = loc
+
+        if numActiveAttribs.value > 0:
+            maxAttribLength = GL.GLint()
+            GL.glGetProgramiv(
+                self._shaderProg,
+                GL.GL_ACTIVE_ATTRIBUTE_MAX_LENGTH,
+                ctypes.byref(maxAttribLength))
+
+            self._attribLoc = {}
+            for attribIdx in range(numActiveAttribs.value):
+                attribType = GL.GLenum()
+                attribName = (GL.GLchar * maxAttribLength.value)()
+
+                GL.glGetActiveUniform(
+                    self._shaderProg,
+                    attribIdx,
+                    maxAttribLength,
+                    ctypes.byref(nameLength),
+                    ctypes.byref(arraySize),
+                    ctypes.byref(attribType),
+                    attribName)
+
+                # get location
+                loc = GL.glGetAttribLocation(self._shaderProg, attribName.value)
+
+                # don't include if -1, these are internal types like 'gl_Vertex'
+                if loc != -1:
+                    self._attribLoc[attribName.value.decode('UTF-8')] = loc
 
     def _compile(self, shaderSrc, shaderType):
         """Compile a shader program.
@@ -727,7 +783,8 @@ class ShaderProgram(object):
         shaderSrc : str
             GLSL shader source code.
         shaderType : GLenum
-            Shader program type (eg. GL_VERTEX_SHADER, GL_FRAGMENT_SHADER, etc.)
+            Shader program type (eg. GL_VERTEX_SHADER, GL_FRAGMENT_SHADER,
+            GL_GEOMETRY_SHADER, etc.)
 
         """
         programId = GL.glCreateShader(shaderType)
@@ -758,38 +815,76 @@ class ShaderProgram(object):
 
         return programId
 
-    def __getattr__(self, item):
-        pass
+    @property
+    def programId(self):
+        """The GL ID of this shader program.
+        """
+        return self._shaderProg
 
-    def __setattr__(self, key, value):
-        pass
+    def getUniformLocation(self, name):
+        """Get the location of a uniform variable within the program object. This
+        is used to specify the location of a uniform when setting their values
+        with `glUniform*` calls.
 
-    def setUniform1i(self, name, value):
-        """Pass"""
-        GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
+        The locations of uniform objects are cached after shader compilation,
+        eliminating the need for additional `glGetUniformLocation` calls within
+        the rendering code.
 
-    def setUniform2i(self, name, value):
-        """Pass"""
-        GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
+        Parameters
+        ----------
+        name : str
+            Uniform name to obtain location of.
 
-    def setUniform3i(self, name, value):
-        """Pass"""
-        GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
+        Returns
+        -------
+        int
 
-    def setUniform4i(self, name, value):
-        """Pass"""
-        GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
+        Examples
+        --------
+        Set a uniform variable in a presently bound shader program::
 
-    def use(self):
-        """Use a fragment shader for successive operations."""
+            GL.glUniform1i(shader.getUniformLocation('myVal'), 1)
+
+        """
+        try:
+            return self._unifLoc[name]
+        except KeyError:
+            return GL.glGetUniformLocation(self._shaderProg, name.encode())
+
+    def getAttribLocation(self, name):
+        """Get the location of a attribute in this shader.
+
+        Parameters
+        ----------
+        name : str
+            Uniform name to obtain location of.
+
+        Returns
+        -------
+        int
+
+        """
+        try:
+            return self._attribLoc[name]
+        except KeyError:
+            return GL.glGetAttribLocation(self._shaderProg, name.encode())
+
+    def useProgram(self):
+        """Use a fragment shader for successive operations. You can override
+        this method with one which also sets uniforms and attributes.
+
+        """
         GL.glUseProgram(self._shaderProg)
+
+    def __enter__(self):
+        self.useProgram()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        GL.glUseProgram(0)
 
     def __del__(self):
         if self._shaderProg is not None:
             GL.glDeleteShader(self._shaderProg)
-
-
-shaderLight = ShaderProgram(phongVertSimple, phongFragSimple)
 
 
 class SimpleMaterial(object):
@@ -915,7 +1010,6 @@ def useMaterial(material, useTextures=True):
     """
 
     if material is not None:
-        shaderLight.use()
         # setup material properties
         GL.glMaterialfv(GL.GL_FRONT, GL.GL_AMBIENT, material._ambientColor)
         GL.glMaterialfv(GL.GL_FRONT, GL.GL_DIFFUSE, material._diffuseColor)
@@ -928,7 +1022,7 @@ def useMaterial(material, useTextures=True):
             GL.glColor4f(1.0, 1.0, 1.0, 1.0)
             GL.glColorMask(True, True, True, True)
             GL.glBindTexture(GL.GL_TEXTURE_2D, material._diffuseTexture.id)
-            shaderLight.setUniform1i('texture0', 0)
+
     else:
         GL.glMaterialfv(GL.GL_FRONT, GL.GL_AMBIENT, _DEFAULT_AMBIENT_COLOR)
         GL.glMaterialfv(GL.GL_FRONT, GL.GL_DIFFUSE, _DEFAULT_DIFFUSE_COLOR)
@@ -1014,6 +1108,8 @@ class ObjMeshStim(MeshStimMixin):
         self._materialVAOs = {}
         self._vertexData = None  # array for vertex data (read-only)
         self.useShaders = useShaders
+
+        self._shader = ShaderProgram(phongVertSimple, phongFragSimple)
 
         # check if the *.OBJ file exists
         self.objFile = objFile
@@ -1271,7 +1367,7 @@ class ObjMeshStim(MeshStimMixin):
 
         # draw the model
         for group, vao in self._materialVAOs.items():
-
+            self._shader.useProgram()
             useMaterial(self._mtllibInfo[group], useTextures=True)
             GL.glBindVertexArray(vao[0])
             GL.glDrawElements(GL.GL_TRIANGLES, vao[1], GL.GL_UNSIGNED_INT, None)
