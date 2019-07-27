@@ -679,21 +679,21 @@ class ShaderProgram(object):
 
         # check for errors
         result = GL.GLint()
-        GL.glGetShaderiv(
+        GL.glGetProgramiv(
             self._shaderProg, GL.GL_LINK_STATUS, ctypes.byref(result))
 
         if result == GL.GL_FALSE:  # failed to compile for whatever reason
             logLength = GL.GLint()
-            GL.glGetShaderiv(
+            GL.glGetProgramiv(
                 self._shaderProg, GL.GL_INFO_LOG_LENGTH, ctypes.byref(logLength))
 
             logBuffer = ctypes.create_string_buffer(logLength.value)
-            GL.glGetShaderInfoLog(
+            GL.glGetProgramInfoLog(
                 self._shaderProg, logLength, ctypes.byref(logLength), logBuffer)
 
             GL.glDeleteShader(vertexShader)
             GL.glDeleteShader(fragmentShader)
-            GL.glDeleteShader(self._shaderProg)
+            GL.glDeleteProgram(self._shaderProg)
 
             print(logBuffer.value)
             raise RuntimeError("Shader linking failed, check log output.")
@@ -775,6 +775,8 @@ class ShaderProgram(object):
                 if loc != -1:
                     self._attribLoc[attribName.value.decode('UTF-8')] = loc
 
+        self.validate()
+
     def _compile(self, shaderSrc, shaderType):
         """Compile a shader program.
 
@@ -820,6 +822,42 @@ class ShaderProgram(object):
         """The GL ID of this shader program.
         """
         return self._shaderProg
+
+    def validate(self, raiseError=True):
+        """Check if the program can execute given the current OpenGL state.
+
+        Parameters
+        ----------
+        raiseError : bool
+            Raise an error (`RuntimeError`) if validation fails.
+
+        Returns
+        -------
+        bool
+            `True` if the program was successfully validated.
+
+        """
+        GL.glValidateProgram(self._shaderProg)
+
+        # check validation info
+        result = GL.GLint()
+        GL.glGetProgramiv(
+            self._shaderProg, GL.GL_VALIDATE_STATUS, ctypes.byref(result))
+
+        if result == GL.GL_FALSE:  # failed to compile for whatever reason
+            logLength = GL.GLint()
+            GL.glGetProgramiv(
+                self._shaderProg, GL.GL_INFO_LOG_LENGTH, ctypes.byref(logLength))
+
+            logBuffer = ctypes.create_string_buffer(logLength.value)
+            GL.glGetProgramInfoLog(
+                self._shaderProg, logLength, ctypes.byref(logLength), logBuffer)
+
+            print(logBuffer.encode())
+            if raiseError:
+                raise RuntimeError('Shader program validation failed.')
+
+        return result == GL.GL_TRUE
 
     def getUniformLocation(self, name):
         """Get the location of a uniform variable within the program object. This
@@ -884,7 +922,7 @@ class ShaderProgram(object):
 
     def __del__(self):
         if self._shaderProg is not None:
-            GL.glDeleteShader(self._shaderProg)
+            GL.glDeleteProgram(self._shaderProg)
 
 
 class SimpleMaterial(object):
