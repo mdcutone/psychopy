@@ -656,9 +656,14 @@ class ShaderProgram(object):
         GLSL vertex and fragment shader sources.
     geomSrc : str, optional
         Optional GLSL geometry shader source.
+    bindAttrib : dict, optional
+        Optional attribute mappings. If specified, generic vertex attributes
+        will be bound automatically when `useProgram` is called. Each entry's
+        key should be the attribute index, and the value is the attribute's
+        name in the shader.
 
     """
-    def __init__(self, vertSrc, fragSrc, geomSrc=None):
+    def __init__(self, vertSrc, fragSrc, geomSrc=None, bindAttrib=None):
         # compile shader sources
         vertexShader = self._compile(vertSrc, GL.GL_VERTEX_SHADER)
         fragmentShader = self._compile(fragSrc, GL.GL_FRAGMENT_SHADER)
@@ -776,7 +781,14 @@ class ShaderProgram(object):
                 if loc != -1:
                     self._attribLoc[attribName.value.decode('UTF-8')] = loc
 
-        self.validate()
+        # check if bindAttrib values are valid (i.e. they are in the shader)
+        if bindAttrib is not None:
+            for idx, name in bindAttrib.items():
+                if name not in self._attribLoc.keys():
+                    raise KeyError(
+                        "Specified attribute not defined in shader program.")
+
+        self._bindAttrib = bindAttrib
 
     def _compile(self, shaderSrc, shaderType):
         """Compile a shader program.
@@ -824,12 +836,12 @@ class ShaderProgram(object):
         """
         return self._shaderProg
 
-    def validate(self, raiseError=True):
+    def validate(self, raiseError=False):
         """Check if the program can execute given the current OpenGL state.
 
         Parameters
         ----------
-        raiseError : bool
+        raiseError : bool, optional
             Raise an error (`RuntimeError`) if validation fails.
 
         Returns
@@ -891,8 +903,9 @@ class ShaderProgram(object):
             return GL.glGetUniformLocation(self._shaderProg, name.encode())
 
     def getAttribLocation(self, name):
-        """Get the location/index of a named attribute in this shader. The
-        returned value can be used when calling `glBindAttribLocation` to
+        """Get the location/index of a named attribute in this shader.
+
+        The returned value can be used when calling `glBindAttribLocation` to
         associate an attribute index defined by `glVertexAttribPointer` calls.
 
         Parameters
@@ -926,11 +939,16 @@ class ShaderProgram(object):
         GL.glBindAttribLocation(self._shaderProg, index, name.encode())
 
     def useProgram(self):
-        """Use a fragment shader for successive operations. You can override
-        this method with one which also sets uniforms and attributes.
+        """Use a fragment shader for successive operations. This shader will be
+        active the next `glUseProgram` call.
 
         """
         GL.glUseProgram(self._shaderProg)
+
+        # automatically bind attributes if mappings are specified
+        if self._bindAttrib is not None:
+            for idx, name in self._bindAttrib.items():
+                GL.glBindAttribLocation(self._shaderProg, idx, name.encode())
 
     def __enter__(self):
         self.useProgram()
