@@ -701,6 +701,7 @@ class ShaderProgram(object):
         GL.glDetachShader(self._shaderProg, GL.GLuint(vertexShader))
         GL.glDetachShader(self._shaderProg, GL.GLuint(fragmentShader))
 
+        # no longer needed
         GL.glDeleteShader(vertexShader)
         GL.glDeleteShader(fragmentShader)
 
@@ -890,7 +891,9 @@ class ShaderProgram(object):
             return GL.glGetUniformLocation(self._shaderProg, name.encode())
 
     def getAttribLocation(self, name):
-        """Get the location of a attribute in this shader.
+        """Get the location/index of a named attribute in this shader. The
+        returned value can be used when calling `glBindAttribLocation` to
+        associate an attribute index defined by `glVertexAttribPointer` calls.
 
         Parameters
         ----------
@@ -900,12 +903,27 @@ class ShaderProgram(object):
         Returns
         -------
         int
+            Index of the attribute in the program object.
 
         """
         try:
             return self._attribLoc[name]
         except KeyError:
             return GL.glGetAttribLocation(self._shaderProg, name.encode())
+
+    def bindAttribLocation(self, name, index):
+        """Associate a generic vertex attribute index with a named attribute
+        variable.
+
+        Parameters
+        ----------
+        name : str
+            Uniform name to obtain location of.
+        index : int
+            Index of the attribute to bind.
+
+        """
+        GL.glBindAttribLocation(self._shaderProg, index, name.encode())
 
     def useProgram(self):
         """Use a fragment shader for successive operations. You can override
