@@ -14,6 +14,7 @@ from psychopy.tools.attributetools import (attributeSetter, logAttrib,
 import numpy as np
 import os.path
 import pyglet.gl as GL
+import string
 import OpenGL.GL
 import OpenGL.GL as GL2
 import pyglet.gl.glu as GLU
@@ -21,9 +22,17 @@ import ctypes
 from io import StringIO
 from collections import OrderedDict
 import math
+from PIL import Image
+
+# ----------------
+# Module Constants
+#
+
+# stores scene light objects currently enabled
+_SCENE_LIGHTS = []
 
 
-vert_prog = """
+phongVertSimple = """
 varying vec3 N;
 varying vec3 v;
 
@@ -34,63 +43,89 @@ void main(void)
 
     gl_FrontColor = gl_Color;
     gl_TexCoord[0] = gl_MultiTexCoord0;
-    gl_TexCoord[1] = gl_MultiTexCoord1;
-    gl_TexCoord[2] = gl_MultiTexCoord2;
     gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;  
 }
           
 """
 
-#
-frag_prog = """
+phongFragSimple = """
 varying vec3 N;
 varying vec3 v;  
 
 uniform sampler2D texture0;
 
+#define MAX_LIGHTS 1
+
 void main (void)  
 {  
-   vec3 L = normalize(gl_LightSource[0].position.xyz - v);   
-   vec3 E = normalize(-v); // we are in Eye Coordinates, so EyePos is (0,0,0)  
-   vec3 R = normalize(-reflect(L,N));  
- 
-   //calculate Ambient Term:  
-   vec4 Iamb = clamp(gl_FrontLightProduct[0].ambient * texture2D(texture0, gl_TexCoord[0].st), 0.0, 1.0);
-
-   //calculate Diffuse Term:  
-   vec4 Idiff = gl_FrontLightProduct[0].diffuse * max(dot(N,L), 0.0);
-   Idiff = clamp(Idiff * texture2D(texture0, gl_TexCoord[0].st), 0.0, 1.0);     
-   
-   // calculate Specular Term:
-   vec4 Ispec = gl_FrontLightProduct[0].specular 
+    vec3 L;
+    vec4 acc = vec4(0., 0., 0., 0.);
+    
+    for (int i=0; i < MAX_LIGHTS; i++)
+    {
+        if (gl_LightSource[i].position.w == 0.0) {  // is directional?
+            L = normalize(gl_LightSource[i].position.xyz);
+        } else {
+            L = normalize(gl_LightSource[i].position.xyz - v); 
+        }
+        
+        vec3 E = normalize(-v);
+        vec3 R = normalize(-reflect(L,N));  
+        
+        vec4 Iamb = clamp(gl_FrontLightProduct[i].ambient, 0.0, 1.0);
+        
+        //calculate Diffuse Term:  
+        vec4 Idiff = gl_FrontLightProduct[i].diffuse * max(dot(N,L), 0.0);
+        Idiff = clamp(Idiff * texture2D(texture0, gl_TexCoord[0].st), 0.0, 1.0);     
+        
+        // calculate Specular Term:
+        vec4 Ispec = gl_FrontLightProduct[i].specular 
                 * pow(max(dot(R,E),0.0), 0.3 * gl_FrontMaterial.shininess);
-   Ispec = clamp(Ispec, 0.0, 1.0); 
-
-   // write Total Color:  
-   gl_FragColor = Iamb + Idiff + Ispec;     
+        Ispec = clamp(Ispec, 0.0, 1.0); 
+        
+        // write Total Color:  
+        acc += Iamb + Idiff + Ispec;
+    }
+    gl_FragColor = acc; 
 }
           
 """
 
-prog = shaders.compileProgram(vert_prog, frag_prog)
+# compile simple lighting shaders
+#_phongShaders = {}
+#for i in range(8):
+#    fragSrc = string.Template(phongFragSimple).substitute(nlights=i+1)
+#    _phongShaders[i + 1] = shaders.compileProgram(phongVertSimple, fragSrc)
 
 
 class RigidBodyPose(object):
     """Class for representing rigid body poses in 3D space.
 
     The pose of rigid bodies are represented by a position vector [x, y, z] and
-    orientation quaternion [x, y, z, w].
+    orientation quaternion [x, y, z, w]. Poses are mainly used to define the
+    spatial configuration of objects and stimuli in the scene.
+
+    Parameters
+    ----------
+    pos : array_like
+        Position vector (x, y, z).
+    ori : array_like
+        Orientation quaternion vector (x, y, z, w).
 
     """
     def __init__(self, pos=(0., 0., 0.), ori=(0., 0., 0., 1.)):
+        self._pos = np.zeros((3,), dtype=np.float32)
+        self._ori = np.zeros((4,), dtype=np.float32)
+
         # transformation matrices
         self._R = np.identity(4, dtype=np.float32)
         self._T = np.identity(4, dtype=np.float32)
         self._M = np.identity(4, dtype=np.float32)
 
-        self._pos = np.zeros((3,), dtype=np.float32)
-        self._ori = np.zeros((4,), dtype=np.float32)
+        # cache this, adds to much overhead to create on the fly
+        self._ptrM = self._M.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
+        # only update the matrix when changes are made
         self._updateTranslationMatrix = False
         self._updateRotationMatrix = False
         self._updateModelMatrix = False
@@ -126,7 +161,7 @@ class RigidBodyPose(object):
 
     @property
     def posOri(self):
-        """Position and orientation."""
+        """Combined position and orientation."""
         return self._pos, self._ori
 
     @posOri.setter
@@ -134,8 +169,33 @@ class RigidBodyPose(object):
         self._pos[:] = value[0]
         self._ori[:] = value[1]
 
+    def clear(self):
+        """Clear all transformation stored in this pose. This zeros `pos` and
+        sets `ori` to and identity quaternion.
+
+        """
+        self._ori[:3].fill(0.0)
+        self._ori[3] = 1.0
+        self._pos.fill(0.0)
+
+        # Clear matrices here, this is much faster than computing matrices only
+        # for them to return identity when getMatrix is called.
+        self._T.fill(0.0)
+        np.fill_diagonal(self._T, 1.0)
+        self._R.fill(0.0)
+        np.fill_diagonal(self._R, 1.0)
+        self._M.fill(0.0)
+        np.fill_diagonal(self._M, 1.0)
+
+        self._updateTranslationMatrix = False
+        self._updateRotationMatrix = False
+        self._updateModelMatrix = False
+
     def __mul__(self, other):
-        """Multiplication operator `*` for rigid body poses."""
+        """Multiplication operator `*` for rigid body poses. This puts the
+        second operand into the reference frame of the first.
+
+        """
         p = other.ori
         # multiply the quaternions of the poses
         to_return = RigidBodyPose()
@@ -168,10 +228,22 @@ class RigidBodyPose(object):
         tuple
             Orientation axis [ax, ay, az] and angle.
 
-        """
-        pass
+        Examples
+        --------
+        Get the axis of rotation and angle in radians of a `RigidBodyPose`::
 
-    def setOriAxisAngle(self, axis, angle, degrees=True):
+            axis, angle = myPose.getOriAxisAngle(degrees=False)
+
+        """
+        dtype = np.dtype(self._ori.dtype).type
+
+        v = np.sqrt(np.sum(np.square(self._ori[:3])))
+        axis = self._ori[:3] / v
+        angle = dtype(2.0) * np.arctan2(v, self._ori[3])
+
+        return axis, np.degrees(angle) if degrees else degrees
+
+    def setOriAxisAngle(self, axis, angle, acc=False, degrees=True):
         """Set the orientation of this pose using an axis and angle.
 
         Parameters
@@ -180,14 +252,59 @@ class RigidBodyPose(object):
             Vector defining the rotation axis in world space [ax, ay, az].
         angle : float
             Angle to rotate about `axis`.
+        acc : bool, optional
+            Accumulate rotations. If `True` the new rotation will be combined with
+            the pose's current rotation. If `False`, the specified rotation will
+            overwrite the current rotation.
         degrees : bool, optional
             Angle is specified as degrees if `True`, else the angle is in
             radians.
 
-        """
-        pass
+        Examples
+        --------
+        Set the orientation of a pose using an axis and angle::
 
-    def angleTo(self, p, degrees=True):
+            axis = (0., 0., -1.)  # -Z is axis of rotation
+            angle = 90.0  # angle to rotate the rigid body about
+
+            myPose.setOriAxisAngle(axis, angle)
+
+        Rotate the rigid body about different axes, having their rotations
+        accumulate by setting `acc=True`::
+
+            myPose.setOriAxisAngle((1., 0., 0.), angleX)  # +X axis
+            myPose.setOriAxisAngle((0., 1., 0.), angleY, acc=True)  # +Y axis
+            myPose.setOriAxisAngle((0., 0., -1.), angleZ, acc=True)  # -Z axis
+
+        """
+        dtype = np.dtype(self._ori.dtype).type
+
+        if degrees:
+            halfRad = np.radians(angle, dtype=dtype) / dtype(2.0)
+        else:
+            halfRad = np.dtype(dtype).type(angle) / dtype(2.0)
+
+        # normalize input axis
+        norm = np.linalg.norm(np.asarray(axis, dtype=dtype))
+        axis /= norm
+        np.nan_to_num(axis, copy=False)  # fix NaNs
+
+        if not acc:
+            # overwrite rotation
+            np.multiply(axis, np.sin(halfRad), out=self._ori[:3])
+            self._ori[3] = np.cos(halfRad)
+        else:
+            # rotations are accumulated
+            q = self._ori.copy()
+            p = np.zeros((4,), dtype=dtype)
+            np.multiply(axis, np.sin(halfRad), out=p[:3])
+            p[3] = np.cos(halfRad)
+
+            # multiply the quaternions of the poses
+            self._ori[:3] = np.cross(q[:3], p[:3]) + q[:3] * p[3] + p[:3] * q[3]
+            self._ori[3] = q[3] * p[3] - q[:3].dot(p[:3])
+
+    def getAngleTo(self, p, degrees=True):
         """Get the relative angle to a point from this pose's forward direction.
 
         Parameters
@@ -206,8 +323,19 @@ class RigidBodyPose(object):
         """
         pass
 
+    def invert(self):
+        """Get the inverse of this rigid body pose.
+
+        Returns
+        -------
+        RigidBodyPose
+            Inverse of this rigid body pose.
+
+        """
+        pass
+
     def transform(self, p):
-        """Transform points.
+        """Inverse transform a point.
 
         Parameters
         ----------
@@ -217,11 +345,10 @@ class RigidBodyPose(object):
         Returns
         -------
         ndarray
-            Transformed points `p`.
+            Transformed point `p`.
 
         """
-        pointIn = np.zeros((3,), dtype=np.float32)
-        pointIn[:] = p  # must be length 3
+        pointIn = np.asarray(p, dtype=np.float32)
 
         # rotate the point using the quaternion @ ori
         u = np.cross(self._ori[:3], pointIn) * np.float32(2.0)
@@ -232,20 +359,52 @@ class RigidBodyPose(object):
         return toReturn
 
     def inverseTransform(self, p):
-        """Inverse transform a points."""
-        pass
+        """Inverse transform a point.
+
+        Parameters
+        ----------
+        p : array_like
+            Points to transform.
+
+        Returns
+        -------
+        ndarray
+            Inverse transformed point `p`.
+
+        """
+        pointIn = np.asarray(p, dtype=np.float32)
+
+        # inverse rotate
+        pointIn -= self._pos
+        u = np.cross(self._ori[:3], pointIn) * np.float32(2.0)
+        toReturn = pointIn - self._ori[3] * u + np.cross(self._ori[:3], u)
+
+        return toReturn
 
     def interp(self, to, weight):
         """Interpolate this pose."""
         pass
 
-    @property
-    def modelMatrix(self):
-        """4x4 homogeneous transformation modelMatrix from this pose."""
+    def getModelMatrix(self, inverse=False, out=None):
+        """Construct a 4x4 homogeneous transformation matrix from this pose.
+
+        Parameters
+        ----------
+        inverse : bool
+            Return the inverse matrix.
+        out : ndarray, optional
+            Optional 4x4 array to write values to.
+
+        Returns
+        -------
+        ndarray
+            4x4 homogeneous transformation matrix (row-major).
+
+        """
         if not self._updateModelMatrix:
             return self._M
 
-        # translation modelMatrix
+        # translation matrix
         if self._updateTranslationMatrix:
             self._T.fill(0.0)
             np.fill_diagonal(self._T, 1.0)
@@ -253,10 +412,9 @@ class RigidBodyPose(object):
 
             self._updateTranslationMatrix = False
 
-        # rotation modelMatrix
+        # rotation matrix
         if self._updateRotationMatrix:
-            a = self._ori[3]
-            b, c, d = self._ori[:3]
+            b, c, d, a = self._ori[:]
 
             a2 = a * a
             b2 = b * b
@@ -270,7 +428,7 @@ class RigidBodyPose(object):
             bd = b * d
             cd = c * d
 
-            # no need to clear the modelMatrix, all values are set
+            # no need to clear the matrix, all values are set
             u = np.float32(2.0)
             self._R[0, 0] = a2 + b2 - c2 - d2
             self._R[1, 0] = u * (bc + ad)
@@ -295,35 +453,12 @@ class RigidBodyPose(object):
 
         return self._M
 
-    @property
-    def inverseModelMatrix(self):
-        """4x4 homogeneous inverse transformation modelMatrix from this pose."""
-        return 1
-
-    def getModelMatrix(self, inverse=False, out=None):
-        """Construct a 4x4 homogeneous transformation modelMatrix from this pose.
-
-        Parameters
-        ----------
-        inverse : bool
-            Return the inverse modelMatrix.
-        out : ndarray, optional
-            Optional 4x4 array to write values to.
-
-        Returns
-        -------
-        ndarray
-            4x4 homogeneous transformation modelMatrix (row-major).
-
-        """
-        pass
-
     def distanceTo(self, p):
         """Distance from the position of this pose to `p`."""
         pass
 
 
-class RigidBodyPoseMixin(object):
+class RigidBodyPoseMixin(basevisual.MinimalStim):
     """Mixin class for 3D stimuli whose poses are represented by a
     `RigidBodyPose` object or similar.
 
@@ -340,12 +475,13 @@ class RigidBodyPoseMixin(object):
         Orientation quaternion [x, y, z, w].
 
     """
-    def __init__(self, pos=(0., 0., 0.), ori=(0., 0., 0., 1.)):
+    def __init__(self, pos=(0., 0., 0.), ori=(0., 0., 0., 1.), *args, **kwargs):
         """
         Attributes
         ----------
         thePose : Rigid body pose object.
         """
+        super(RigidBodyPoseMixin, self).__init__(*args, **kwargs)
         self._thePose = RigidBodyPose(pos, ori)
 
     @property
@@ -357,11 +493,12 @@ class RigidBodyPoseMixin(object):
         (eg. `LibOVRPose` from PsychXR).
 
         At the very least, objects set as `thePose` must have the following
-        attributes essential for rendering stimuli:
+        attributes and methods essential for rendering stimuli:
 
             * `pos` - Position vector [x, y, z].
             * `ori` - Orientation quaternion [x, y, z, w].
-            * `modelMatrix` - Pose transformations as a 4x4 modelMatrix (row-order).
+            * `getModelMatrix()` - Get pose transformations as a 4x4 matrix
+              (row-order).
 
         Returned data must be Numpy arrays with type `ndarray`. Other than the
         above attributes, classes may differ greatly in terms of features which
@@ -388,6 +525,7 @@ class RigidBodyPoseMixin(object):
     @thePose.setter
     def thePose(self, value):
         self._thePose = value
+
 
 CULL_FACE = {
     'back': GL.GL_BACK,
@@ -435,8 +573,8 @@ class MeshStimMixin(RigidBodyPoseMixin):
 
         GL.glEnable(GL.GL_BLEND)
 
-        # get the model modelMatrix
-        M = self.thePose.modelMatrix.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        # get the model matrix
+        M = self.thePose.getModelMatrix().ctypes.data_as(ctypes.POINTER(ctypes.c_float))
 
         GL.glPushMatrix()
         GL.glMultTransposeMatrixf(M)
@@ -500,16 +638,344 @@ class CornerStim(MeshStimMixin):
         self._endDraw()
 
 
-class ObjStim(MeshStimMixin):
+_SHADER_UNIFORM_SETTERS = {
+    GL.GL_FLOAT: GL.glUniform1f,
+    GL.GL_FLOAT_VEC2: GL.glUniform2fv,
+    GL.GL_FLOAT_VEC3: GL.glUniform3fv,
+    GL.GL_FLOAT_VEC4: GL.glUniform4fv
+}
+
+
+class ShaderProgram(object):
+    """Class for creating and using GLSL shader programs.
+
+    Parameters
+    ----------
+    vertSrc, fragSrc : str
+        GLSL vertex and fragment shader sources.
+
+    """
+    def __init__(self, vertSrc, fragSrc):
+        # compile shader sources
+        vertexShader = self._compile(vertSrc, GL.GL_VERTEX_SHADER)
+        fragmentShader = self._compile(fragSrc, GL.GL_FRAGMENT_SHADER)
+
+        # attach shaders and link
+        self._shaderProg = GL.glCreateProgram()
+        GL.glAttachShader(self._shaderProg, vertexShader)
+        GL.glAttachShader(self._shaderProg, fragmentShader)
+        GL.glLinkProgram(self._shaderProg)
+
+        # check for errors
+        result = GL.GLint()
+        GL.glGetShaderiv(
+            self._shaderProg, GL.GL_LINK_STATUS, ctypes.byref(result))
+
+        if result == GL.GL_FALSE:  # failed to compile for whatever reason
+            logLength = GL.GLint()
+            GL.glGetShaderiv(
+                self._shaderProg, GL.GL_INFO_LOG_LENGTH, ctypes.byref(logLength))
+
+            logBuffer = ctypes.create_string_buffer(logLength.value)
+            GL.glGetShaderInfoLog(
+                self._shaderProg, logLength, ctypes.byref(logLength), logBuffer)
+
+            GL.glDeleteShader(vertexShader)
+            GL.glDeleteShader(fragmentShader)
+            GL.glDeleteShader(self._shaderProg)
+
+            print(logBuffer.value)
+            raise RuntimeError("Shader linking failed, check log output.")
+
+        # check for errors
+        GL.glDetachShader(self._shaderProg, vertexShader)
+        GL.glDetachShader(self._shaderProg, fragmentShader)
+
+        GL.glDeleteShader(vertexShader)
+        GL.glDeleteShader(fragmentShader)
+
+        # get shader uniforms and attributes
+        numActiveAttribs = GL.GLint()
+        numActiveUniforms = GL.GLint()
+        GL.glGetProgramiv(
+            self._shaderProg,
+            GL.GL_ACTIVE_ATTRIBUTES,
+            ctypes.byref(numActiveAttribs))
+        GL.glGetProgramiv(
+            self._shaderProg,
+            GL.GL_ACTIVE_UNIFORMS,
+            ctypes.byref(numActiveUniforms))
+
+        # # store attribute locations for this shader program
+        # self._uniformLoc = {}
+        # if uniforms is not None:
+        #     for uniform in uniforms:
+        #         self._uniformLoc[uniform] = \
+        #             GL.glGetUniformLocation(self._shaderProg, uniform.encode())
+        #
+        # self._attribLoc = {}
+        # if attribs is not None:
+        #     for attrib in attribs:
+        #         self._attribLoc[attrib] = \
+        #             GL.glGetUniformLocation(self._shaderProg, attrib.encode())
+
+    def _compile(self, shaderSrc, shaderType):
+        """Compile a shader program.
+
+        Parameters
+        ----------
+        shaderSrc : str
+            GLSL shader source code.
+        shaderType : GLenum
+            Shader program type (eg. GL_VERTEX_SHADER, GL_FRAGMENT_SHADER, etc.)
+
+        """
+        programId = GL.glCreateShader(shaderType)
+        shaderSrc = shaderSrc.encode()
+        srcPtr = ctypes.c_char_p(shaderSrc)
+        GL.glShaderSource(
+            programId, 1,
+            ctypes.cast(ctypes.byref(srcPtr),
+                        ctypes.POINTER(ctypes.POINTER(ctypes.c_char))),
+            ctypes.byref(GL.GLint(-1)))
+        GL.glCompileShader(programId)
+
+        # check for errors
+        result = GL.GLint()
+        GL.glGetShaderiv(programId, GL.GL_COMPILE_STATUS, ctypes.byref(result))
+        if result == GL.GL_FALSE:  # failed to compile for whatever reason
+            logLength = GL.GLint()
+            GL.glGetShaderiv(
+                programId, GL.GL_INFO_LOG_LENGTH, ctypes.byref(logLength))
+
+            logBuffer = ctypes.create_string_buffer(logLength.value)
+            GL.glGetShaderInfoLog(
+                programId, logLength, ctypes.byref(logLength), logBuffer)
+
+            GL.glDeleteShader(programId)
+            print(logBuffer.value)
+            raise RuntimeError("Shader compilation failed, check log output.")
+
+        return programId
+
+    def __getattr__(self, item):
+        pass
+
+    def __setattr__(self, key, value):
+        pass
+
+    def setUniform1i(self, name, value):
+        """Pass"""
+        GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
+
+    def setUniform2i(self, name, value):
+        """Pass"""
+        GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
+
+    def setUniform3i(self, name, value):
+        """Pass"""
+        GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
+
+    def setUniform4i(self, name, value):
+        """Pass"""
+        GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
+
+    def use(self):
+        """Use a fragment shader for successive operations."""
+        GL.glUseProgram(self._shaderProg)
+
+    def __del__(self):
+        if self._shaderProg is not None:
+            GL.glDeleteShader(self._shaderProg)
+
+
+shaderLight = ShaderProgram(phongVertSimple, phongFragSimple)
+
+
+class SimpleMaterial(object):
+    """Class for representing simple material properties."""
+    def __init__(self,
+                 diffuseColor=(0.0, 0.0, 0.0, 1.0),
+                 specularColor=(0.0, 0.0, 0.0, 1.0),
+                 ambientColor=(0.0, 0.0, 0.0, 1.0),
+                 shininess=1.0,
+                 diffuseTexture=None,
+                 faceMode='front',
+                 shader=None):
+
+        self._diffuseColor = (GL.GLfloat * 4)(*diffuseColor)
+        self._specularColor = (GL.GLfloat * 4)(*specularColor)
+        self._ambientColor = (GL.GLfloat * 4)(*ambientColor)
+        self._shininess = GL.GLfloat(shininess)
+
+        # load a texture if diffuse texture is a string
+        self._diffuseTexture = None
+        if diffuseTexture is not None:
+            self._diffuseTexture = self.setDiffuseTexture(diffuseTexture)
+
+        self._shader = shader
+        self._faceMode = faceMode
+
+    @property
+    def shader(self):
+        """Shader to use when rendering this material."""
+        return self._shader
+
+    @shader.setter
+    def shader(self, value):
+        self._shader = value
+
+    @property
+    def diffuseColor(self):
+        """Diffuse color of this material (r, g, b, a)."""
+        return list(self._diffuseColor)
+
+    @diffuseColor.setter
+    def diffuseColor(self, value):
+        self._diffuseColor = (GL.GLfloat * 4)(*value)
+
+    @property
+    def specularColor(self):
+        """Specular color of this material (r, g, b, a)."""
+        return list(self._specularColor)
+
+    @specularColor.setter
+    def specularColor(self, value):
+        self._specularColor = (GL.GLfloat * 4)(*value)
+
+    @property
+    def ambientColor(self):
+        """Ambient color of this material (r, g, b, a)."""
+        return list(self._ambientColor)
+
+    @ambientColor.setter
+    def ambientColor(self, value):
+        self._ambientColor = (GL.GLfloat * 4)(*value)
+
+    @property
+    def shininess(self):
+        """Specular exponent of this material."""
+        return list(self._shininess)
+
+    @shininess.setter
+    def shininess(self, value):
+        self._shininess = GL.GLfloat(value)
+
+    def setDiffuseTexture(self, value):
+        """Set the diffuse texture."""
+        if isinstance(value, str):
+            im = Image.open(value)
+            im = im.transpose(Image.FLIP_TOP_BOTTOM)
+            im = im.convert("RGBA")
+            pixelData = np.array(im).ctypes
+            width = pixelData.shape[1]
+            height = pixelData.shape[0]
+            self._diffuseTexture = gltools.createTexImage2D(
+                width,
+                height,
+                internalFormat=GL.GL_RGBA,
+                pixelFormat=GL.GL_RGBA,
+                dataType=GL.GL_UNSIGNED_BYTE,
+                data=pixelData,
+                unpackAlignment=1,
+                texParameters=[(GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR),
+                               (GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)])
+        elif isinstance(value, gltools.TexImage2D):
+            self._diffuseTexture = value
+        else:
+            raise ValueError("Invalid diffuse texture format specified.")
+
+
+# default materials
+_DEFAULT_AMBIENT_COLOR = (GL.GLfloat * 4)(0.2, 0.2, 0.2, 1.0)
+_DEFAULT_DIFFUSE_COLOR = (GL.GLfloat * 4)(0.8, 0.8, 0.8, 1.0)
+_DEFAULT_SPECULAR_COLOR = (GL.GLfloat * 4)(0.0, 0.0, 0.0, 1.0)
+_DEFAULT_SHININESS = GL.GLfloat(0.0)
+
+
+def useMaterial(material, useTextures=True):
+    """Use a material for rendering primitives.
+
+    Successive drawing calls (eg. `glDrawArrays`) will use the specified
+    material's colors, textures, and shaders (if applicable). Be sure to call
+    `useMaterial(None)` when your done using materials, or else the material
+    settings may carry forward to other rendering operations producing
+    undesirable results.
+
+    Parameters
+    ----------
+    material : :obj:`SimpleMaterial`
+        Material to use. Default OpenGL material properties are set if `None` is
+        specified. This is equivalent to disabling materials.
+    useTextures : :obj:`bool`
+        Enable textures. Note, when disabling materials, the value of
+        `useTextures` must match the previous call. If there are no textures
+        attached to the material, `useTexture` will be silently ignored.
+
+    """
+
+    if material is not None:
+        shaderLight.use()
+        # setup material properties
+        GL.glMaterialfv(GL.GL_FRONT, GL.GL_AMBIENT, material._ambientColor)
+        GL.glMaterialfv(GL.GL_FRONT, GL.GL_DIFFUSE, material._diffuseColor)
+        GL.glMaterialfv(GL.GL_FRONT, GL.GL_SPECULAR, material._specularColor)
+        GL.glMaterialf(GL.GL_FRONT, GL.GL_SHININESS, material._shininess)
+
+        if material._diffuseTexture is not None and useTextures:
+            GL.glEnable(GL.GL_TEXTURE_2D)
+            GL.glActiveTexture(GL.GL_TEXTURE0)
+            GL.glColor4f(1.0, 1.0, 1.0, 1.0)
+            GL.glColorMask(True, True, True, True)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, material._diffuseTexture.id)
+            shaderLight.setUniform1i('texture0', 0)
+    else:
+        GL.glMaterialfv(GL.GL_FRONT, GL.GL_AMBIENT, _DEFAULT_AMBIENT_COLOR)
+        GL.glMaterialfv(GL.GL_FRONT, GL.GL_DIFFUSE, _DEFAULT_DIFFUSE_COLOR)
+        GL.glMaterialfv(GL.GL_FRONT, GL.GL_SPECULAR, _DEFAULT_SPECULAR_COLOR)
+        GL.glMaterialf(GL.GL_FRONT, GL.GL_SHININESS, _DEFAULT_SHININESS)
+
+        # disable textures
+        if useTextures:
+            GL.glActiveTexture(GL.GL_TEXTURE0)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+            GL.glDisable(GL.GL_TEXTURE_2D)
+
+        GL.glUseProgram(0)
+
+
+class ObjMeshStim(MeshStimMixin):
     """Class for loading and presenting 3D stimuli in the Wavefront OBJ format.
+
+    Vertex positions, texture coordinates, and normals are loaded and packed
+    into a single vertex buffer object (VBO). Vertex array objects (VAO) are
+    created for each material with an index buffer referencing vertices assigned
+    that material in the VBO. For maximum performance, keep the number of
+    materials per object as low as possible, as switching between VAOs has some
+    overhead.
+
+    Material attributes are read from the material library file (*.MTL)
+    associated with the *.OBJ file. This file will be automatically searched for
+    and read during loading. Afterwards you can edit material properties by
+    accessing the data structure of the `materials` attribute.
+
+    Keep in mind that OBJ shapes are rigid bodies, the mesh itself cannot be
+    deformed during runtime. However, meshes can be positioned and rotated as
+    desired by manipulating the `RigidBodyPose` instance accessed through the
+    `thePose` attribute.
 
     Warnings
     --------
         Loading an *.OBJ file is a slow process, be sure to do this outside
         of any time-critical routines!
 
-    """
+    Examples
+    --------
+    Loading an *.OBJ file from a disk location::
 
+        myObjStim = ObjMeshStim(win, '/path/to/file/model.obj')
+
+    """
     def __init__(self,
                  win,
                  objFile,
@@ -525,13 +991,13 @@ class ObjStim(MeshStimMixin):
         ----------
         win : :class:`~psychopy.visual.Window`
             The :class:`~psychopy.visual.Window` object in which the stimulus
-            will be rendered by default. (required)
+            will be rendered by default.
+        objFile : str
+            Path to the *.OBJ file.
         pos : array_like
             Position vector [x, y, z].
         ori : array_like
             Orientation quaternion [x, y, z, w].
-        objFile : str
-            Path to the *.OBJ file.
         loadMtl : bool
             Load the material library (if any) referenced by the *.OBJ file. If
             the file is referenced by a relative path, and 'objFile' was
@@ -543,38 +1009,40 @@ class ObjStim(MeshStimMixin):
             value is ignored if loadMtl=False.
 
         """
-        super(ObjStim, self).__init__(win, pos, ori)
+        super(ObjMeshStim, self).__init__(win, pos, ori)
+
+        self._materialVAOs = {}
+        self._vertexData = None  # array for vertex data (read-only)
+        self.useShaders = useShaders
 
         # check if the *.OBJ file exists
         self.objFile = objFile
         if not os.path.isfile(self.objFile):
             raise FileNotFoundError(
                 "Cannot find *.obj file '{}'".format(self.objFile))
-
-        self.win.backend.setCurrent()  # must be current
-        self.objVAOs = {}
-        self.vao = None
-        self._vertexData = None
-        self.useShaders = useShaders
-
-        # load the OBJ file
         self.mtlFile = None
-        self._loadObjFile(self.objFile, loadMtl)
+        self._loadObjFile(self.objFile, loadMtl)  # load it
+
+        # load the *.MTL file if requested, otherwise it must be specified later
+        # before rendering
+        if loadMtl and self.mtlFile is not None:
+            # path might be relative but not in CWD, try to resolve the path
+            if os.path.isabs(objFile) and not os.path.isabs(self.mtlFile):
+                mtlPath = os.path.join(
+                    os.path.split(objFile)[0], self.mtlFile)
+            else:
+                mtlPath = self.mtlFile
+            if os.path.isfile(mtlPath):
+                self._mtllibInfo = self._loadMtlFile(mtlPath)
+            else:
+                raise FileNotFoundError(
+                    "Cannot find *.mtl file '{}'".format(mtlPath))
 
     @property
-    def vertices(self):
-        """Array of loaded vertices."""
-        return self._vertexData[:, :3]
-
-    @property
-    def texCoords(self):
-        """Array of loaded texture coordinates."""
-        return self._vertexData[:, 3:5]
-
-    @property
-    def normals(self):
-        """Array of loaded vertex normals."""
-        return self._vertexData[:, 5:]
+    def extents(self):
+        """Minimum and maximum extents of the model in each dimension.
+        """
+        return self._extents
 
     @property
     def materials(self):
@@ -585,92 +1053,133 @@ class ObjStim(MeshStimMixin):
     def materials(self, value):
         self._mtllibInfo = value
 
+    def _loadMtlFile(self, mtlFilePath):
+        """Load a *.MTL file and create material data structure."""
+        # open the file, read it into memory
+        with open(mtlFilePath, 'r') as mtlFile:
+            mtlBuffer = StringIO(mtlFile.read())
+
+        foundMaterials = {}
+        foundTextures = {}
+        thisMaterial = 0
+        for line in mtlBuffer.readlines():
+            line = line.strip()
+            if line.startswith('newmtl '):  # new material
+                thisMaterial = line[7:]
+                foundMaterials[thisMaterial] = SimpleMaterial()
+            elif line.startswith('Ns '):  # specular exponent
+                foundMaterials[thisMaterial].shininess = float(line[3:])
+            elif line.startswith('Ks '):  # specular color
+                foundMaterials[thisMaterial].specularColor = \
+                    list(map(float, line[3:].split(' '))) + [1.0]
+            elif line.startswith('Kd '):  # diffuse color
+                foundMaterials[thisMaterial].diffuseColor = \
+                    list(map(float, line[3:].split(' '))) + [1.0]
+            elif line.startswith('Ka '):  # ambient color
+                foundMaterials[thisMaterial].ambientColor = \
+                    list(map(float, line[3:].split(' '))) + [1.0]
+            elif line.startswith('map_Kd '):  # diffuse color map
+                # load a diffuse texture from file
+                textureName = line[7:]
+                if textureName not in foundTextures:
+                    texPath = os.path.join(os.path.split(mtlFilePath)[0], textureName)
+                    foundMaterials[thisMaterial].setDiffuseTexture(texPath)
+                    foundTextures[textureName] = foundMaterials[thisMaterial]._diffuseTexture
+                else:
+                    foundMaterials[thisMaterial].setDiffuseTexture(foundTextures[textureName])
+
+        return foundMaterials
+
     def _loadObjFile(self, objFile, loadMtl):
-        """Load and obj file and create vertex buffers."""
+        """Load and *.OBJ file and create vertex buffers."""
         # open the file, read it into memory
         with open(objFile, 'r') as f:
             objBuffer = StringIO(f.read())
 
-        nVertices = nTextureCoords = nNormals = nFaces = nObjects = nMaterials = 0
-        mtlFile = None
-        # first pass, examine the file
-        for line in objBuffer.readlines():
-            if line.startswith('v '):
-                nVertices += 1
-            elif line.startswith('vt '):
-                nTextureCoords += 1
-            elif line.startswith('vn '):
-                nNormals += 1
-            elif line.startswith('f '):
-                nFaces += 1
-            elif line.startswith('o '):
-                nObjects += 1
-            elif line.startswith('usemtl '):
-                nMaterials += 1
-            elif line.startswith('mtllib '):
-                mtlFile = line.strip()[7:]
-
-        # error check
-        if nVertices == 0:
-            raise RuntimeError(
-                "Failed to load OBJ file, file contains no vertices.")
-
-        objBuffer.seek(0)  # reset file position
-
-        # attribute data lists
+        # unsorted attribute data lists
         positionDefs = []
         texCoordDefs = []
         normalDefs = []
-
-        # attribute lists to upload
-        vertexAttrList = []
-        texCoordAttrList = []
-        normalAttrList = []
-
-        # store vertex attributes in dictionaries for easy re-mapping if needed
         vertexAttrs = OrderedDict()
-        vertexIndices = OrderedDict()
+        faceDefs = {}
+        materialFaces = {}
 
-        # group faces by material, each one will get its own VAO
-        materialGroups = OrderedDict()
-
-        # parse attributes
-        vertexIdx = faceIdx = 0
+        nVertices = nTextureCoords = nNormals = nFaces = 0
+        vertexIdx = 0
         materialGroup = None
+        # first pass, examine the file and load up vertex attributes
         for line in objBuffer.readlines():
-            line = line.strip()
-            if line.startswith('v '):  # new vertex position
+            line = line.strip()  # clean up like
+            if line.startswith('v '):
                 positionDefs.append(tuple(map(float, line[2:].split(' '))))
-            elif line.startswith('vt '):  # new vertex texture coordinate
+                nVertices += 1
+            elif line.startswith('vt '):
                 texCoordDefs.append(tuple(map(float, line[3:].split(' '))))
-            elif line.startswith('vn '):  # new vertex normal
+                nTextureCoords += 1
+            elif line.startswith('vn '):
                 normalDefs.append(tuple(map(float, line[3:].split(' '))))
+                nNormals += 1
             elif line.startswith('f '):
-                faceDef = []
-                for attrs in line[2:].split(' '):
-                    if attrs not in vertexAttrs.keys():
-                        p, t, n = map(int, attrs.split('/'))
-                        vertexAttrList.append(positionDefs[p - 1])
-                        texCoordAttrList.append(texCoordDefs[t - 1])
-                        normalAttrList.append(normalDefs[n - 1])
-                        vertexIndices[attrs] = vertexIdx
+                faceAttrs = []
+                for attrs in line[2:].split(' '):  # triangle vertex attrs
+                    if attrs not in vertexAttrs.keys():  # new face
+                        vertexAttrs[attrs] = vertexIdx
                         vertexIdx += 1
-                    faceDef.append(vertexIndices[attrs])
-                materialGroups[materialGroup].extend(faceDef)
+                    faceAttrs.append(vertexAttrs[attrs])
+                faceDefs[nFaces] = faceAttrs
+                materialFaces[materialGroup].append(nFaces)
+                nFaces += 1
+            elif line.startswith('o '):  # ignored for now
+                pass
             elif line.startswith('usemtl '):
                 materialGroup = line[7:]
-                if materialGroup not in materialGroups.keys():
-                    materialGroups[materialGroup] = []
+                if materialGroup not in materialFaces.keys():
+                    materialFaces[materialGroup] = []
+            elif line.startswith('mtllib '):
+                self.mtlFile = line.strip()[7:]
 
-        # Vertex attributes are interleaved like this in the VBO
-        # [v0, v1, v2, t0, t1, n0, n1, n2, ... ]
-        #
-        self._vertexData = np.hstack(
-            (np.asarray(vertexAttrList, dtype=np.float32),
-             np.asarray(texCoordAttrList, dtype=np.float32),
-             np.asarray(normalAttrList, dtype=np.float32)))
+        # at the very least, we need vertices and facedefs
+        if nVertices == 0 or nFaces == 0:
+            raise RuntimeError(
+                "Failed to load OBJ file, file contains no vertices or faces.")
+
+        # Indicate if file has any texture coordinates of normals. If not, the
+        # size of the storage buffer will be reduced and vertex pointers and
+        # strides adjusted.
+        hasTexCoords = nTextureCoords > 0
+        hasNormals = nNormals > 0
+
+        # build arrays to pass to VBO
+        vertexAttrList = []
+        for attrs, idx in vertexAttrs.items():
+            attr = attrs.split('/')
+            attrData = []
+            if len(attr) > 1:  # vertices and texture coords only
+                p = int(attr[0])
+                attrData.extend(positionDefs[p - 1])
+                if attr[1] != '':  # texcoord field not empty
+                    if hasTexCoords:
+                        t = int(attr[1])
+                        attrData.extend(texCoordDefs[t - 1])
+                else:
+                    attrData.extend([0., 0.])
+            if len(attr) > 2:  # has normals too
+                if hasNormals:
+                    n = int(attr[2])
+                    attrData.extend(normalDefs[n - 1])
+                else:
+                    attrData.extend([0., 0., 0.])
+
+            vertexAttrList.append(attrData)
+
+        self._vertexData = np.asarray(vertexAttrList, dtype=np.float32)
+
+        # compute the extents of the model
+        verts = self._vertexData[:, :3]
+        self._extents = (verts.min(axis=0), verts.max(axis=0))
 
         # create a VBO with the interleaved vertex data, loading data to VRAM
+        self.win.backend.setCurrent()  # must be current
         self.vboId = GL.GLuint()
         GL.glGenBuffers(1, ctypes.byref(self.vboId))
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vboId)
@@ -682,16 +1191,20 @@ class ObjStim(MeshStimMixin):
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
 
         # create a VAO and EBO for each material
-        for group, elements in materialGroups.items():
+        for materialName, materialFaceDefs in materialFaces.items():
+            eboList = []
+            for i in materialFaceDefs:
+                eboList.extend(faceDefs[i])
+
             # create an element buffer object
-            elements = np.asarray(elements, dtype=np.uint32)
+            eboArray = np.asarray(eboList, dtype=np.uint32)
             eboId = GL.GLuint()
             GL.glGenBuffers(1, ctypes.byref(eboId))
             GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, eboId)
             GL.glBufferData(
                 GL.GL_ELEMENT_ARRAY_BUFFER,
-                elements.size * ctypes.sizeof(GL.GLuint),  # total buffer size
-                elements.ctypes.data_as(ctypes.POINTER(GL.GLuint)),
+                eboArray.size * ctypes.sizeof(GL.GLuint),  # total buffer size
+                eboArray.ctypes.data_as(ctypes.POINTER(GL.GLuint)),
                 GL.GL_STATIC_DRAW)
             GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, 0)
 
@@ -700,47 +1213,41 @@ class ObjStim(MeshStimMixin):
             GL.glGenVertexArrays(1, ctypes.byref(vaoId))
             GL.glBindVertexArray(vaoId)
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vboId)
-            byte_offset = 8 * ctypes.sizeof(GL.GLfloat)  # sizeof vertex data
+
+            # compute VBO vertex stride
+            stride = 3 * ctypes.sizeof(GL.GLfloat)
+            stride += 2 * ctypes.sizeof(GL.GLfloat) if hasTexCoords else 0
+            stride += 3 * ctypes.sizeof(GL.GLfloat) if hasNormals else 0
 
             # set attribute pointers to buffer data
             GL.glVertexAttribPointer(  # vertex
-                0, 3, GL.GL_FLOAT, GL.GL_FALSE, byte_offset, 0)
-
-            GL.glVertexAttribPointer(  # texture coord
-                8, 2, GL.GL_FLOAT, GL.GL_FALSE, byte_offset,
-                3 * ctypes.sizeof(GL.GLfloat))
-
-            GL.glVertexAttribPointer(  # normals
-                2, 3, GL.GL_FLOAT, GL.GL_FALSE, byte_offset,
-                5 * ctypes.sizeof(GL.GLfloat))
-
+                0, 3, GL.GL_FLOAT, GL.GL_FALSE, stride, 0)
             GL.glEnableVertexAttribArray(0)
-            GL.glEnableVertexAttribArray(2)
-            GL.glEnableVertexAttribArray(8)
+
+            if hasTexCoords:
+                GL.glVertexAttribPointer(  # texture coord
+                    8, 2, GL.GL_FLOAT, GL.GL_FALSE, stride,
+                    3 * ctypes.sizeof(GL.GLfloat))
+                GL.glEnableVertexAttribArray(8)
+
+            if hasNormals:
+                if hasTexCoords:
+                    GL.glVertexAttribPointer(  # normals
+                        2, 3, GL.GL_FLOAT, GL.GL_FALSE, stride,
+                        5 * ctypes.sizeof(GL.GLfloat))
+                else:
+                    GL.glVertexAttribPointer(
+                        2, 3, GL.GL_FLOAT, GL.GL_FALSE, stride,
+                        3 * ctypes.sizeof(GL.GLfloat))
+                GL.glEnableVertexAttribArray(2)
 
             GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, eboId)  # element array
             GL.glBindVertexArray(0)
 
-            self.objVAOs[group] = (vaoId, len(elements))
+            self._materialVAOs[materialName] = (vaoId, len(eboArray))
 
-        # load the *.MTL file if requested, otherwise it must be specified later
-        # before rendering
-        if loadMtl and mtlFile is not None:
-            # path might be relative but not in CWD, try to resolve the path
-            if os.path.isabs(objFile) and not os.path.isabs(mtlFile):
-                mtlPath = os.path.join(
-                    os.path.split(objFile)[0], mtlFile)
-            else:
-                mtlPath = mtlFile
-
-            if os.path.isfile(mtlPath):
-                self._mtllibInfo = gltools.loadMtlFile(mtlPath)
-            else:
-                raise FileNotFoundError(
-                    "Cannot find *.mtl file '{}'".format(mtlPath))
-
-    def draw(self, win=None):
-        """Draw the object.
+    def draw(self, win=None, useLights=None):
+        """Render the 3D mesh to the scene.
 
         Parameters
         ----------
@@ -748,6 +1255,8 @@ class ObjStim(MeshStimMixin):
             The :class:`~psychopy.visual.Window` object in which the stimulus
             will be rendered to. The window must share a context with the
             window specified when instantiating the object.
+        useLights : list or tuple
+            List of lights to enable when rendering the model.
 
         """
         if win is None:
@@ -755,28 +1264,23 @@ class ObjStim(MeshStimMixin):
         else:
             win._setCurrent()
 
+        gltools.useLights(useLights)
+        GL.glLightModeli(GL.GL_LIGHT_MODEL_LOCAL_VIEWER, GL.GL_TRUE)
+
         self._prepareDraw()
-        MVP = self.win.projectionMatrix.ctypes.data_as(ctypes.POINTER(GL.GLfloat))
 
         # draw the model
-        for group, vao in self.objVAOs.items():
+        for group, vao in self._materialVAOs.items():
 
-            #mvpLoc = GL.glGetUniformLocation(prog, b"MVP")
-
-            #GL.glUseProgram(prog)
-            gltools.useMaterial(self._mtllibInfo[group])
-            #texId = self._mtllibInfo[group].textures[GL.GL_TEXTURE0].id
+            useMaterial(self._mtllibInfo[group], useTextures=True)
             GL.glBindVertexArray(vao[0])
-            #texLoc = GL.glGetUniformLocation(prog, b"texture0")
-
-            #GL.glUniformMatrix4fv
-            #GL.glUniform1ui(texLoc, texId)
             GL.glDrawElements(GL.GL_TRIANGLES, vao[1], GL.GL_UNSIGNED_INT, None)
             GL.glBindVertexArray(0)
-            #GL.glUseProgram(0)
+            GL.glUseProgram(0)
 
         # disable materials
-        gltools.useMaterial(None)
+        useMaterial(None)
+        gltools.useLights(None)
 
         self._endDraw()
 
