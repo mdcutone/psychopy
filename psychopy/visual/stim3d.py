@@ -22,6 +22,14 @@ import ctypes
 from io import StringIO
 from collections import OrderedDict
 import math
+from PIL import Image
+
+# ----------------
+# Module Constants
+#
+
+# stores scene light objects currently enabled
+_SCENE_LIGHTS = []
 
 
 phongVertSimple = """
@@ -46,17 +54,17 @@ varying vec3 v;
 
 uniform sampler2D texture0;
 
-#define MAX_LIGHTS $nlights
+#define MAX_LIGHTS 1
 
 void main (void)  
 {  
     vec3 L;
-    vec4 acc = vec4(0.0, 0.0, 0.0, 0.0);
+    vec4 acc = vec4(0., 0., 0., 0.);
     
     for (int i=0; i < MAX_LIGHTS; i++)
     {
         if (gl_LightSource[i].position.w == 0.0) {  // is directional?
-            L = normalize(-gl_LightSource[i].position.xyz);
+            L = normalize(gl_LightSource[i].position.xyz);
         } else {
             L = normalize(gl_LightSource[i].position.xyz - v); 
         }
@@ -64,7 +72,7 @@ void main (void)
         vec3 E = normalize(-v);
         vec3 R = normalize(-reflect(L,N));  
         
-        vec4 Iamb = clamp(gl_FrontLightProduct[i].ambient * texture2D(texture0, gl_TexCoord[0].st), 0.0, 1.0);
+        vec4 Iamb = clamp(gl_FrontLightProduct[i].ambient, 0.0, 1.0);
         
         //calculate Diffuse Term:  
         vec4 Idiff = gl_FrontLightProduct[i].diffuse * max(dot(N,L), 0.0);
@@ -84,10 +92,10 @@ void main (void)
 """
 
 # compile simple lighting shaders
-_phongShaders = {}
-for i in range(8):
-    fragSrc = string.Template(phongFragSimple).substitute(nlights=i+1)
-    _phongShaders[i + 1] = shaders.compileProgram(phongVertSimple, fragSrc)
+#_phongShaders = {}
+#for i in range(8):
+#    fragSrc = string.Template(phongFragSimple).substitute(nlights=i+1)
+#    _phongShaders[i + 1] = shaders.compileProgram(phongVertSimple, fragSrc)
 
 
 class RigidBodyPose(object):
@@ -630,6 +638,198 @@ class CornerStim(MeshStimMixin):
         self._endDraw()
 
 
+class ShaderProgram(object):
+    """Class for creating and using GLSL shader programs.
+
+    Parameters
+    ----------
+    vertSrc, fragSrc : str
+        GLSL vertex and fragment shader sources.
+    uniforms : list, optional
+        List of uniform variable name hints. This is used to cache uniform
+        locations to reduce overhead involved when looking them up.
+
+    """
+    def __init__(self, vertSrc, fragSrc, uniforms=None, attribs=None):
+        self._shaderProg = shaders.compileProgram(vertSrc, fragSrc)
+
+        # store attribute locations for this shader program
+        self._uniformLoc = {}
+        if uniforms is not None:
+            for uniform in uniforms:
+                self._uniformLoc[uniform] = \
+                    GL.glGetUniformLocation(self._shaderProg, uniform.encode())
+
+        self._attribLoc = {}
+        if attribs is not None:
+            for attrib in attribs:
+                self._attribLoc[attrib] = \
+                    GL.glGetUniformLocation(self._shaderProg, attrib.encode())
+
+    def setUniform1i(self, name, value):
+        """Pass"""
+        GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
+
+    def use(self):
+        """Use a fragment shader for successive operations."""
+        GL.glUseProgram(self._shaderProg)
+
+
+shaderLight = ShaderProgram(phongVertSimple, phongFragSimple, uniforms=['texture0'])
+
+
+class SimpleMaterial(object):
+    """Class for representing simple material properties."""
+    def __init__(self,
+                 diffuseColor=(0.0, 0.0, 0.0, 1.0),
+                 specularColor=(0.0, 0.0, 0.0, 1.0),
+                 ambientColor=(0.0, 0.0, 0.0, 1.0),
+                 shininess=1.0,
+                 diffuseTexture=None,
+                 faceMode='front',
+                 shader=None):
+
+        self._diffuseColor = (GL.GLfloat * 4)(*diffuseColor)
+        self._specularColor = (GL.GLfloat * 4)(*specularColor)
+        self._ambientColor = (GL.GLfloat * 4)(*ambientColor)
+        self._shininess = GL.GLfloat(shininess)
+
+        # load a texture if diffuse texture is a string
+        self._diffuseTexture = None
+        if diffuseTexture is not None:
+            self._diffuseTexture = self.setDiffuseTexture(diffuseTexture)
+
+        self._shader = shader
+        self._faceMode = faceMode
+
+    @property
+    def shader(self):
+        """Shader to use when rendering this material."""
+        return self._shader
+
+    @shader.setter
+    def shader(self, value):
+        self._shader = value
+
+    @property
+    def diffuseColor(self):
+        """Diffuse color of this material (r, g, b, a)."""
+        return list(self._diffuseColor)
+
+    @diffuseColor.setter
+    def diffuseColor(self, value):
+        self._diffuseColor = (GL.GLfloat * 4)(*value)
+
+    @property
+    def specularColor(self):
+        """Specular color of this material (r, g, b, a)."""
+        return list(self._specularColor)
+
+    @specularColor.setter
+    def specularColor(self, value):
+        self._specularColor = (GL.GLfloat * 4)(*value)
+
+    @property
+    def ambientColor(self):
+        """Ambient color of this material (r, g, b, a)."""
+        return list(self._ambientColor)
+
+    @ambientColor.setter
+    def ambientColor(self, value):
+        self._ambientColor = (GL.GLfloat * 4)(*value)
+
+    @property
+    def shininess(self):
+        """Specular exponent of this material."""
+        return list(self._shininess)
+
+    @shininess.setter
+    def shininess(self, value):
+        self._shininess = GL.GLfloat(value)
+
+    def setDiffuseTexture(self, value):
+        """Set the diffuse texture."""
+        if isinstance(value, str):
+            im = Image.open(value)
+            im = im.transpose(Image.FLIP_TOP_BOTTOM)
+            im = im.convert("RGBA")
+            pixelData = np.array(im).ctypes
+            width = pixelData.shape[1]
+            height = pixelData.shape[0]
+            self._diffuseTexture = gltools.createTexImage2D(
+                width,
+                height,
+                internalFormat=GL.GL_RGBA,
+                pixelFormat=GL.GL_RGBA,
+                dataType=GL.GL_UNSIGNED_BYTE,
+                data=pixelData,
+                unpackAlignment=1,
+                texParameters=[(GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR),
+                               (GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)])
+        elif isinstance(value, gltools.TexImage2D):
+            self._diffuseTexture = value
+        else:
+            raise ValueError("Invalid diffuse texture format specified.")
+
+
+# default materials
+_DEFAULT_AMBIENT_COLOR = (GL.GLfloat * 4)(0.2, 0.2, 0.2, 1.0)
+_DEFAULT_DIFFUSE_COLOR = (GL.GLfloat * 4)(0.8, 0.8, 0.8, 1.0)
+_DEFAULT_SPECULAR_COLOR = (GL.GLfloat * 4)(0.0, 0.0, 0.0, 1.0)
+_DEFAULT_SHININESS = GL.GLfloat(0.0)
+
+
+def useMaterial(material, useTextures=True):
+    """Use a material for rendering primitives.
+
+    Successive drawing calls (eg. `glDrawArrays`) will use the specified
+    material's colors, textures, and shaders (if applicable). Be sure to call
+    `useMaterial(None)` when your done using materials, or else the material
+    settings may carry forward to other rendering operations producing
+    undesirable results.
+
+    Parameters
+    ----------
+    material : :obj:`SimpleMaterial`
+        Material to use. Default OpenGL material properties are set if `None` is
+        specified. This is equivalent to disabling materials.
+    useTextures : :obj:`bool`
+        Enable textures. Note, when disabling materials, the value of
+        `useTextures` must match the previous call. If there are no textures
+        attached to the material, `useTexture` will be silently ignored.
+
+    """
+
+    if material is not None:
+        shaderLight.use()
+        # setup material properties
+        GL.glMaterialfv(GL.GL_FRONT, GL.GL_AMBIENT, material._ambientColor)
+        GL.glMaterialfv(GL.GL_FRONT, GL.GL_DIFFUSE, material._diffuseColor)
+        GL.glMaterialfv(GL.GL_FRONT, GL.GL_SPECULAR, material._specularColor)
+        GL.glMaterialf(GL.GL_FRONT, GL.GL_SHININESS, material._shininess)
+
+        if material._diffuseTexture is not None and useTextures:
+            GL.glEnable(GL.GL_TEXTURE_2D)
+            GL.glActiveTexture(GL.GL_TEXTURE0)
+            GL.glColor4f(1.0, 1.0, 1.0, 1.0)
+            GL.glColorMask(True, True, True, True)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, material._diffuseTexture.id)
+            shaderLight.setUniform1i('texture0', 0)
+    else:
+        GL.glMaterialfv(GL.GL_FRONT, GL.GL_AMBIENT, _DEFAULT_AMBIENT_COLOR)
+        GL.glMaterialfv(GL.GL_FRONT, GL.GL_DIFFUSE, _DEFAULT_DIFFUSE_COLOR)
+        GL.glMaterialfv(GL.GL_FRONT, GL.GL_SPECULAR, _DEFAULT_SPECULAR_COLOR)
+        GL.glMaterialf(GL.GL_FRONT, GL.GL_SHININESS, _DEFAULT_SHININESS)
+
+        # disable textures
+        if useTextures:
+            GL.glActiveTexture(GL.GL_TEXTURE0)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+            GL.glDisable(GL.GL_TEXTURE_2D)
+
+        GL.glUseProgram(0)
+
+
 class ObjMeshStim(MeshStimMixin):
     """Class for loading and presenting 3D stimuli in the Wavefront OBJ format.
 
@@ -709,6 +909,21 @@ class ObjMeshStim(MeshStimMixin):
         self.mtlFile = None
         self._loadObjFile(self.objFile, loadMtl)  # load it
 
+        # load the *.MTL file if requested, otherwise it must be specified later
+        # before rendering
+        if loadMtl and self.mtlFile is not None:
+            # path might be relative but not in CWD, try to resolve the path
+            if os.path.isabs(objFile) and not os.path.isabs(self.mtlFile):
+                mtlPath = os.path.join(
+                    os.path.split(objFile)[0], self.mtlFile)
+            else:
+                mtlPath = self.mtlFile
+            if os.path.isfile(mtlPath):
+                self._mtllibInfo = self._loadMtlFile(mtlPath)
+            else:
+                raise FileNotFoundError(
+                    "Cannot find *.mtl file '{}'".format(mtlPath))
+
     @property
     def extents(self):
         """Minimum and maximum extents of the model in each dimension.
@@ -724,9 +939,42 @@ class ObjMeshStim(MeshStimMixin):
     def materials(self, value):
         self._mtllibInfo = value
 
-    def _loadMtlFile(self, mtlFile):
+    def _loadMtlFile(self, mtlFilePath):
         """Load a *.MTL file and create material data structure."""
-        pass
+        # open the file, read it into memory
+        with open(mtlFilePath, 'r') as mtlFile:
+            mtlBuffer = StringIO(mtlFile.read())
+
+        foundMaterials = {}
+        foundTextures = {}
+        thisMaterial = 0
+        for line in mtlBuffer.readlines():
+            line = line.strip()
+            if line.startswith('newmtl '):  # new material
+                thisMaterial = line[7:]
+                foundMaterials[thisMaterial] = SimpleMaterial()
+            elif line.startswith('Ns '):  # specular exponent
+                foundMaterials[thisMaterial].shininess = float(line[3:])
+            elif line.startswith('Ks '):  # specular color
+                foundMaterials[thisMaterial].specularColor = \
+                    list(map(float, line[3:].split(' '))) + [1.0]
+            elif line.startswith('Kd '):  # diffuse color
+                foundMaterials[thisMaterial].diffuseColor = \
+                    list(map(float, line[3:].split(' '))) + [1.0]
+            elif line.startswith('Ka '):  # ambient color
+                foundMaterials[thisMaterial].ambientColor = \
+                    list(map(float, line[3:].split(' '))) + [1.0]
+            elif line.startswith('map_Kd '):  # diffuse color map
+                # load a diffuse texture from file
+                textureName = line[7:]
+                if textureName not in foundTextures:
+                    texPath = os.path.join(os.path.split(mtlFilePath)[0], textureName)
+                    foundMaterials[thisMaterial].setDiffuseTexture(texPath)
+                    foundTextures[textureName] = foundMaterials[thisMaterial]._diffuseTexture
+                else:
+                    foundMaterials[thisMaterial].setDiffuseTexture(foundTextures[textureName])
+
+        return foundMaterials
 
     def _loadObjFile(self, objFile, loadMtl):
         """Load and *.OBJ file and create vertex buffers."""
@@ -742,8 +990,7 @@ class ObjMeshStim(MeshStimMixin):
         faceDefs = {}
         materialFaces = {}
 
-        nVertices = nTextureCoords = nNormals = nFaces = nMaterials = 0
-        mtlFile = None
+        nVertices = nTextureCoords = nNormals = nFaces = 0
         vertexIdx = 0
         materialGroup = None
         # first pass, examine the file and load up vertex attributes
@@ -775,7 +1022,7 @@ class ObjMeshStim(MeshStimMixin):
                 if materialGroup not in materialFaces.keys():
                     materialFaces[materialGroup] = []
             elif line.startswith('mtllib '):
-                mtlFile = line.strip()[7:]
+                self.mtlFile = line.strip()[7:]
 
         # at the very least, we need vertices and facedefs
         if nVertices == 0 or nFaces == 0:
@@ -885,22 +1132,6 @@ class ObjMeshStim(MeshStimMixin):
 
             self._materialVAOs[materialName] = (vaoId, len(eboArray))
 
-        # load the *.MTL file if requested, otherwise it must be specified later
-        # before rendering
-        if loadMtl and mtlFile is not None:
-            # path might be relative but not in CWD, try to resolve the path
-            if os.path.isabs(objFile) and not os.path.isabs(mtlFile):
-                mtlPath = os.path.join(
-                    os.path.split(objFile)[0], mtlFile)
-            else:
-                mtlPath = mtlFile
-
-            if os.path.isfile(mtlPath):
-                self._mtllibInfo = gltools.loadMtlFile(mtlPath)
-            else:
-                raise FileNotFoundError(
-                    "Cannot find *.mtl file '{}'".format(mtlPath))
-
     def draw(self, win=None, useLights=None):
         """Render the 3D mesh to the scene.
 
@@ -919,18 +1150,22 @@ class ObjMeshStim(MeshStimMixin):
         else:
             win._setCurrent()
 
+        gltools.useLights(useLights)
+        GL.glLightModeli(GL.GL_LIGHT_MODEL_LOCAL_VIEWER, GL.GL_TRUE)
+
         self._prepareDraw()
 
         # draw the model
         for group, vao in self._materialVAOs.items():
-            gltools.useMaterial(self._mtllibInfo[group])
-            gltools.useLights(useLights)
+
+            useMaterial(self._mtllibInfo[group], useTextures=True)
             GL.glBindVertexArray(vao[0])
             GL.glDrawElements(GL.GL_TRIANGLES, vao[1], GL.GL_UNSIGNED_INT, None)
             GL.glBindVertexArray(0)
+            GL.glUseProgram(0)
 
         # disable materials
-        gltools.useMaterial(None)
+        useMaterial(None)
         gltools.useLights(None)
 
         self._endDraw()
