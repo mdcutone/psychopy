@@ -638,6 +638,14 @@ class CornerStim(MeshStimMixin):
         self._endDraw()
 
 
+_SHADER_UNIFORM_SETTERS = {
+    GL.GL_FLOAT: GL.glUniform1f,
+    GL.GL_FLOAT_VEC2: GL.glUniform2fv,
+    GL.GL_FLOAT_VEC3: GL.glUniform3fv,
+    GL.GL_FLOAT_VEC4: GL.glUniform4fv
+}
+
+
 class ShaderProgram(object):
     """Class for creating and using GLSL shader programs.
 
@@ -645,28 +653,130 @@ class ShaderProgram(object):
     ----------
     vertSrc, fragSrc : str
         GLSL vertex and fragment shader sources.
-    uniforms : list, optional
-        List of uniform variable name hints. This is used to cache uniform
-        locations to reduce overhead involved when looking them up.
 
     """
-    def __init__(self, vertSrc, fragSrc, uniforms=None, attribs=None):
-        self._shaderProg = shaders.compileProgram(vertSrc, fragSrc)
+    def __init__(self, vertSrc, fragSrc):
+        # compile shader sources
+        vertexShader = self._compile(vertSrc, GL.GL_VERTEX_SHADER)
+        fragmentShader = self._compile(fragSrc, GL.GL_FRAGMENT_SHADER)
 
-        # store attribute locations for this shader program
-        self._uniformLoc = {}
-        if uniforms is not None:
-            for uniform in uniforms:
-                self._uniformLoc[uniform] = \
-                    GL.glGetUniformLocation(self._shaderProg, uniform.encode())
+        # attach shaders and link
+        self._shaderProg = GL.glCreateProgram()
+        GL.glAttachShader(self._shaderProg, vertexShader)
+        GL.glAttachShader(self._shaderProg, fragmentShader)
+        GL.glLinkProgram(self._shaderProg)
 
-        self._attribLoc = {}
-        if attribs is not None:
-            for attrib in attribs:
-                self._attribLoc[attrib] = \
-                    GL.glGetUniformLocation(self._shaderProg, attrib.encode())
+        # check for errors
+        result = GL.GLint()
+        GL.glGetShaderiv(
+            self._shaderProg, GL.GL_LINK_STATUS, ctypes.byref(result))
+
+        if result == GL.GL_FALSE:  # failed to compile for whatever reason
+            logLength = GL.GLint()
+            GL.glGetShaderiv(
+                self._shaderProg, GL.GL_INFO_LOG_LENGTH, ctypes.byref(logLength))
+
+            logBuffer = ctypes.create_string_buffer(logLength.value)
+            GL.glGetShaderInfoLog(
+                self._shaderProg, logLength, ctypes.byref(logLength), logBuffer)
+
+            GL.glDeleteShader(vertexShader)
+            GL.glDeleteShader(fragmentShader)
+            GL.glDeleteShader(self._shaderProg)
+
+            print(logBuffer.value)
+            raise RuntimeError("Shader linking failed, check log output.")
+
+        # check for errors
+        GL.glDetachShader(self._shaderProg, vertexShader)
+        GL.glDetachShader(self._shaderProg, fragmentShader)
+
+        GL.glDeleteShader(vertexShader)
+        GL.glDeleteShader(fragmentShader)
+
+        # get shader uniforms and attributes
+        numActiveAttribs = GL.GLint()
+        numActiveUniforms = GL.GLint()
+        GL.glGetProgramiv(
+            self._shaderProg,
+            GL.GL_ACTIVE_ATTRIBUTES,
+            ctypes.byref(numActiveAttribs))
+        GL.glGetProgramiv(
+            self._shaderProg,
+            GL.GL_ACTIVE_UNIFORMS,
+            ctypes.byref(numActiveUniforms))
+
+        # # store attribute locations for this shader program
+        # self._uniformLoc = {}
+        # if uniforms is not None:
+        #     for uniform in uniforms:
+        #         self._uniformLoc[uniform] = \
+        #             GL.glGetUniformLocation(self._shaderProg, uniform.encode())
+        #
+        # self._attribLoc = {}
+        # if attribs is not None:
+        #     for attrib in attribs:
+        #         self._attribLoc[attrib] = \
+        #             GL.glGetUniformLocation(self._shaderProg, attrib.encode())
+
+    def _compile(self, shaderSrc, shaderType):
+        """Compile a shader program.
+
+        Parameters
+        ----------
+        shaderSrc : str
+            GLSL shader source code.
+        shaderType : GLenum
+            Shader program type (eg. GL_VERTEX_SHADER, GL_FRAGMENT_SHADER, etc.)
+
+        """
+        programId = GL.glCreateShader(shaderType)
+        shaderSrc = shaderSrc.encode()
+        srcPtr = ctypes.c_char_p(shaderSrc)
+        GL.glShaderSource(
+            programId, 1,
+            ctypes.cast(ctypes.byref(srcPtr),
+                        ctypes.POINTER(ctypes.POINTER(ctypes.c_char))),
+            ctypes.byref(GL.GLint(-1)))
+        GL.glCompileShader(programId)
+
+        # check for errors
+        result = GL.GLint()
+        GL.glGetShaderiv(programId, GL.GL_COMPILE_STATUS, ctypes.byref(result))
+        if result == GL.GL_FALSE:  # failed to compile for whatever reason
+            logLength = GL.GLint()
+            GL.glGetShaderiv(
+                programId, GL.GL_INFO_LOG_LENGTH, ctypes.byref(logLength))
+
+            logBuffer = ctypes.create_string_buffer(logLength.value)
+            GL.glGetShaderInfoLog(
+                programId, logLength, ctypes.byref(logLength), logBuffer)
+
+            GL.glDeleteShader(programId)
+            print(logBuffer.value)
+            raise RuntimeError("Shader compilation failed, check log output.")
+
+        return programId
+
+    def __getattr__(self, item):
+        pass
+
+    def __setattr__(self, key, value):
+        pass
 
     def setUniform1i(self, name, value):
+        """Pass"""
+        GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
+
+    def setUniform2i(self, name, value):
+        """Pass"""
+        GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
+
+    def setUniform3i(self, name, value):
+        """Pass"""
+        GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
+
+    def setUniform4i(self, name, value):
         """Pass"""
         GL.glUniform1i(self._uniformLoc[name], GL.GLint(value))
 
@@ -674,8 +784,12 @@ class ShaderProgram(object):
         """Use a fragment shader for successive operations."""
         GL.glUseProgram(self._shaderProg)
 
+    def __del__(self):
+        if self._shaderProg is not None:
+            GL.glDeleteShader(self._shaderProg)
 
-shaderLight = ShaderProgram(phongVertSimple, phongFragSimple, uniforms=['texture0'])
+
+shaderLight = ShaderProgram(phongVertSimple, phongFragSimple)
 
 
 class SimpleMaterial(object):
