@@ -651,24 +651,14 @@ class ShaderProgram(object):
     """Class for creating and using GLSL vertex, fragment, and geometry shader
     programs.
 
-    GPU pipelines are programmable, controlling the output color at each pixel
-    fragment. The OpenGL Shading Language (GLSL) is used for creating these
-    shader programs for use with OpenGL (and by extension PsychoPy). GLSL source
-    code is text which is compiled then later executed when drawing geometric
-    primitives (i.e. triangles). Shader programs are comprised of sub-programs
-    for specific stages of the rendering pipeline. For instance, vertex shaders
-    are executed per-vertex, controlling aspects like position. The output of
-    the vertex shader passed to fragment shaders which is executed per-pixel to
-    control the color of faces and other elements when rasterized.
-
     This class accepts GLSL program sources as text (either loaded from a file
     or stored in memory), compiles/links them, and then makes the shader program
     available for use. Afterwards, program inputs and uniform variables can be
     accessed and written to using class methods. If the compiler encounters an
     error in the source code, the log message from the compiler will be output
-    to the standard input for inspection. At the very least, you must specify
-    both a vertex and fragment shader sources when instantiating this class.
-    Optionally, a geometry shader source can be provide if desired.
+    to the standard output for inspection. At the very least, you must specify
+    both vertex and fragment shader sources when instantiating this class.
+    If desired, a geometry shader source can be provided.
 
     Parameters
     ----------
@@ -739,22 +729,17 @@ class ShaderProgram(object):
             GL.glDeleteShader(self._shaderProg, GL.GLuint(geometryShader))
 
         # get shader uniforms and attributes
-        numActiveAttribs = GL.GLint()
-        numActiveUniforms = GL.GLint()
-        GL.glGetProgramiv(
-            self._shaderProg,
-            GL.GL_ACTIVE_ATTRIBUTES,
-            ctypes.byref(numActiveAttribs))
-        GL.glGetProgramiv(
-            self._shaderProg,
-            GL.GL_ACTIVE_UNIFORMS,
-            ctypes.byref(numActiveUniforms))
-
-        # cache uniform locations to avoid looking them up before setting them
         arraySize = GL.GLint()
         nameLength = GL.GLsizei()
 
-        if numActiveUniforms.value > 0:
+        # cache uniform locations to avoid looking them up before setting them
+        nUniforms = GL.GLint()
+        GL.glGetProgramiv(
+            self._shaderProg,
+            GL.GL_ACTIVE_UNIFORMS,
+            ctypes.byref(nUniforms))
+
+        if nUniforms.value > 0:
             maxUniformLength = GL.GLint()
             GL.glGetProgramiv(
                 self._shaderProg,
@@ -762,7 +747,7 @@ class ShaderProgram(object):
                 ctypes.byref(maxUniformLength))
 
             self._unifLoc = {}
-            for uniformIdx in range(numActiveUniforms.value):
+            for uniformIdx in range(nUniforms.value):
                 unifType = GL.GLenum()
                 unifName = (GL.GLchar * maxUniformLength.value)()
 
@@ -781,7 +766,13 @@ class ShaderProgram(object):
                 if loc != -1:
                     self._unifLoc[unifName.value.decode('UTF-8')] = loc
 
-        if numActiveAttribs.value > 0:
+        nAttribs = GL.GLint()
+        GL.glGetProgramiv(
+            self._shaderProg,
+            GL.GL_ACTIVE_ATTRIBUTES,
+            ctypes.byref(nAttribs))
+
+        if nAttribs.value > 0:
             maxAttribLength = GL.GLint()
             GL.glGetProgramiv(
                 self._shaderProg,
@@ -789,7 +780,7 @@ class ShaderProgram(object):
                 ctypes.byref(maxAttribLength))
 
             self._attribLoc = {}
-            for attribIdx in range(numActiveAttribs.value):
+            for attribIdx in range(nAttribs.value):
                 attribType = GL.GLenum()
                 attribName = (GL.GLchar * maxAttribLength.value)()
 
@@ -836,9 +827,10 @@ class ShaderProgram(object):
         srcPtr = ctypes.c_char_p(shaderSrc)
         GL.glShaderSource(
             programId, 1,
-            ctypes.cast(ctypes.byref(srcPtr),
-                        ctypes.POINTER(ctypes.POINTER(ctypes.c_char))),
-            ctypes.byref(GL.GLint(-1)))
+            ctypes.cast(
+                ctypes.byref(srcPtr),
+                ctypes.POINTER(ctypes.POINTER(ctypes.c_char))),
+            None)
         GL.glCompileShader(programId)
 
         # check for errors
@@ -859,19 +851,17 @@ class ShaderProgram(object):
 
         return programId
 
-    @property
-    def programId(self):
-        """The GL ID of this shader program.
-        """
-        return self._shaderProg
-
-    def validate(self, raiseError=False):
+    @staticmethod
+    def _validate(program, raiseError=False):
         """Check if the program can execute given the current OpenGL state.
 
         Parameters
         ----------
+        program : int
+            Shader program to validate.
         raiseError : bool, optional
-            Raise an error (`RuntimeError`) if validation fails.
+            Raise an error (`RuntimeError`) if validation fails. Default is
+            `False`.
 
         Returns
         -------
@@ -879,21 +869,21 @@ class ShaderProgram(object):
             `True` if the program was successfully validated.
 
         """
-        GL.glValidateProgram(self._shaderProg)
+        GL.glValidateProgram(program)
 
         # check validation info
         result = GL.GLint()
         GL.glGetProgramiv(
-            self._shaderProg, GL.GL_VALIDATE_STATUS, ctypes.byref(result))
+            program, GL.GL_VALIDATE_STATUS, ctypes.byref(result))
 
         if result == GL.GL_FALSE:  # failed to compile for whatever reason
             logLength = GL.GLint()
             GL.glGetProgramiv(
-                self._shaderProg, GL.GL_INFO_LOG_LENGTH, ctypes.byref(logLength))
+                program, GL.GL_INFO_LOG_LENGTH, ctypes.byref(logLength))
 
             logBuffer = ctypes.create_string_buffer(logLength.value)
             GL.glGetProgramInfoLog(
-                self._shaderProg, logLength, ctypes.byref(logLength), logBuffer)
+                program, logLength, ctypes.byref(logLength), logBuffer)
 
             print(logBuffer.encode())
             if raiseError:
@@ -901,10 +891,33 @@ class ShaderProgram(object):
 
         return result == GL.GL_TRUE
 
+    @property
+    def programId(self):
+        """The GL ID of this shader program.
+        """
+        return self._shaderProg
+
+    def validate(self, raiseError=False):
+        """Validate this shader program.
+
+        Parameters
+        ----------
+        raiseError : bool, optional
+            Raise an error (`RuntimeError`) if validation fails. Default is
+            `False`.
+
+        Returns
+        -------
+        bool
+            `True` if the program was successfully validated.
+
+        """
+        ShaderProgram._validate(self._shaderProg, raiseError)
+
     def getUniformLocation(self, name):
-        """Get the location of a uniform variable within the program object. This
-        is used to specify the location of a uniform when setting their values
-        with `glUniform*` calls.
+        """Get the location of a uniform variable within the program object.
+        This is used to specify the location of a uniform variable when setting
+        their values with `glUniform*` calls.
 
         The locations of uniform objects are cached after shader compilation,
         eliminating the need for additional `glGetUniformLocation` calls within
@@ -913,7 +926,7 @@ class ShaderProgram(object):
         Parameters
         ----------
         name : str
-            Uniform name to obtain location of.
+            Uniform name to obtain the location of.
 
         Returns
         -------
@@ -923,6 +936,7 @@ class ShaderProgram(object):
         --------
         Set a uniform variable in a presently bound shader program::
 
+            GL.useProgram()
             GL.glUniform1i(shader.getUniformLocation('myVal'), 1)
 
         """
