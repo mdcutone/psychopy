@@ -657,9 +657,11 @@ class ShaderProgram(object):
     available for use. Afterwards, program inputs and uniform variables can be
     accessed and written to using class methods. If the compiler encounters an
     error in the source code, the log message from the compiler will be output
-    to the standard output for inspection. At the very least, you must specify
-    both vertex and fragment shader sources when instantiating this class.
-    If desired, a geometry shader source can be provided.
+    to standard error for inspection.
+
+    At the very least, you must specify both vertex and fragment shader sources
+    when instantiating this class. If desired, an additional geometry shader
+    source can be provided.
 
     Parameters
     ----------
@@ -703,16 +705,12 @@ class ShaderProgram(object):
             self._shaderProg, GL.GL_LINK_STATUS, ctypes.byref(result))
 
         if result.value == GL.GL_FALSE:  # failed to compile for whatever reason
-            log = ShaderProgram._getInfoLog(self._shaderProg)
-
             GL.glDeleteShader(vertexShader)
             GL.glDeleteShader(fragmentShader)
             if geometryShader is not None:
                 GL.glDeleteShader(self._shaderProg, GL.GLuint(geometryShader))
-
+            sys.stderr.write(ShaderProgram._getInfoLog(self._shaderProg) + '\n')
             GL.glDeleteProgram(self._shaderProg)
-
-            sys.stderr.write(log + '\n')
             raise RuntimeError("Shader linking failed, check log output.")
 
         GL.glDetachShader(self._shaderProg, GL.GLuint(vertexShader))
@@ -842,12 +840,12 @@ class ShaderProgram(object):
         return programId
 
     @staticmethod
-    def _validate(program, raiseError=False):
+    def _validate(programId, raiseError=False):
         """Check if the program can execute given the current OpenGL state.
 
         Parameters
         ----------
-        program : int
+        programId : int
             Shader program to validate.
         raiseError : bool, optional
             Raise an error (`RuntimeError`) if validation fails. Default is
@@ -859,23 +857,15 @@ class ShaderProgram(object):
             `True` if the program was successfully validated.
 
         """
-        GL.glValidateProgram(program)
+        GL.glValidateProgram(programId)
 
         # check validation info
         result = GL.GLint()
         GL.glGetProgramiv(
-            program, GL.GL_VALIDATE_STATUS, ctypes.byref(result))
+            programId, GL.GL_VALIDATE_STATUS, ctypes.byref(result))
 
         if result.value == GL.GL_FALSE:
-            logLength = GL.GLint()
-            GL.glGetProgramiv(
-                program, GL.GL_INFO_LOG_LENGTH, ctypes.byref(logLength))
-
-            logBuffer = ctypes.create_string_buffer(logLength.value)
-            GL.glGetProgramInfoLog(
-                program, logLength, ctypes.byref(logLength), logBuffer)
-
-            print(logBuffer.encode())
+            sys.stderr.write(ShaderProgram._getInfoLog(programId) + '\n')
             if raiseError:
                 raise RuntimeError('Shader program validation failed.')
 
@@ -901,14 +891,12 @@ class ShaderProgram(object):
             GL.glGetShaderiv(
                 programId, GL.GL_INFO_LOG_LENGTH, ctypes.byref(logLength))
             logBuffer = ctypes.create_string_buffer(logLength.value)
-            GL.glGetShaderInfoLog(
-                programId, logLength, ctypes.byref(logLength), logBuffer)
+            GL.glGetShaderInfoLog(programId, logLength, None, logBuffer)
         elif GL.glIsProgram(programId) == GL.GL_TRUE:
             GL.glGetProgramiv(
                 programId, GL.GL_INFO_LOG_LENGTH, ctypes.byref(logLength))
             logBuffer = ctypes.create_string_buffer(logLength.value)
-            GL.glGetProgramInfoLog(
-                programId, logLength, ctypes.byref(logLength), logBuffer)
+            GL.glGetProgramInfoLog(programId, logLength, None, logBuffer)
         else:
             raise ValueError(
                 "Specified value of 'programId' is not a shader or program.")
