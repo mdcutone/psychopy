@@ -649,11 +649,11 @@ def deleteTexture(texture):
 VertexBufferObject = namedtuple(
     'VertexBufferObject',
     ['id',
-     'size',
      'count',
-     'indices',
-     'usage',
+     'stride',
+     'target',
      'dtype',
+     'usage',
      'userData']
 )
 
@@ -666,21 +666,22 @@ VertexArrayObject = namedtuple(
 )
 
 
-def createVBO(data, size=3, dtype=GL.GL_FLOAT, target=GL.GL_ARRAY_BUFFER):
-    """Create a single-storage array buffer, often referred to as Vertex Buffer
-    Object (VBO).
+def createVBO(data, dtype=GL.GL_FLOAT, target=GL.GL_ARRAY_BUFFER, usage=GL.GL_STATIC_DRAW):
+    """Create an array buffer, often referred to as Vertex Buffer Object (VBO).
 
     Parameters
     ----------
-    data : :obj:`list` or :obj:`tuple` of :obj:`float` or :obj:`int`
-        Coordinates as a 1D array of floats (e.g. [X0, Y0, Z0, X1, Y1, Z1, ...])
-    size : :obj:`int`
-        Number of coordinates per-vertex, default is 3.
-    dtype : :obj:`int`
-        Data type OpenGL will interpret that data as, should be compatible with
-        the type of 'data'.
-    target : :obj:`int`
+    data : array_like
+        Array to create a buffer from. If `target=GL_ELEMENT_ARRAY_BUFFER`, the
+        array should be 1D. If `target=GL_ARRAY_BUFFER`, the array should be
+        2D where each row corresponds to the attribute of a single vertex.
+    target : int, optional
         Target used when binding the buffer (e.g. GL_VERTEX_ARRAY)
+    dtype : int, optional
+        Data type OpenGL will interpret that data as, should be compatible with
+        the type of 'data'. Default is `GL_FLOAT`.
+    usage : int, optional
+        Usage pattern for the data store. Default is `GL_STATIC_DRAW`.
 
     Returns
     -------
@@ -712,62 +713,61 @@ def createVBO(data, size=3, dtype=GL.GL_FLOAT, target=GL.GL_ARRAY_BUFFER):
     """
     # convert values to ctypes float array
     if dtype == GL.GL_FLOAT:
-        useType = GL.GLfloat
+        npType = np.float32
+        glType = GL.GLfloat
     elif dtype == GL.GL_UNSIGNED_INT:
-        useType = GL.GLuint
+        npType = np.uint32
+        glType = GL.GLuint
     elif dtype == GL.GL_UNSIGNED_SHORT:
-        useType = GL.GLushort
+        npType = np.ushort
+        glType = GL.GLushort
     else:
         raise TypeError("Invalid type specified.")
 
-    if isinstance(data, array.array):
-        addr, count = data.buffer_info()
-        c_array = ctypes.cast(addr, ctypes.POINTER((useType * count)))[0]
-    else:
-        count = len(data)
-        c_array = (useType * count)(*data)
+    # convert to array for upload
+    vertexData = np.ascontiguousarray(data, dtype=npType)
+    count = vertexData.shape[0]  # number of vertex attributes
 
     # create a vertex buffer ID
     vboId = GL.GLuint()
     GL.glGenBuffers(1, ctypes.byref(vboId))
 
-    nIndices = count
-    if target != GL.GL_ELEMENT_ARRAY_BUFFER:
-        nIndices = int(nIndices / size)
-
-    # new vertex descriptor
-    vboDesc = VertexBufferObject(vboId,
-                                 size,
-                                 count,
-                                 nIndices,
-                                 GL.GL_STATIC_DRAW,
-                                 dtype,
-                                 dict())
-
     # bind and upload
     GL.glBindBuffer(target, vboId)
     GL.glBufferData(target,
-                    ctypes.sizeof(c_array),
-                    c_array,
-                    GL.GL_STATIC_DRAW)
+                    vertexData.size * ctypes.sizeof(glType),
+                    vertexData.ctypes.data_as(ctypes.POINTER(glType)),
+                    usage)
     GL.glBindBuffer(target, 0)
+
+    stride = vertexData.shape[1] * ctypes.sizeof(glType)
+    vboDesc = VertexBufferObject(
+        vboId, count, stride, target, usage, dtype, dict())
 
     return vboDesc
 
 
-def createVAO(vertexBuffers, indexBuffer=None):
-    """Create a Vertex Array Object (VAO) with specified Vertex Buffer Objects.
-    VAOs store buffer binding states, reducing CPU overhead when drawing objects
-    with vertex data stored in VBOs.
+def createVAO(vertexBuffer, attribIdx, attribSize, indices=None):
+    """Create a Vertex Array Object (VAO) with specified Vertex Buffer Objects
+    (VBO). VAOs store buffer binding states, reducing CPU overhead when drawing
+    objects with vertex data stored in VBOs.
+
+    This function assumes that different vertex attributes specified in the VBO
+    are interleaved.
 
     Parameters
     ----------
-    vertexBuffers : :obj:`list` of :obj:`tuple`
-        Specify vertex attributes VBO descriptors apply to.
-    indexBuffer : :obj:`list` of :obj:`int`, optional
+    vertexBuffer : VertexBufferObject or list of VertexBufferObject
+        Vertex buffer to use.
+    attribIdx : int or list
+        Attribute indices to associate each vertex attribute to.
+    attribSize : int or list
+        Format of each vertex attribute.
+    indices : :obj:`list` of :obj:`int`, optional
         Index array of elements. If provided, an element array is created from
         the array. The returned descriptor will have isIndexed=True. This
-        requires the VAO be drawn with glDrawElements instead of glDrawArrays.
+        requires the VAO be drawn with `glDrawElements` instead of
+        `glDrawArrays`.
 
     Returns
     -------
@@ -783,8 +783,20 @@ def createVAO(vertexBuffers, indexBuffer=None):
     drawVAO(vaoDesc, GL.GL_TRIANGLES)
 
     """
-    if not vertexBuffers:  # in case an empty list is passed
-        raise ValueError("No buffers specified.")
+    # create an element buffer object
+    nIndices = 0
+    if indices is not None:
+        eboArray = np.asarray(indices, dtype=np.uint32)
+        nIndices = eboArray.size
+        eboId = GL.GLuint()
+        GL.glGenBuffers(1, ctypes.byref(eboId))
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, eboId)
+        GL.glBufferData(
+            GL.GL_ELEMENT_ARRAY_BUFFER,
+            nIndices * ctypes.sizeof(GL.GLuint),  # total buffer size
+            eboArray.ctypes.data_as(ctypes.POINTER(GL.GLuint)),
+            GL.GL_STATIC_DRAW)
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, 0)
 
     # create a vertex buffer ID
     vaoId = GL.GLuint()
@@ -817,13 +829,12 @@ def createVAO(vertexBuffers, indexBuffer=None):
         raise RuntimeError("Failed to create VAO, no vertex data specified.")
 
     # bind the EBO if available
-    if indexBuffer is not None:
+    if indices is not None:
         GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, indexBuffer.id)
-        nIndices = indexBuffer.indices
 
     GL.glBindVertexArray(0)
 
-    return VertexArrayObject(vaoId, nIndices, indexBuffer is not None, dict())
+    return VertexArrayObject(vaoId, nIndices, indices is not None, dict())
 
 
 def drawVAO(vao, mode=GL.GL_TRIANGLES, flush=False):

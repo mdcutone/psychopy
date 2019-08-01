@@ -29,6 +29,7 @@ from psychopy import platform_specific, logging
 import pyglet.gl as GL
 from psychopy.tools.attributetools import setAttribute
 import numpy as np
+import warnings
 
 reportNDroppedFrames = 5
 
@@ -194,6 +195,7 @@ class Rift(window.Window):
 
         self._samples = samples
         self._mirrorRes = mirrorRes
+        self._drawMirrorTex = False
 
         # this can be changed while running
         self.warnAppFrameDropped = warnAppFrameDropped
@@ -542,7 +544,7 @@ class Rift(window.Window):
                 libovr.EYE_LEFT, (horzTan, vertTan))
         elif self.buffer == 'right':
             return libovr.getTanAngleToRenderTargetNDC(
-                libovr.EYE_LEFT, (horzTan, vertTan))
+                libovr.EYE_RIGHT, (horzTan, vertTan))
 
     @property
     def trackerCount(self):
@@ -711,7 +713,7 @@ class Rift(window.Window):
 
         """
         if absTime is None:
-            absTime = self.predictedDisplayTime()
+            absTime = self.getPredictedDisplayTime()
 
         return libovr.getTrackingState(absTime, latencyMarker)
 
@@ -719,12 +721,14 @@ class Rift(window.Window):
         """Calculate eye poses from a given head pose.
 
         Frame rendering is stalled until this function returns. If `headPose` is
-        not from a recent tracking state, ensure ``headLocked=True``.
+        not from a recent tracking state, ensure ``headLocked=True`` to prevent
+        the rendered image from 'slipping' due to ASW.
 
         Once this function returns, `setBuffer` can be called and frame
         rendering can commence. The computed eye pose for the selected buffer is
-        accessible through the :py:attr:`eyePose` attribute after calling
-        :py:method:`setBuffer`.
+        accessible through the :py:attr:`eyeRenderPose` attribute after calling
+        :py:method:`setBuffer`. If `monoscopic=True`, the eye poses are set to
+        the head pose.
 
         Parameters
         ----------
@@ -776,7 +780,7 @@ class Rift(window.Window):
         self._startHmdFrame()
 
     @property
-    def eyePose(self):
+    def eyeRenderPose(self):
         """Computed eye pose for the current buffer. Only valid after calling
         :func:`calcEyePoses`.
 
@@ -998,9 +1002,10 @@ class Rift(window.Window):
         data must be 'resolved' by blitting it to the swap chain texture. If
         not, the texture will be blank.
 
-        NOTE: You cannot perform operations on the default FBO (at frameBuffer)
-        when MSAA is enabled. Any changes will be over-written when 'flip' is
-        called.
+        Notes
+        -----
+        You cannot perform operations on the default FBO (at frameBuffer) when
+        MSAA is enabled. Any changes will be over-written when 'flip' is called.
 
         """
         # if multi-sampling is off just NOP
@@ -1079,9 +1084,11 @@ class Rift(window.Window):
     def setBuffer(self, buffer, clear=True):
         """Set the active stereo draw buffer.
 
-        Warning! The window.Window.size property will return the buffer's
-        dimensions in pixels instead of the window's when setBuffer is set to
-        'left' or 'right'.
+        Warnings
+        --------
+        The window.Window.size property will return the buffer's dimensions in
+        pixels instead of the window's when `setBuffer` is set to 'left' or
+        'right'.
 
         Parameters
         ----------
@@ -1094,6 +1101,8 @@ class Rift(window.Window):
         """
         # if monoscopic, nop
         if self._monoscopic:
+            warnings.warn("`setBuffer` called in monoscopic mode.",
+                          RuntimeWarning)
             return
 
         # check if the buffer name is valid
@@ -1132,8 +1141,7 @@ class Rift(window.Window):
             GL.glClear(
                 GL.GL_COLOR_BUFFER_BIT |
                 GL.GL_DEPTH_BUFFER_BIT |
-                GL.GL_STENCIL_BUFFER_BIT
-            )
+                GL.GL_STENCIL_BUFFER_BIT)
 
         # if self.sRGB:
         #    GL.glDisable(GL.GL_FRAMEBUFFER_SRGB)
@@ -1144,7 +1152,7 @@ class Rift(window.Window):
         GL.glDisable(GL.GL_TEXTURE_2D)
         GL.glEnable(GL.GL_BLEND)
 
-    def predictedDisplayTime(self):
+    def getPredictedDisplayTime(self):
         """Get the predicted time the next frame will be displayed.
 
         Returns
@@ -1159,7 +1167,7 @@ class Rift(window.Window):
         """
         return libovr.getPredictedDisplayTime(self._frameIndex)
 
-    def timeInSeconds(self):
+    def getTimeInSeconds(self):
         """Absolute time in seconds.
 
         Returns
@@ -1172,7 +1180,10 @@ class Rift(window.Window):
 
     @property
     def viewMatrix(self):
-        """Get the view modelMatrix for the current buffer."""
+        """Get the view matrix for the current eye buffer. Only valid after a
+        :func:`calcEyePoses` call.
+
+        """
         if not self._monoscopic:
             if self.buffer == 'left':
                 return self._viewMatrix[libovr.EYE_LEFT]
@@ -1183,7 +1194,7 @@ class Rift(window.Window):
 
     @property
     def projectionMatrix(self):
-        """Get the projection modelMatrix for the current buffer."""
+        """Get the projection matrix for the current eye buffer."""
         if not self._monoscopic:
             if self.buffer == 'left':
                 return self._projectionMatrix[libovr.EYE_LEFT]
@@ -1342,7 +1353,6 @@ class Rift(window.Window):
                     libovr.destroyTextureSwapChain(libovr.TEXTURE_SWAP_CHAIN0)
                     libovr.destroy()
                     libovr.shutdown()
-                    self.close()
 
                 _, msg = libovr.getLastErrorInfo()
                 raise LibOVRError(msg)
@@ -1409,31 +1419,37 @@ class Rift(window.Window):
             stencilOn = GL.glIsEnabled(GL.GL_STENCIL_TEST)
             GL.glDisable(GL.GL_STENCIL_TEST)
 
-            # blit mirror texture
-            GL.glBindFramebuffer(GL.GL_READ_FRAMEBUFFER, self._mirrorFbo)
-            GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, 0)
-
-            GL.glEnable(GL.GL_FRAMEBUFFER_SRGB)
-            # bind the rift's texture to the framebuffer
-            GL.glFramebufferTexture2D(
-                GL.GL_READ_FRAMEBUFFER,
-                GL.GL_COLOR_ATTACHMENT0,
-                GL.GL_TEXTURE_2D, mirrorTexId, 0)
-
             win_w, win_h = self.__dict__['size']
-            tex_w, tex_h = self._mirrorRes
-
             GL.glViewport(0, 0, win_w, win_h)
             GL.glScissor(0, 0, win_w, win_h)
-            GL.glClearColor(0.0, 0.0, 0.0, 1.0)
-            GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-            GL.glBlitFramebuffer(0, 0, tex_w, tex_h,
-                                 0, win_h, win_w, 0,  # flips texture
-                                 GL.GL_COLOR_BUFFER_BIT,
-                                 GL.GL_LINEAR)
 
-            GL.glDisable(GL.GL_FRAMEBUFFER_SRGB)
-            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+            # draw the mirror texture, if not anything drawn to the backbuffer
+            # will be displayed instead
+            if self._drawMirrorTex:
+                # blit mirror texture
+                GL.glBindFramebuffer(GL.GL_READ_FRAMEBUFFER, self._mirrorFbo)
+                GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, 0)
+
+                GL.glEnable(GL.GL_FRAMEBUFFER_SRGB)
+                # bind the rift's texture to the framebuffer
+                GL.glFramebufferTexture2D(
+                    GL.GL_READ_FRAMEBUFFER,
+                    GL.GL_COLOR_ATTACHMENT0,
+                    GL.GL_TEXTURE_2D, mirrorTexId, 0)
+
+                tex_w, tex_h = self._mirrorRes
+                GL.glViewport(0, 0, win_w, win_h)
+                GL.glScissor(0, 0, win_w, win_h)
+                GL.glClearColor(0.0, 0.0, 0.0, 1.0)
+                GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+                GL.glBlitFramebuffer(0, 0, tex_w, tex_h,
+                                     0, win_h, win_w, 0,  # flips texture
+                                     GL.GL_COLOR_BUFFER_BIT,
+                                     GL.GL_LINEAR)
+
+                GL.glDisable(GL.GL_FRAMEBUFFER_SRGB)
+                GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+
             self._finishFBOrender()
 
         # call this before flip() whether FBO was used or not
@@ -1444,10 +1460,11 @@ class Rift(window.Window):
 
         if flipThisFrame:
             # set rendering back to the framebuffer object
-            GL.glBindFramebufferEXT(
-                GL.GL_FRAMEBUFFER_EXT, self.frameBuffer)
-            GL.glReadBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)
-            GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)
+            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+            #GL.glReadBuffer(GL.GL_BACK)
+            #GL.glDrawBuffer(GL.GL_BACK)
+            GL.glClearColor(0.0, 0.0, 0.0, 1.0)
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT)
             # set to no active rendering texture
             GL.glActiveTexture(GL.GL_TEXTURE0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
@@ -1730,11 +1747,11 @@ class Rift(window.Window):
         testState : `str`
             State to test. Valid values are:
 
-                * **continuous** - Button is presently being held down.
-                * **rising** or **pressed** - Button has been *pressed* since
-                  the last update.
-                * **falling** or **released** - Button has been *released* since
-                  the last update.
+            * **continuous** - Button is presently being held down.
+            * **rising** or **pressed** - Button has been *pressed* since
+              the last update.
+            * **falling** or **released** - Button has been *released* since
+              the last update.
 
         Returns
         -------
@@ -1821,6 +1838,92 @@ class Rift(window.Window):
         libovr.setControllerVibration(
             RIFT_CONTROLLER_TYPES[controller], 'off', 0.0)
 
+    @staticmethod
+    def createHapticsBuffer(samples):
+        """Create a new haptics buffer.
+
+        A haptics buffer is object which stores vibration amplitude samples for
+        playback through the Touch controllers. To play a haptics buffer, pass
+        it to :py:method:`submitHapticsBuffer`.
+
+        Parameters
+        ----------
+        samples : array_like
+            1-D array of amplitude samples, ranging from 0 to 1. Values outside
+            of this range will be clipped. The buffer must not exceed
+            `HAPTICS_BUFFER_SAMPLES_MAX` samples, any additional samples will be
+            dropped.
+
+        Returns
+        -------
+        LibOVRHapticsBuffer
+            Haptics buffer object.
+
+        Notes
+        -----
+        Methods `startHaptics` and `stopHaptics` cannot be used interchangeably
+        with this function.
+
+        Examples
+        --------
+        Create a haptics buffer where vibration amplitude ramps down over the
+        course of playback::
+
+            samples = np.linspace(
+                1.0, 0.0, num=HAPTICS_BUFFER_SAMPLES_MAX-1, dtype=np.float32)
+            hbuff = Rift.createHapticsBuffer(samples)
+
+            # vibrate right Touch controller
+            hmd.submitControllerVibration(CONTROLLER_TYPE_RTOUCH, hbuff)
+
+        """
+        if len(samples) > libovr.HAPTICS_BUFFER_SAMPLES_MAX:
+            samples = samples[:libovr.HAPTICS_BUFFER_SAMPLES_MAX]
+
+        return libovr.LibOVRHapticsBuffer(samples)
+
+    def submitControllerVibration(self, controller, hapticsBuffer):
+        """Submit a haptics buffer to begin controller vibration.
+
+        Parameters
+        ----------
+        controller : str
+            Name of controller to vibrate.
+        hapticsBuffer : LibOVRHapticsBuffer
+            Haptics buffer to playback.
+
+        Notes
+        -----
+        Methods `startHaptics` and `stopHaptics` cannot be used interchangeably
+        with this function.
+
+        """
+        libovr.submitControllerVibration(
+            RIFT_CONTROLLER_TYPES[controller], hapticsBuffer)
+
+    @staticmethod
+    def createPose(pos=(0., 0., 0.), ori=(0., 0., 0., 1.)):
+        """Create a new Rift pose object (``psychxr.libovr.LibOVRPose``).
+
+        `LibOVRPose` is used to represent a rigid body pose mainly for use with the
+        PsychXR's LibOVR module. There are several methods associated with the
+        object to manipulate the pose.
+
+        Parameters
+        ----------
+        pos : tuple, list, or ndarray of float
+            Position vector/coordinate (x, y, z).
+        ori : tuple, list, or ndarray of float
+            Orientation quaternion (x, y, z, w).
+
+        Returns
+        -------
+        LibOVRPose
+            Object representing a rigid body pose for use with LibOVR.
+
+        """
+        return libovr.LibOVRPose(pos, ori)
+
     # def getTouches(self, touchNames, stateMode='continuous'):
     #     """Returns True if any buttons are touched using sensors. This feature
     #     is used to estimate finger poses and can be used to read gestures. An
@@ -1839,24 +1942,4 @@ class Rift(window.Window):
     #     return ovr.getTouches('Touch', touchNames, stateMode)
 
 
-def createPose(pos=(0., 0., 0.), ori=(0., 0., 0., 1.)):
-    """Create a new Rift pose object (``psychxr.libovr.LibOVRPose``).
 
-    `LibOVRPose` is used to represent a rigid body pose mainly for use with the
-    PsychXR's LibOVR module. There are several methods associated with the
-    object to manipulate the pose.
-
-    Parameters
-    ----------
-    pos : tuple, list, or ndarray of float
-        Position vector/coordinate (x, y, z).
-    ori : tuple, list, or ndarray of float
-        Orientation quaternion (x, y, z, w).
-
-    Returns
-    -------
-    LibOVRPose
-        Object representing a rigid body pose for use with LibOVR.
-
-    """
-    return libovr.LibOVRPose(pos, ori)
