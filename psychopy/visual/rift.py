@@ -5,6 +5,9 @@
 Copyright (C) 2019 - Matthew D. Cutone, The Centre for Vision Research, Toronto,
 Ontario, Canada
 
+Uses PsychXR to interface with the Oculus Rift runtime. See http://psychxr.org
+for more information.
+
 """
 
 # Part of the PsychoPy library
@@ -158,7 +161,9 @@ class Rift(window.Window):
             Specifying False maintains compatibility with existing PsychoPy
             stimuli drawing routines. Use True when computing transformations
             using some other method and supplying shaders matrices directly.
-        mirrorRes: :obj:`list` of :obj:`int`
+        mirrorMode : str
+            On-screen mirror mode.
+        mirrorRes : :obj:`list` of :obj:`int`
             Resolution of the mirror texture. If None, the resolution will
             match the window size.
         warnAppFrameDropped : :obj:`bool`
@@ -341,7 +346,7 @@ class Rift(window.Window):
         self._allowHmdRendering = False
 
         # VR pose data, updated every frame
-        self._trackingState = libovr.LibOVRTrackingState()
+        self._headPose = libovr.LibOVRPose()
 
         # set the tracking origin type
         self.trackingOriginType = trackingOriginType
@@ -631,8 +636,9 @@ class Rift(window.Window):
         libovr.clearShouldRecenterFlag()
 
     def testBoundary(self, deviceType, bounadryType='PlayArea'):
-        """Test if tracked devices are colliding with the play area boundary."""
+        """Test if tracked devices are colliding with the play area boundary.
 
+        """
         if isinstance(deviceType, (list, tuple,)):
             deviceBits = 0x00000000
             for device in deviceType:
@@ -681,167 +687,81 @@ class Rift(window.Window):
 
         return devicePose[0]
 
-    def updateTrackingState(self, absTime):
-        """Update tracked object poses.
-
-        Get the poses of all tracked devices (e.g. HMD and touch controllers) at
-        `bsTime`. New poses will appear at :py:class:`~Rift.trackedHeadPose` and
-        :py:class:`~Rift.trackedHandPoses` representing the configuration of
-        the head and hands at `absTime`.
-
-        If ``autoUpdatePoses=True``, this is called automatically after
-        :py:class:`~Rift.flip` is called.
+    def getTrackingState(self, absTime=None, latencyMarker=True):
+        """Get the tracking state of the head and hands.
 
         Parameters
         ----------
-        absTime : float
-            Absolute time the updated tracking state refers to. Usually passed
-            the value of :py:class:`~Rift.predictedDisplayTime`.
+        absTime : float, optional
+            Absolute time the the tracking state refers to. If not specified,
+            the predicted display time is used.
+        latencyMarker : bool
+            Set a latency marker upon getting the tracking state. This is used
+            for motion-to-photon calculations.
+
+        Returns
+        -------
+        LibOVRTrackingState
+            Tracking state object.
 
         See Also
         --------
         getPredictedDisplayTime
             Time at mid-frame for the current frame index.
 
-        Examples
-        --------
-
-        Manually calculating eye poses each frame::
-
-            absTime = hmd.getPredictedDisplayTime()  # predicted frame time
-            hmd.updateTrackingState(absTime)
-            myHeadPose = hmd.trackedHeadPose.thePose
-            hmd.calcEyePoses(myHeadPose)
-
-            for buffer in ['left', 'right']:
-                hmd.setBuffer(buffer)
-                hmd.setRiftView()
-                # draw stuff ...
-
-        Edit the tracked head pose, then use it (must specify
-        `headLocked`=True when creating the window to do this)::
-
-            myHeadPose = Rift.createPose((0., 0., 0.))
-            hmd.calcEyePoses(myHeadPose)
-
-            for buffer in ['left', 'right']:
-                hmd.setBuffer(buffer)
-                hmd.setRiftView()
-                # draw stuff ...
-
         """
-        # Get the current tracking state structure, estimated poses for the
-        # head and hands are stored here. The latency marker for computing
-        # motion-to-photon latency is set when this function is called.
-        self._trackingState = libovr.getTrackingState(absTime)
+        if absTime is None:
+            absTime = self.predictedDisplayTime()
 
-    @property
-    def hmdToEyePoses(self):
-        """HMD to eye poses (`LibOVRPose`, `LibOVRPose`).
+        return libovr.getTrackingState(absTime, latencyMarker)
 
-        These are the prototype eye poses specified by LibOVR, defined only
-        after 'start' is called. These poses are transformed by the head pose
-        by 'calcEyePoses' to get 'eyeRenderPoses'.
+    def calcEyePoses(self, headPose, originPose=None):
+        """Calculate eye poses from a given head pose.
 
-        The horizontal (x-axis) separation of the eye poses are determined by
-        the configured lens spacing (slider adjustment). This spacing is
-        supposed to correspond to the actual inter-ocular distance (IOD) of the
-        user. You can get the IOD used for rendering by adding up the absolute
-        values of the x-components of the eye poses, or by multiplying the value
-        of `eyeToNoseDist` by two. Furthermore, the IOD values can be altered,
-        prior to calling `calcEyePoses`, to override the values specified by
-        LibOVR.
+        Frame rendering is stalled until this function returns. If `headPose` is
+        not from a recent tracking state, ensure ``headLocked=True``.
 
-        Note that the poses describe view space translations, not the relative
-        position of the eye's in world-space. So the left eye should have a
-        positive X value and the right negative.
-
-        """
-        return [libovr.getHmdToEyePose(i) for i in range(libovr.EYE_COUNT)]
-
-    @hmdToEyePoses.setter
-    def hmdToEyePoses(self, value):
-        for eye, pose in enumerate(value):
-            libovr.setHmdToEyePose(eye, pose)
-
-    @property
-    def headPosTracked(self):
-        """`True` if the head position (translation) was tracked.
-
-        This usually returns `False` when the HMD leaves the space covered by
-        the sensors. Value reflects the state at the last
-        :py:class:`~Rift.updateTrackingState` call.
-
-        """
-        status = self._trackingState.statusFlags
-        return libovr.STATUS_POSITION_TRACKED == (
-                status & libovr.STATUS_POSITION_TRACKED)
-
-    @property
-    def headOriTracked(self):
-        """`True` if the head orientation was tracked.
-
-        Value reflects the state at the last
-        :py:class:`~Rift.updateTrackingState` call.
-
-        """
-        status = self._trackingState.statusFlags
-        return libovr.STATUS_ORIENTATION_TRACKED == (
-                status & libovr.STATUS_ORIENTATION_TRACKED)
-
-    @property
-    def trackedHeadPose(self):
-        """Tracked head pose reported by LibOVR (`LibOVRPose`).
-
-        Gives the tracked pose of the head (HMD) from the last call to
-        :py:class:`~Rift.updateTrackingState`. The poses should be referenced to
-        the time passed to that function.
-
-        More detailed pose state information, such as motion derivatives, can
-        be accessed through the ``_headPoseState`` private attribute.
-
-        """
-        return self._trackingState.headPose.thePose
-
-    @property
-    def trackedHandPoses(self):
-        """Tracked left and right hand poses reported by LibOVR (`LibOVRPose`,
-        `LibOVRPose`).
-
-        Gives the tracked pose of the head (HMD) from the last call to
-        :py:class:`~Rift.updateTrackingState`. The poses should be referenced to
-        the time passed to that function.
-
-        """
-        return [self._trackingState.handPoses[i].thePose for i in range(libovr.EYE_COUNT)]
-
-    @property
-    def calibrtedOrigin(self):
-        """Get the calibrated tracking origin (`LibOVRPose`).
-
-        The pose reflects the last :py:class:`~Rift.updateTrackingState` call.
-
-        """
-        return self._trackingState.calibratedOrigin
-
-    def calcEyePoses(self, headPose=None):
-        """Calculate eye poses.
-
-        Only effective if ``autoUpdatePoses=True``. Must be called once per
-        frame prior to calling :py:class:`~Rift.setRiftView` or drawing
-        anything.
+        Once this function returns, `setBuffer` can be called and frame
+        rendering can commence. The computed eye pose for the selected buffer is
+        accessible through the :py:attr:`eyePose` attribute after calling
+        :py:method:`setBuffer`.
 
         Parameters
         ----------
-        headPose : LibOVRPose, optional
-            Head pose to use. If `None` specified, the most recent tracked head
-            pose is used.
+        headPose : LibOVRPose
+            Head pose to use.
+        originPose : LibOVRPose, optional
+            Origin of tracking in the VR scene.
+
+        Examples
+        --------
+        Get the tracking state and calculate the eye poses::
+
+            # get tracking state at predicted mid-frame time
+            trackingState = hmd.getTrackingState()
+
+            # get the head pose from the tracking state
+            headPose = trackingState.headPose.thePose
+            hmd.calcEyePoses(headPose)  # compute eye poses
+
+            # begin rendering to each eye
+            for eye in ('left', 'right'):
+                hmd.setBuffer(eye)
+                hmd.setRiftView()
+                # draw stuff here ...
+
+        Using a custom head pose (make sure ``headLocked=True`` before doing
+        this)::
+
+            headPose = createPose((0., 1.75, 0.))
+            hmd.calcEyePoses(headPose)  # compute eye poses
 
         """
         if not self._allowHmdRendering:
             return
 
-        libovr.calcEyePoses(self.trackedHeadPose if headPose is None else headPose)
+        libovr.calcEyePoses(headPose, originPose)
+        self._headPose = headPose
 
         # Calculate eye poses, this needs to be called every frame.
         # apply additional transformations to eye poses
@@ -851,31 +771,23 @@ class Rift(window.Window):
                 libovr.getEyeViewMatrix(eye, matrix)
         else:
             # view modelMatrix derived from head position when in monoscopic mode
-            self._viewMatrix = self.trackedHeadPose.getViewMatrix()
+            self._viewMatrix = headPose.getViewMatrix()
 
         self._startHmdFrame()
 
     @property
-    def eyePoses(self):
-        """Eye poses to use when rendering (`LibOVRPose`, `LibOVRPose`).
+    def eyePose(self):
+        """Computed eye pose for the current buffer. Only valid after calling
+        :func:`calcEyePoses`.
 
         """
-        return [libovr.getEyeRenderPose(i) for i in range(libovr.EYE_COUNT)]
-
-    @eyePoses.setter
-    def eyePoses(self, value):
-        libovr.setEyeRenderPose(libovr.EYE_LEFT, value[0])
-        libovr.setEyeRenderPose(libovr.EYE_RIGHT, value[1])
-
-        # Calculate eye poses, this needs to be called every frame.
-        # apply additional transformations to eye poses
         if not self._monoscopic:
-            for eye, matrix in enumerate(self._viewMatrix):
-                # compute each eye's transformation modelMatrix from returned poses
-                libovr.getEyeViewMatrix(eye, matrix)
+            if self.buffer == 'left':
+                return libovr.getEyeRenderPose(libovr.EYE_LEFT)
+            elif self.buffer == 'right':
+                return libovr.getEyeRenderPose(libovr.EYE_RIGHT)
         else:
-            # view modelMatrix derived from head position when in monoscopic mode
-            self._viewMatrix = self.trackedHeadPose.getTransformMatrix()
+            return self._headPose
 
     @property
     def shouldQuit(self):
@@ -1364,17 +1276,16 @@ class Rift(window.Window):
         result = libovr.waitToBeginFrame(self._frameIndex)
         #if result == ovr.SUCCESS_NOT_VISIBLE:
         #    pass
-        self.updateInputState()  # poll controller states
+        #self.updateInputState()  # poll controller states
 
-        # update the tracking state
-        if self.autoUpdatePoses:
-            # get the current frame time
-            absTime = libovr.getPredictedDisplayTime(self._frameIndex)
-            # Get the current tracking state structure, estimated poses for the
-            # head and hands are stored here. The latency marker for computing
-            # motion-to-photon latency is set when this function is called.
-            self.updateTrackingState(absTime)
-            self.calcEyePoses()
+        # # update the tracking state
+        # if self.autoUpdatePoses:
+        #     # get the current frame time
+        #     absTime = libovr.getPredictedDisplayTime(self._frameIndex)
+        #     # Get the current tracking state structure, estimated poses for the
+        #     # head and hands are stored here. The latency marker for computing
+        #     # motion-to-photon latency is set when this function is called.
+        #     self.calcEyePoses()
 
     def _startHmdFrame(self):
         """Prepare to render an HMD frame. This must be called every frame
