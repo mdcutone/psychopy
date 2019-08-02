@@ -195,7 +195,7 @@ class Rift(window.Window):
 
         self._samples = samples
         self._mirrorRes = mirrorRes
-        self._drawMirrorTex = False
+        self._drawMirrorTex = True
 
         # this can be changed while running
         self.warnAppFrameDropped = warnAppFrameDropped
