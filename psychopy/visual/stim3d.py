@@ -877,7 +877,7 @@ class ShaderProgram(object):
 
         Parameters
         ----------
-        program : int
+        programId : int
             Shader/program ID to retrieve log information from.
 
         Returns

@@ -90,6 +90,45 @@ RIFT_BOUNDARY_TYPE = {
     'Outer': libovr.BOUNDARY_OUTER
 }
 
+class RenderTarget(object):
+    """Render target descriptor for eye buffers."""
+    def __init__(self, fboId, viewport):
+        if GL.glIsFramebuffer(fboId):
+            self._fboId = fboId
+        else:
+            raise ValueError('`fboId` is not a framebuffer.')
+
+        self._viewport = np.asarray(viewport, dtype=np.int)
+        assert self._viewport.shape == (4,)
+
+    @property
+    def framebuffer(self):
+        """Framebuffer for this render target."""
+        return self._fboId
+
+    @framebuffer.setter
+    def framebuffer(self, value):
+        if GL.glIsFramebuffer(value):
+            self._fboId = value
+        else:
+            raise ValueError('`fboId` is not a framebuffer.')
+
+    @property
+    def viewport(self):
+        """Viewport rectangle [x, y, w, h] for this render target."""
+        return self._viewport
+
+    @viewport.setter
+    def viewport(self, value):
+        self._viewport = np.asarray(value, dtype=np.int)
+        assert self._viewport.shape == (4,)
+
+    @property
+    def size(self):
+        """Dimensions for the render target [w, h]."""
+        return self._viewport[2:]
+
+
 class LibOVRError(Exception):
     """Exception for LibOVR errors."""
     pass
@@ -465,6 +504,21 @@ class Rift(window.Window):
                 'Inter-axial separation set to {} meters.'.format(value))
 
     @property
+    def hasPositionTracking(self):
+        """``True`` if the HMD is capable of tracking position."""
+        return self._hmdInfo.hasPositionTracking
+
+    @property
+    def hasOrientationTracking(self):
+        """``True`` if the HMD is capable of tracking orientation."""
+        return self._hmdInfo.hasOrientationTracking
+
+    @property
+    def hasMagYawCorrection(self):
+        """``True`` if this HMD supports yaw drift correction."""
+        return self._hmdInfo.hasMagYawCorrection
+
+    @property
     def productName(self):
         """Get the HMD's product name (`str`).
         """
@@ -514,8 +568,8 @@ class Rift(window.Window):
 
     @property
     def pixelsPerTanAngleAtCenter(self):
-        """Horizontal and vertical per tangent angle (=1) at the center of the
-        display.
+        """Horizontal and vertical pixels per tangent angle (=1) at the center
+        of the display.
 
         """
         return [libovr.getPixelsPerTanAngleAtCenter(libovr.EYE_LEFT),
@@ -610,7 +664,10 @@ class Rift(window.Window):
         libovr.recenterTrackingOrigin()
 
     def specifyTrackingOrigin(self, pose):
-        """Specify a tracking origin.
+        """Specify a tracking origin. If `trackingOriginType='floor'`, this
+        function sets the origin of the scene in the ground plane. If
+        `trackingOriginType='eye'`, the scene origin is set to the known eye
+        height.
 
         Parameters
         ----------
@@ -621,7 +678,9 @@ class Rift(window.Window):
         libovr.specifyTrackingOrigin(pose)
 
     def specifyTrackingOriginPosOri(self, pos=(0., 0., 0.), ori=(0., 0., 0., 1.)):
-        """Specify a tracking origin using a pose and orientation.
+        """Specify a tracking origin using a pose and orientation. This is the
+        same as `specifyTrackingOrigin`, but accepts a position vector [x, y, z]
+        and orientation quaternion [x, y, z, w].
 
         Parameters
         ----------
@@ -660,6 +719,19 @@ class Rift(window.Window):
 
         return testResult
 
+    @property
+    def sensorSampleTime(self):
+        """Sensor sample time. This value corresponds to the time the head (HMD)
+        position was sampled, which is required for computing motion-to-photon
+        latency. This does not need to be specified if `getTrackingState` was
+        called with `latencyMarker=True`.
+        """
+        return libovr.getSensorSampleTime()
+
+    @sensorSampleTime.setter
+    def sensorSampleTime(self, value):
+        libovr.setSensorSampleTime(value)
+
     def getDevicePose(self, deviceName, absTime, latencyMarker=False):
         """Get the pose of a tracked device.
 
@@ -672,7 +744,7 @@ class Rift(window.Window):
             Absolute time in seconds the device pose refers to.
         latencyMarker : bool
             Insert a marker for motion-to-photon latency calculation. Should
-            only be True if the HMD pose is being used to compute eye poses.
+            only be `True` if the HMD pose is being used to compute eye poses.
 
         Returns
         -------
@@ -692,12 +764,18 @@ class Rift(window.Window):
     def getTrackingState(self, absTime=None, latencyMarker=True):
         """Get the tracking state of the head and hands.
 
+        Calling this function retrieves the tracking state of the head (HMD)
+        and hands at `absTime` from the `LibOVR` runtime. The returned object is
+        a `LibOVRPoseState` instance with poses, motion derivatives (i.e. linear
+        and angular velocity/acceleration), and tracking status flags accessible
+        through its attributes.
+
         Parameters
         ----------
         absTime : float, optional
             Absolute time the the tracking state refers to. If not specified,
             the predicted display time is used.
-        latencyMarker : bool
+        latencyMarker : bool, optional
             Set a latency marker upon getting the tracking state. This is used
             for motion-to-photon calculations.
 
@@ -718,17 +796,25 @@ class Rift(window.Window):
         return libovr.getTrackingState(absTime, latencyMarker)
 
     def calcEyePoses(self, headPose, originPose=None):
-        """Calculate eye poses from a given head pose.
+        """Calculate eye poses for rendering.
 
-        Frame rendering is stalled until this function returns. If `headPose` is
-        not from a recent tracking state, ensure ``headLocked=True`` to prevent
-        the rendered image from 'slipping' due to ASW.
+        This function calculates the eye poses to define the viewpoint
+        transformation for each eye buffer. Upon starting a new frame, the
+        application loop is halted until this function is called and returns.
 
-        Once this function returns, `setBuffer` can be called and frame
+        Once this function returns, `setBuffer` may be called and frame
         rendering can commence. The computed eye pose for the selected buffer is
         accessible through the :py:attr:`eyeRenderPose` attribute after calling
         :py:method:`setBuffer`. If `monoscopic=True`, the eye poses are set to
         the head pose.
+
+        The source data specified to `headPose` can originate from the tracking
+        state retrieved by calling :py:method:`getTrackingState`, or from
+        other sources. If a custom head pose is specified (for instance, from a
+        motion tracker), you must ensure `head-locking` is enabled to prevent
+        the ASW feature of the compositor from engaging. Furthermore, you must
+        specify sensor sample time for motion-to-photon calculation derived from
+        the sample time of the custom tracking source.
 
         Parameters
         ----------
@@ -974,6 +1060,14 @@ class Rift(window.Window):
         GL.glClear(GL.GL_STENCIL_BUFFER_BIT)
         GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
 
+        # create render buffers
+        self.renderTargets = {
+            'left': RenderTarget(
+                self.frameBuffer, libovr.getEyeRenderViewport(0)),
+            'right': RenderTarget(
+                self.frameBuffer, libovr.getEyeRenderViewport(1))
+        }
+
         # Setup the mirror texture framebuffer. The swap chain is managed
         # internally by PsychXR.
         self._mirrorFbo = GL.GLuint()
@@ -1159,10 +1253,6 @@ class Rift(window.Window):
         -------
         float
             Absolute frame mid-point time for the given frame index in seconds.
-
-        See Also
-        --------
-
 
         """
         return libovr.getPredictedDisplayTime(self._frameIndex)
@@ -1658,10 +1748,10 @@ class Rift(window.Window):
         -------
         tuple
             Left and right, X and Y thumbstick values. Axis displacements are
-            represented in each tuple by a floats ranging from -1.0
-            (full left/down) to 1.0 (full right/up). The returned values
-            reflect the controller state since the last
-            :py:class:`~Rift.updateInputState` or :py:class:`~Rift.flip` call.
+            represented in each tuple by floats ranging from -1.0 (full
+            left/down) to 1.0 (full right/up). The returned values reflect the
+            controller state since the last :py:class:`~Rift.updateInputState`
+            or :py:class:`~Rift.flip` call.
 
         """
         return libovr.getThumbstickValues(controller, deadzone)
