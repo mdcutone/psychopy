@@ -485,6 +485,108 @@ class Rift(window.Window):
         result = libovr.setInt(libovr.PERF_HUD_MODE, libovr.PERF_HUD_OFF)
         logging.info('Performance HUD disabled.')
 
+
+    def stereoDebugHudMode(self, mode):
+        """Set the debug stereo HUD mode.
+
+        This makes the compositor add stereoscopic reference guides to the
+        scene. You can configure the HUD can be configured using other methods.
+
+        Parameters
+        ----------
+        mode : str
+            Stereo debug mode to use. Valid options are `Off`, `Quad`,
+            `QuadWithCrosshair`, and `CrosshairAtInfinity`.
+
+        Examples
+        --------
+        Enable a stereo debugging guide::
+
+            hmd.stereoDebugHudMode('CrosshairAtInfinity')
+
+        Hide the debugging guide. Should be called before exiting the
+        application since it's persistent until the Oculus service is
+        restarted::
+
+            hmd.stereoDebugHudMode('Off')
+
+        """
+        result = libovr.setInt(
+            libovr.DEBUG_HUD_STEREO_MODE, RIFT_STEREO_DEBUG_HUD_MODES[mode])
+
+        if result:
+            logging.info("Stereo debug HUD mode set to '{}'.".format(mode))
+        else:
+            logging.warning(
+                "Failed to set stereo debug HUD mode set to '{}'.".format(mode))
+
+    def setStereoDebugHudOption(self, option, value):
+        """Configure stereo debug HUD guides.
+
+        Parameters
+        ----------
+        option : str
+            Option to set. Valid options are `InfoEnable`, `Size`, `Position`,
+            `YawPitchRoll`, and `Color`.
+        value : array_like or bool
+            Value to set for a given `option`. Appropriate types for each
+            option are:
+
+            * `InfoEnable` - bool, `True` to show, `False` to hide.
+            * `Size` - array_like, [w, h] in meters.
+            * `Position` - array_like, [x, y, z] in meters.
+            * `YawPitchRoll` - array_like, [pitch, yaw, roll] in degrees.
+            * `Color` - array_like, [r, g, b] as floats ranging 0.0 to 1.0.
+
+        Returns
+        -------
+        bool
+            ``True`` if the option was successfully set.
+
+        Examples
+        --------
+        Configuring a stereo debug HUD guide::
+
+            # show a quad with a crosshair
+            hmd.stereoDebugHudMode('QuadWithCrosshair')
+            # enable displaying guide information
+            hmd.setStereoDebugHudOption('InfoEnable', True)
+            # set the position of the guide quad in the scene
+            hmd.setStereoDebugHudOption('Position', [0.0, 1.7, -2.0])
+
+        """
+
+        if option == 'InfoEnable':
+            result = libovr.setBool(
+                libovr.DEBUG_HUD_STEREO_GUIDE_INFO_ENABLE, value)
+        elif option == 'Size':
+            value = np.asarray(value, dtype=np.float32)
+            result = libovr.setFloatArray(
+                libovr.DEBUG_HUD_STEREO_GUIDE_SIZE, value)
+        elif option == 'Position':
+            value = np.asarray(value, dtype=np.float32)
+            result = libovr.setFloatArray(
+                libovr.DEBUG_HUD_STEREO_GUIDE_POSITION, value)
+        elif option == 'YawPitchRoll':
+            value = np.asarray(value, dtype=np.float32)
+            result = libovr.setFloatArray(
+                libovr.DEBUG_HUD_STEREO_GUIDE_YAWPITCHROLL, value)
+        elif option == 'Color' or option == 'Colour':
+            value = np.asarray(value, dtype=np.float32)
+            result = libovr.setFloatArray(
+                libovr.DEBUG_HUD_STEREO_GUIDE_COLOR, value)
+        else:
+            raise ValueError("Invalid option `{}` specified.".format(option))
+
+        if result:
+            logging.info(
+                "Stereo debug HUD option '{}' set to {}.".format(
+                    option, str(value)))
+        else:
+            logging.warning(
+                "Failed to set stereo debug HUD option '{}' set to {}.".format(
+                    option, str(value)))
+
     @property
     def userHeight(self):
         """Get user height in meters (`float`)."""
@@ -504,13 +606,14 @@ class Rift(window.Window):
         Examples
         --------
 
-        Generate your own eye poses::
+        Generate your own eye poses. These are used when
+        :py:method:`calcEyePoses` is called::
 
-            leftEyePose = createPose((-self.eyeToNoseDistance, 0., 0.))
-            rightEyePose = createPose((self.eyeToNoseDistance, 0., 0.))
+            leftEyePose = Rift.createPose((-self.eyeToNoseDistance, 0., 0.))
+            rightEyePose = Rift.createPose((self.eyeToNoseDistance, 0., 0.))
             self.hmdToEyePoses = [leftEyePose, rightEyePose]
 
-        Get the inter-axial separation (IAS) reported by LibOVR::
+        Get the inter-axial separation (IAS) reported by `LibOVR`::
 
             iad = self.eyeToNoseDistance * 2.0
 
@@ -692,63 +795,6 @@ class Rift(window.Window):
         else:
             raise ValueError("LibOVR returned unknown tracking origin type.")
 
-    def stereoDebugHudMode(self, mode='CrosshairAtInfinity'):
-        """Set the debug stereo HUD mode.
-
-        This makes the compositor add stereoscopic reference guides to the
-        scene. You can configure the HUD can be configured using other methods.
-
-        Parameters
-        ----------
-        mode : str
-            Stereo debug mode to use. Valid options are `Off`, `Quad`,
-            `QuadWithCrosshair`, and `CrosshairAtInfinity`
-
-        """
-        libovr.setInt(libovr.DEBUG_HUD_STEREO_MODE,
-                      RIFT_STEREO_DEBUG_HUD_MODES[mode])
-
-    def setStereoDebugHudOption(self, option, value):
-        """Configure stereo debug HUD guides.
-
-        Parameters
-        ----------
-        option : str
-            Option to set. Valid options are `InfoEnable`, `Size`, `Position`,
-            `YawPitchRoll`, and `Color`.
-        value : array_like or bool
-            Value to set for a given `option`. Must be an appropriate type for
-            the option. `InfoEnable` is bool, `Size` is [x, y], and the rest are
-            [x, y, z].
-
-        Returns
-        -------
-        bool
-            ``True`` if the option was successfully set.
-
-        """
-        if option == 'InfoEnable':
-            return libovr.setBool(
-                libovr.DEBUG_HUD_STEREO_GUIDE_INFO_ENABLE, value)
-        elif option == 'Size':
-            value = np.asarray(value, dtype=np.float32)
-            return libovr.setFloatArray(
-                libovr.DEBUG_HUD_STEREO_GUIDE_SIZE, value)
-        elif option == 'Position':
-            value = np.asarray(value, dtype=np.float32)
-            return libovr.setFloatArray(
-                libovr.DEBUG_HUD_STEREO_GUIDE_POSITION, value)
-        elif option == 'YawPitchRoll':
-            value = np.asarray(value, dtype=np.float32)
-            return libovr.setFloatArray(
-                libovr.DEBUG_HUD_STEREO_GUIDE_YAWPITCHROLL, value)
-        elif option == 'Color' or option == 'Colour':
-            value = np.asarray(value, dtype=np.float32)
-            return libovr.setFloatArray(
-                libovr.DEBUG_HUD_STEREO_GUIDE_COLOR, value)
-        else:
-            raise ValueError("Invalid option `{}` specified.".format(option))
-
     @trackingOriginType.setter
     def trackingOriginType(self, value):
         libovr.setTrackingOriginType(RIFT_TRACKING_ORIGIN_TYPE[value])
@@ -876,12 +922,78 @@ class Rift(window.Window):
         Returns
         -------
         LibOVRTrackingState
-            Tracking state object.
+            Tracking state object. For more information about this type see:
 
         See Also
         --------
         getPredictedDisplayTime
             Time at mid-frame for the current frame index.
+
+        Examples
+        --------
+        Get the tracked head pose and use it to calculate render eye poses::
+
+            # get tracking state at predicted mid-frame time
+            absTime = getPredictedDisplayTime()
+            trackingState = hmd.getTrackingState(absTime)
+
+            # get the head pose from the tracking state
+            headPose = trackingState.headPose.thePose
+            hmd.calcEyePoses(headPose)  # compute eye poses
+
+        Get linear/angular velocity and acceleration vectors of the right
+        touch controller::
+
+            # right hand is the second value (index 1) at `handPoses`
+            rightHandState = trackingState.handPoses[1]
+
+            # access `LibOVRTrackingState` fields to get the data
+            linearVel = rightHandState.linearVelocity  # m/s
+            angularVel = rightHandState.angularVelocity  # rad/s
+            linearAcc = rightHandState.linearAcceleration  # m/s^2
+            angularAcc = rightHandState.angularAcceleration  # rad/s^2
+
+            # extract components like this if desired
+            vx, vy, vz = linearVel
+            ax, ay, az = angularVel
+
+        Checking if head position and orientation tracking was valid when
+        sampled::
+
+            if trackingState.positionValid and trackingState.orientationValid:
+                print('Tracking valid.')
+
+        Get the calibrated origin used for tracking during the sample period
+        of the tracking state::
+
+            calibratedOrigin = trackingState.calibratedOrigin
+            calibPos, calibOri = calibratedOrigin.posOri
+
+        Time integrate a tracking state. This extrapolates the pose over time
+        given the present computed motion derivatives. The example below shows
+        how to implement head pose forward prediction::
+
+            # get current system time
+            absTime = getTimeInSeconds()
+
+            # get the elapsed time from `absTime` to predicted v-sync time,
+            # again this is an example, you would usually pass predicted time to
+            # `getTrackingState` directly.
+            dt = getPredictedDisplayTime() - absTime
+
+            # get the tracking state for the current time, poses will lag where
+            # they are expected at predicted time by `dt` seconds
+            trackingState = hmd.getTrackingState(absTime)
+
+            # time integrate a pose by dt
+            headPoseState = trackingState.headPose
+            headPosePredicted = headPoseState.timeIntegrate(dt)
+
+            # calc eye poses with predicted head pose
+            hmd.calcEyePoses(headPosePredicted)
+
+        The resulting head pose is usually very close to what `getTrackingState`
+        would return if the predicted time was used.
 
         """
         if absTime is None:
