@@ -5,8 +5,9 @@
 Copyright (C) 2019 - Matthew D. Cutone, The Centre for Vision Research, Toronto,
 Ontario, Canada
 
-Uses PsychXR to interface with the Oculus Rift runtime. See http://psychxr.org
-for more information.
+Uses PsychXR to interface with the Oculus Rift runtime (LibOVR) and SDK. See
+http://psychxr.org for more information. The Oculus PC SDK is Copyright (c)
+Facebook Technologies, LLC and its affiliates. All rights reserved.
 
 """
 
@@ -14,6 +15,14 @@ for more information.
 # Copyright (C) 2018 Jonathan Peirce
 # Distributed under the terms of the GNU General Public License (GPL).
 
+# ----------
+# Initialize
+# ----------
+
+# Check if they system has PsychXR installed and is importable. If not, this
+# module will still load, but the `Rift` class will fail to load. This allows
+# the Rift library to be lazy-loaded on systems without PsychXR.
+#
 _HAS_PSYCHXR_ = True
 
 try:
@@ -21,30 +30,39 @@ try:
 except ImportError:
     _HAS_PSYCHXR_ = False
 
-from . import window
+# -------
+# Imports
+# -------
 
+import warnings
 import platform
 import ctypes
-from psychopy import platform_specific, logging
-import pyglet.gl as GL
-from psychopy.tools.attributetools import setAttribute
 import numpy as np
-import warnings
+import pyglet.gl as GL
+from psychopy.visual import window
+from psychopy import platform_specific, logging
+from psychopy.tools.attributetools import setAttribute
 
 reportNDroppedFrames = 5
 
+# -------------------------------------------
+# Look-up tables for PsychXR/LibOVR constants
+# -------------------------------------------
+
+# Controller types supported by PsychXR
 RIFT_CONTROLLER_TYPES = {
     'Xbox': libovr.CONTROLLER_TYPE_XBOX,
     'Remote': libovr.CONTROLLER_TYPE_REMOTE,
     'Touch': libovr.CONTROLLER_TYPE_TOUCH,
     'LeftTouch': libovr.CONTROLLER_TYPE_LTOUCH,
     'RightTouch': libovr.CONTROLLER_TYPE_RTOUCH,
-    "Object0": libovr.CONTROLLER_TYPE_OBJECT0,
-    "Object1": libovr.CONTROLLER_TYPE_OBJECT1,
-    "Object2": libovr.CONTROLLER_TYPE_OBJECT2,
-    "Object3": libovr.CONTROLLER_TYPE_OBJECT3
+    'Object0': libovr.CONTROLLER_TYPE_OBJECT0,
+    'Object1': libovr.CONTROLLER_TYPE_OBJECT1,
+    'Object2': libovr.CONTROLLER_TYPE_OBJECT2,
+    'Object3': libovr.CONTROLLER_TYPE_OBJECT3
 }
 
+# Button types supported by PsychXR
 RIFT_BUTTON_TYPES = {
     "A": libovr.BUTTON_A,
     "B": libovr.BUTTON_B,
@@ -65,8 +83,9 @@ RIFT_BUTTON_TYPES = {
     "Home": libovr.BUTTON_HOME,
 }
 
+# Tracked device identifiers
 RIFT_TRACKED_DEVICE_TYPES = {
-    "HMD" : libovr.TRACKED_DEVICE_TYPE_HMD,
+    "HMD": libovr.TRACKED_DEVICE_TYPE_HMD,
     "LTouch": libovr.TRACKED_DEVICE_TYPE_LTOUCH,
     "RTouch": libovr.TRACKED_DEVICE_TYPE_RTOUCH,
     "Touch": libovr.TRACKED_DEVICE_TYPE_TOUCH,
@@ -76,19 +95,37 @@ RIFT_TRACKED_DEVICE_TYPES = {
     "Object3": libovr.TRACKED_DEVICE_TYPE_OBJECT3
 }
 
+# Tracking origin types
 RIFT_TRACKING_ORIGIN_TYPE = {
     "floor": libovr.TRACKING_ORIGIN_FLOOR_LEVEL,
     "eye": libovr.TRACKING_ORIGIN_EYE_LEVEL
 }
 
+# Performance hud modes
 RIFT_PERF_HUD_MODES = {
     'PerfSummary': libovr.PERF_HUD_PERF_SUMMARY,
-    'Off': libovr.PERF_HUD_OFF}
+    'LatencyTiming': libovr.PERF_HUD_LATENCY_TIMING,
+    'AppRenderTiming': libovr.PERF_HUD_APP_RENDER_TIMING,
+    'CompRenderTiming': libovr.PERF_HUD_COMP_RENDER_TIMING,
+    'AswStats': libovr.PERF_HUD_ASW_STATS,
+    'VersionInfo': libovr.PERF_HUD_VERSION_INFO,
+    'Off': libovr.PERF_HUD_OFF
+}
 
+# stereo debug hud modes
+RIFT_STEREO_DEBUG_HUD_MODES = {
+    'Off': libovr.DEBUG_HUD_STEREO_MODE_OFF,
+    'Quad': libovr.DEBUG_HUD_STEREO_MODE_QUAD,
+    'QuadWithCrosshair': libovr.DEBUG_HUD_STEREO_MODE_QUAD_WITH_CROSSHAIR,
+    'CrosshairAtInfinity': libovr.DEBUG_HUD_STEREO_MODE_CROSSHAIR_AT_INFINITY
+}
+
+# Boundary types
 RIFT_BOUNDARY_TYPE = {
     'PlayArea': libovr.BOUNDARY_PLAY_AREA,
     'Outer': libovr.BOUNDARY_OUTER
 }
+
 
 class RenderTarget(object):
     """Render target descriptor for eye buffers."""
@@ -655,6 +692,63 @@ class Rift(window.Window):
         else:
             raise ValueError("LibOVR returned unknown tracking origin type.")
 
+    def stereoDebugHudMode(self, mode='CrosshairAtInfinity'):
+        """Set the debug stereo HUD mode.
+
+        This makes the compositor add stereoscopic reference guides to the
+        scene. You can configure the HUD can be configured using other methods.
+
+        Parameters
+        ----------
+        mode : str
+            Stereo debug mode to use. Valid options are `Off`, `Quad`,
+            `QuadWithCrosshair`, and `CrosshairAtInfinity`
+
+        """
+        libovr.setInt(libovr.DEBUG_HUD_STEREO_MODE,
+                      RIFT_STEREO_DEBUG_HUD_MODES[mode])
+
+    def setStereoDebugHudOption(self, option, value):
+        """Configure stereo debug HUD guides.
+
+        Parameters
+        ----------
+        option : str
+            Option to set. Valid options are `InfoEnable`, `Size`, `Position`,
+            `YawPitchRoll`, and `Color`.
+        value : array_like or bool
+            Value to set for a given `option`. Must be an appropriate type for
+            the option. `InfoEnable` is bool, `Size` is [x, y], and the rest are
+            [x, y, z].
+
+        Returns
+        -------
+        bool
+            ``True`` if the option was successfully set.
+
+        """
+        if option == 'InfoEnable':
+            return libovr.setBool(
+                libovr.DEBUG_HUD_STEREO_GUIDE_INFO_ENABLE, value)
+        elif option == 'Size':
+            value = np.asarray(value, dtype=np.float32)
+            return libovr.setFloatArray(
+                libovr.DEBUG_HUD_STEREO_GUIDE_SIZE, value)
+        elif option == 'Position':
+            value = np.asarray(value, dtype=np.float32)
+            return libovr.setFloatArray(
+                libovr.DEBUG_HUD_STEREO_GUIDE_POSITION, value)
+        elif option == 'YawPitchRoll':
+            value = np.asarray(value, dtype=np.float32)
+            return libovr.setFloatArray(
+                libovr.DEBUG_HUD_STEREO_GUIDE_YAWPITCHROLL, value)
+        elif option == 'Color' or option == 'Colour':
+            value = np.asarray(value, dtype=np.float32)
+            return libovr.setFloatArray(
+                libovr.DEBUG_HUD_STEREO_GUIDE_COLOR, value)
+        else:
+            raise ValueError("Invalid option `{}` specified.".format(option))
+
     @trackingOriginType.setter
     def trackingOriginType(self, value):
         libovr.setTrackingOriginType(RIFT_TRACKING_ORIGIN_TYPE[value])
@@ -930,8 +1024,8 @@ class Rift(window.Window):
         buffer is created. Rendering is diverted to the multi-sample buffer
         when drawing, which is then resolved into the HMD's swap chain texture
         prior to committing it to the chain. Consequently, you cannot pass
-        the texture attached to the FBO specified by frameBuffer until the MSAA
-        buffer is resolved. Doing so will result in a blank texture.
+        the texture attached to the FBO specified by `frameBuffer` until the
+        MSAA buffer is resolved. Doing so will result in a blank texture.
 
         """
         # create a texture swap chain for both eye textures
@@ -1098,7 +1192,7 @@ class Rift(window.Window):
 
         Notes
         -----
-        You cannot perform operations on the default FBO (at frameBuffer) when
+        You cannot perform operations on the default FBO (at `frameBuffer`) when
         MSAA is enabled. Any changes will be over-written when 'flip' is called.
 
         """
@@ -1176,7 +1270,7 @@ class Rift(window.Window):
         GL.glEnable(GL.GL_BLEND)
 
     def setBuffer(self, buffer, clear=True):
-        """Set the active stereo draw buffer.
+        """Set the active draw buffer.
 
         Warnings
         --------
@@ -1247,7 +1341,8 @@ class Rift(window.Window):
         GL.glEnable(GL.GL_BLEND)
 
     def getPredictedDisplayTime(self):
-        """Get the predicted time the next frame will be displayed.
+        """Get the predicted time the next frame will be displayed. The returned
+        time is referenced to the clock `LibOVR` is using.
 
         Returns
         -------
@@ -1258,7 +1353,8 @@ class Rift(window.Window):
         return libovr.getPredictedDisplayTime(self._frameIndex)
 
     def getTimeInSeconds(self):
-        """Absolute time in seconds.
+        """Absolute time in seconds. The returned time is referenced to the
+        clock `LibOVR` is using.
 
         Returns
         -------
@@ -1271,7 +1367,7 @@ class Rift(window.Window):
     @property
     def viewMatrix(self):
         """Get the view matrix for the current eye buffer. Only valid after a
-        :func:`calcEyePoses` call.
+        :py:method:`calcEyePoses` call.
 
         """
         if not self._monoscopic:
@@ -1333,7 +1429,8 @@ class Rift(window.Window):
         return [ctrlKeys[ctrl] for ctrl in controllers]
 
     def updateInputState(self, controllers=None):
-        """Update all connected controller states.
+        """Update all connected controller states. This updates controller input
+        states for all devices managed by `LibOVR`.
 
         Parameters
         ----------
