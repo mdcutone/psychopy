@@ -35,60 +35,76 @@ _SCENE_LIGHTS = []
 
 
 phongVertSimple = """
-varying vec3 N;
-varying vec3 v;
+varying vec3 normal, lightDir, halfVector;
+varying vec4 ambient_color, diffuse_color, specular_color; //, emissive_color;
 
-void main(void)  
-{     
-    v = vec3(gl_ModelViewMatrix * gl_Vertex);       
-    N = normalize(gl_NormalMatrix * gl_Normal);
+uniform vec4 diffuse, specular;
+uniform vec3 ambient; //emissive;
 
-    gl_FrontColor = gl_Color;
+
+void main()
+{
+    normal = gl_NormalMatrix * gl_Normal;
+
+    vec3 vVertex = vec3(gl_ModelViewMatrix * gl_Vertex);
+
+    lightDir = vec3(gl_LightSource[0].position.xyz - vVertex);
+    halfVector = normalize(gl_LightSource[0].halfVector.xyz);
+
+    ambient_color = (gl_FrontLightModelProduct.sceneColor * gl_FrontMaterial.ambient) + 
+    (gl_LightSource[0].ambient * vec4(gl_FrontMaterial.ambient.rgb, 1.0));
+
+    diffuse_color = gl_LightSource[0].diffuse * gl_FrontMaterial.diffuse;
+
+    specular_color.rgb = gl_LightSource[0].specular.rgb * gl_FrontMaterial.specular.rgb;
+    specular_color.a = gl_FrontMaterial.specular.a;
+
+    //emissive_color = vec4(emissive, 1.0);
+
     gl_TexCoord[0] = gl_MultiTexCoord0;
-    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;  
+    gl_Position = ftransform();
 }
           
 """
 
 phongFragSimple = """
-varying vec3 N;
-varying vec3 v;  
+varying vec3 normal, lightDir, halfVector;
+varying vec4 ambient_color, diffuse_color, specular_color, emissive_color;
 
-uniform sampler2D texture0;
+uniform sampler2D diffuseTexture;
 
-#define MAX_LIGHTS 1
 
-void main (void)  
-{  
-    vec3 L;
-    vec4 acc = vec4(0., 0., 0., 0.);
-    
-    for (int i=0; i < MAX_LIGHTS; i++)
+void main (void)
+{
+
+    vec4 tex_color = texture2D(diffuseTexture, gl_TexCoord[0].st);
+
+    // Ambient * texture color
+    vec4 final_color = ambient_color * tex_color;
+
+    vec3 N = normalize(normal);
+    vec3 L = normalize(lightDir);
+
+    float NdotL = max(dot(N, L), 0.0);
+
+    if(NdotL > 0.0)
     {
-        if (gl_LightSource[i].position.w == 0.0) {  // is directional?
-            L = normalize(gl_LightSource[i].position.xyz);
-        } else {
-            L = normalize(gl_LightSource[i].position.xyz - v); 
-        }
+        // Diffuse * texture color
+        final_color += diffuse_color * NdotL * tex_color;
         
-        vec3 E = normalize(-v);
-        vec3 R = normalize(-reflect(L,N));  
-        
-        vec4 Iamb = clamp(gl_FrontLightProduct[i].ambient, 0.0, 1.0);
-        
-        //calculate Diffuse Term:  
-        vec4 Idiff = gl_FrontLightProduct[i].diffuse * max(dot(N,L), 0.0);
-        Idiff = clamp(Idiff * texture2D(texture0, gl_TexCoord[0].st), 0.0, 1.0);     
-        
-        // calculate Specular Term:
-        vec4 Ispec = gl_FrontLightProduct[i].specular 
-                * pow(max(dot(R,E),0.0), 0.3 * gl_FrontMaterial.shininess);
-        Ispec = clamp(Ispec, 0.0, 1.0); 
-        
-        // write Total Color:  
-        acc += Iamb + Idiff + Ispec;
+        // Specular
+        vec3 H = normalize(halfVector);
+        float NdotH = max(dot(N, H), 0.0);
+        float shininess = specular_color.a * 255.0;
+        float specular = pow(NdotH, shininess);
+        final_color.rgb += specular_color.rgb * specular;
     }
-    gl_FragColor = acc; 
+
+    // Make sure we use the alpha from the texture
+    // otherwise the eyelashes and eyebrows are not tranparent
+    final_color.a = tex_color.a;
+    // final_color.rgb += emissive_color.rgb;
+    gl_FragColor = final_color;
 }
           
 """
@@ -573,7 +589,10 @@ class MeshStimMixin(RigidBodyPoseMixin):
         GL.glEnable(GL.GL_DEPTH_TEST)
         GL.glDepthFunc(self.depthFunc)
 
+        GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
         GL.glEnable(GL.GL_BLEND)
+        #GL.glEnable(GL.GL_ALPHA_TEST)
+        #GL.glAlphaFunc(GL.GL_GREATER, 0.8)
 
         # get the model matrix
         M = self.thePose.getModelMatrix().ctypes.data_as(ctypes.POINTER(ctypes.c_float))
@@ -1167,8 +1186,6 @@ def useMaterial(material, useTextures=True):
             GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
             GL.glDisable(GL.GL_TEXTURE_2D)
 
-        GL.glUseProgram(0)
-
 
 class ObjMeshStim(MeshStimMixin):
     """Class for loading and presenting 3D stimuli in the Wavefront OBJ format.
@@ -1499,12 +1516,14 @@ class ObjMeshStim(MeshStimMixin):
 
         # draw the model
         for group, vao in self._materialVAOs.items():
-            self._shader.useProgram()
+            #self._shader.useProgram()
             useMaterial(self._mtllibInfo[group], useTextures=True)
             GL.glBindVertexArray(vao[0])
             GL.glDrawElements(GL.GL_TRIANGLES, vao[1], GL.GL_UNSIGNED_INT, None)
             GL.glBindVertexArray(0)
-            GL.glUseProgram(0)
+            #GL.glUseProgram(0)
+
+        print(group)
 
         # disable materials
         useMaterial(None)

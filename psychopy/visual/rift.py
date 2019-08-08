@@ -611,7 +611,6 @@ class Rift(window.Window):
 
             leftEyePose = Rift.createPose((-self.eyeToNoseDistance, 0., 0.))
             rightEyePose = Rift.createPose((self.eyeToNoseDistance, 0., 0.))
-            self.hmdToEyePoses = [leftEyePose, rightEyePose]
 
         Get the inter-axial separation (IAS) reported by `LibOVR`::
 
@@ -628,20 +627,22 @@ class Rift(window.Window):
     def iod(self):
         """Inter-axial separation in meters (`float`).
 
-        Value is applied to the poses in :py:class:`~Rift.hmdToEyePoses`.
-
         """
-        if self.hmdToEyePoses is not None:
-            return -self.hmdToEyePoses[0].pos[0] + self.hmdToEyePoses[1].pos[0]
+        leftEyeHmdPose = libovr.getHmdToEyePose(libovr.EYE_LEFT)
+        rightEyeHmdPose = libovr.getHmdToEyePose(libovr.EYE_RIGHT)
+
+        return -leftEyeHmdPose.pos[0] + rightEyeHmdPose.pos[0]
 
     @iod.setter
     def iod(self, value):
-        if self.hmdToEyePoses is not None:
-            halfIAS = value / 2.0
-            self.hmdToEyePoses = [libovr.LibOVRPose((halfIAS, 0.0, 0.0)),
-                                  libovr.LibOVRPose((-halfIAS, 0.0, 0.0))]
-            logging.info(
-                'Inter-axial separation set to {} meters.'.format(value))
+        halfIAS = value / 2.0
+        libovr.setHmdToEyePose(
+            libovr.EYE_LEFT, libovr.LibOVRPose((halfIAS, 0.0, 0.0)))
+        libovr.setHmdToEyePose(
+            libovr.EYE_RIGHT, libovr.LibOVRPose((-halfIAS, 0.0, 0.0)))
+
+        logging.info(
+            'Inter-axial separation set to {} meters.'.format(value))
 
     @property
     def hasPositionTracking(self):
@@ -710,6 +711,8 @@ class Rift(window.Window):
     def pixelsPerTanAngleAtCenter(self):
         """Horizontal and vertical pixels per tangent angle (=1) at the center
         of the display.
+
+        This can be used to compute pixels-per-degree for the display.
 
         """
         return [libovr.getPixelsPerTanAngleAtCenter(libovr.EYE_LEFT),
@@ -872,16 +875,19 @@ class Rift(window.Window):
     def sensorSampleTime(self, value):
         libovr.setSensorSampleTime(value)
 
-    def getDevicePose(self, deviceName, absTime, latencyMarker=False):
-        """Get the pose of a tracked device.
+    def getDevicePose(self, deviceName, absTime=None, latencyMarker=False):
+        """Get the pose of a tracked device. For head (HMD) and hand poses
+        (Touch controllers) it is better to use :py:method:`getTrackingState`
+        instead.
 
         Parameters
         ----------
         deviceName : str
             Name of the device. Valid device names are: 'HMD', 'LTouch',
             'RTouch', 'Touch', 'Object0', 'Object1', 'Object2', and 'Object3'.
-        absTime : float
-            Absolute time in seconds the device pose refers to.
+        absTime : float, optional
+            Absolute time in seconds the device pose refers to. If not
+            specified, the predicted time is used.
         latencyMarker : bool
             Insert a marker for motion-to-photon latency calculation. Should
             only be `True` if the HMD pose is being used to compute eye poses.
@@ -892,6 +898,9 @@ class Rift(window.Window):
             Pose state object. `None` if device tracking was lost.
 
         """
+        if absTime is None:
+            absTime = self.getPredictedDisplayTime()
+
         deviceStatus, devicePose = libovr.getDevicePoses(
             [RIFT_TRACKED_DEVICE_TYPES[deviceName]], absTime, latencyMarker)
 
@@ -906,9 +915,12 @@ class Rift(window.Window):
 
         Calling this function retrieves the tracking state of the head (HMD)
         and hands at `absTime` from the `LibOVR` runtime. The returned object is
-        a `LibOVRPoseState` instance with poses, motion derivatives (i.e. linear
-        and angular velocity/acceleration), and tracking status flags accessible
-        through its attributes.
+        a `LibOVRTrackingState` instance with poses, motion derivatives (i.e.
+        linear and angular velocity/acceleration), and tracking status flags
+        accessible through its attributes.
+
+        The pose states of the head and hands are available by accessing the
+        `headPose` and `handPoses` attributes, respectively.
 
         Parameters
         ----------
@@ -945,9 +957,9 @@ class Rift(window.Window):
         touch controller::
 
             # right hand is the second value (index 1) at `handPoses`
-            rightHandState = trackingState.handPoses[1]
+            rightHandState = trackingState.handPoses[1]  # is `LibOVRPoseState`
 
-            # access `LibOVRTrackingState` fields to get the data
+            # access `LibOVRPoseState` fields to get the data
             linearVel = rightHandState.linearVelocity  # m/s
             angularVel = rightHandState.angularVelocity  # rad/s
             linearAcc = rightHandState.linearAcceleration  # m/s^2
@@ -970,8 +982,8 @@ class Rift(window.Window):
             calibPos, calibOri = calibratedOrigin.posOri
 
         Time integrate a tracking state. This extrapolates the pose over time
-        given the present computed motion derivatives. The example below shows
-        how to implement head pose forward prediction::
+        given the present computed motion derivatives. The contrived example
+        below shows how to implement head pose forward prediction::
 
             # get current system time
             absTime = getTimeInSeconds()
@@ -985,11 +997,12 @@ class Rift(window.Window):
             # they are expected at predicted time by `dt` seconds
             trackingState = hmd.getTrackingState(absTime)
 
-            # time integrate a pose by dt
+            # time integrate a pose by `dt`
             headPoseState = trackingState.headPose
             headPosePredicted = headPoseState.timeIntegrate(dt)
 
-            # calc eye poses with predicted head pose
+            # calc eye poses with predicted head pose, this is a custom pose to
+            # head-locking should be enabled!
             hmd.calcEyePoses(headPosePredicted)
 
         The resulting head pose is usually very close to what `getTrackingState`
