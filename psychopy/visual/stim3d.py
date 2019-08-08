@@ -1523,8 +1523,6 @@ class ObjMeshStim(MeshStimMixin):
             GL.glBindVertexArray(0)
             #GL.glUseProgram(0)
 
-        print(group)
-
         # disable materials
         useMaterial(None)
         gltools.useLights(None)
