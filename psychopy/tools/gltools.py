@@ -2860,6 +2860,200 @@ def loadObjFile(objFile):
     return WavefrontObj(matLibPath, objVAOs, posVBO, texVBO, normVBO, dict())
 
 
+class ObjMeshInfo(object):
+    """Descriptor for mesh data loaded from a Wavefront OBJ.
+
+    """
+    __slots__ = [
+        'vertices',
+        'texCoords',
+        'normals',
+        'faces',
+        'groupIdx',
+        'materialIdx',
+        'objIdx',
+        'extents',
+        'mtlFile']
+
+    def __init__(self,
+                 vertices=None,
+                 texCoords=None,
+                 normals=None,
+                 faces=None,
+                 objIdx=None,
+                 groupIdx=None,
+                 materialIdx=None,
+                 extents=None,
+                 mtlFile=None):
+
+        self.vertices = vertices
+        self.texCoords = texCoords
+        self.normals = normals
+        self.faces = faces
+        self.mtlFile = mtlFile
+        self.objIdx = objIdx
+        self.groupIdx = groupIdx
+        self.materialIdx = materialIdx
+        self.extents = extents
+
+
+def loadObjFile2(objFile):
+    """Load and *.OBJ file and create vertex buffers."""
+    # open the file, read it into memory
+    with open(objFile, 'r') as f:
+        objBuffer = io.StringIO(f.read())
+
+    mtlFile = None
+
+    # unsorted attribute data lists
+    positionDefs = []
+    texCoordDefs = []
+    normalDefs = []
+    faceDefs = []
+
+    vertexAttrs = collections.OrderedDict()
+
+    # vertex groups
+    vertexGroups = {'(null)': 0}  # (null) is reserved
+    vertexGroupList = []
+    currentVertexGroup = 0
+
+    # material groups
+    materialGroups = {}
+    materialGroupList = []
+    currentMaterialGroup = 0
+
+    # object groups
+    objectGroups = {}
+    objectGroupList = []
+    currentObjectGroup = 0
+
+    nVertices = nTextureCoords = nNormals = nFaces = 0
+    vertexIdx = 0
+    vertexGroup = None
+    # first pass, examine the file and load up vertex attributes
+    for line in objBuffer.readlines():
+        line = line.strip()  # clean up like
+        if line.startswith('v '):
+            positionDefs.append(tuple(map(float, line[2:].split(' '))))
+            nVertices += 1
+        elif line.startswith('vt '):
+            texCoordDefs.append(tuple(map(float, line[3:].split(' '))))
+            nTextureCoords += 1
+        elif line.startswith('vn '):
+            normalDefs.append(tuple(map(float, line[3:].split(' '))))
+            nNormals += 1
+        elif line.startswith('f '):
+            faceAttrs = []  # attributes this face
+            for attrs in line[2:].split(' '):  # triangle vertex attrs
+                if attrs not in vertexAttrs.keys():
+                    vertexAttrs[attrs] = vertexIdx
+                    vertexIdx += 1
+                faceAttrs.append(vertexAttrs[attrs])
+            faceDefs.append(faceAttrs)
+            vertexGroupList.append(currentVertexGroup)
+            materialGroupList.append(currentMaterialGroup)
+            objectGroupList.append(currentObjectGroup)
+            nFaces += 1
+        elif line.startswith('o '):  # ignored for now
+            objectGroup = line[2:]
+            if objectGroup not in objectGroups.keys():
+                currentObjectGroup += 1
+                objectGroups[objectGroup] = currentObjectGroup
+            else:
+                currentObjectGroup = objectGroups[objectGroup]
+        elif line.startswith('g '):  # ignored for now
+            vertexGroup = line[2:]
+            if vertexGroup not in vertexGroups.keys():
+                currentVertexGroup += 1
+                vertexGroups[vertexGroup] = currentVertexGroup
+            else:
+                currentVertexGroup = vertexGroups[vertexGroup]
+        elif line.startswith('usemtl '):
+            materialGroup = line[7:]
+            if materialGroup not in materialGroups.keys():
+                currentMaterialGroup += 1
+                materialGroups[materialGroup] = currentMaterialGroup
+            else:
+                currentMaterialGroup = materialGroups[materialGroup]
+        elif line.startswith('mtllib '):
+            mtlFile = line.strip()[7:]
+
+    faceDefs = np.asarray(faceDefs, dtype=np.int)
+    vertexGroupList = np.asarray(vertexGroupList, dtype=np.int)
+
+    # at the very least, we need vertices and facedefs
+    if nVertices == 0 or nFaces == 0:
+        raise RuntimeError(
+            "Failed to load OBJ file, file contains no vertices or faces.")
+
+    # indicate if file has any texture coordinates of normals
+    hasTexCoords = nTextureCoords > 0
+    hasNormals = nNormals > 0
+
+    # lists for vertex attributes
+    vertexPos = []
+    vertexTexCoord = []
+    vertexNormal = []
+
+    # populate vertex attribute arrays
+    for attrs, idx in vertexAttrs.items():
+        attr = attrs.split('/')
+        p = int(attr[0]) - 1
+        vertexPos.append(positionDefs[p])
+        if len(attr) > 1:  # has texture coords
+            if hasTexCoords:
+                if attr[1] != '':  # texcoord field not empty
+                    t = int(attr[1]) - 1
+                    vertexTexCoord.append(texCoordDefs[t])
+                else:
+                    vertexTexCoord.append([0., 0.])
+        if len(attr) > 2:  # has normals too
+            if hasNormals:
+                n = int(attr[2]) - 1
+                vertexNormal.append(normalDefs[n])
+            else:
+                vertexNormal.append([0., 0., 0.])
+
+    # convert lists to numeric arrays
+    vertexPos = np.asarray(vertexPos)
+    vertexTexCoord = np.asarray(vertexTexCoord)
+    vertexNormal = np.asarray(vertexNormal)
+
+    print(materialGroups)
+    # compute vertex tangents
+    # surfaceTangent = np.zeros_like(vertexNormal)
+    # vertexTangent = np.zeros_like(vertexNormal)
+    # if hasNormals:
+    #     # get face tangents first
+    #     for face in faceDefs:
+    #         surfaceTangent[face, :] = \
+    #             mt.surfaceTangent(vertexPos[face, :], vertexTexCoord[face, :])
+    #
+    #     # average tangents of adjoining faces to get vertex tangent
+    #     for i in range(vertexPos.shape[0]):
+    #         foundRow, _ = np.where(faceDefs == i)
+    #         for j in faceDefs[foundRow, :]:
+    #             vertexTangent[i, :] = np.sum(surfaceTangent[j, :], axis=0)
+    #
+    #     # orthogonialize tangent with normal
+    #     vertexTangent = mt.orthogonalize(vertexTangent, vertexNormal)
+    #     vertexBitangent = mt.cross(vertexNormal, vertexTangent)
+    #
+    #     # ensure tangents are facing the same direction
+    #     d = mt.dot(mt.cross(vertexNormal, vertexTangent), vertexBitangent) < 0.0
+    #     vertexTangent[d] *= -1.0
+    # compute the extents of the model
+    verts = vertexPos[:, :3]
+    extents = (verts.min(axis=0), verts.max(axis=0))
+    return ObjMeshInfo(vertexPos,
+                       vertexTexCoord,
+                       vertexNormal,
+                       faceDefs,
+                       extents,
+                       mtlFile)
+
+
 def loadMtlFile(mtlFilePath, texParameters=None):
     """Load a material library (*.mtl).
 
