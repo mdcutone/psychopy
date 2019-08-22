@@ -984,20 +984,48 @@ class Window(object):
                     flip = -1
             GL.glRotatef(flip * self.viewOri, 0.0, 0.0, -1.0)
 
-        # reset returned buffer for next frame
-        self._endOfFlip(clearBuffer)
+        self._endOfFlip()
 
         # waitBlanking
         if self.waitBlanking and flipThisFrame:
-            GL.glBegin(GL.GL_POINTS)
-            GL.glColor4f(0, 0, 0, 0)
-            if sys.platform == 'win32' and self.glVendor.startswith('ati'):
-                pass
+            if clearBuffer:
+                GL.glBegin(GL.GL_POINTS)
+                GL.glColor4f(0, 0, 0, 0)
+                if sys.platform == 'win32' and self.glVendor.startswith('ati'):
+                    pass
+                else:
+                    # this corrupts text rendering on win with some ATI cards :-(
+                    GL.glVertex2i(10, 10)
+                GL.glEnd()
             else:
-                # this corrupts text rendering on win with some ATI cards :-(
-                GL.glVertex2i(10, 10)
-            GL.glEnd()
-            GL.glFinish()
+                # Have rendered content from the current frame appear on the
+                # next instead of clearing it.
+                GL.glReadBuffer(GL.GL_FRONT)
+                if not self.useFBO:
+                    GL.glDrawBuffer(GL.GL_BACK)
+                else:
+                    GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)
+
+                # copy contents of the front buffer to the back
+                GL.glBlitFramebuffer(
+                    0, 0, self.size[0], self.size[1],
+                    0, 0, self.size[0], self.size[1],
+                    GL.GL_COLOR_BUFFER_BIT |
+                    GL.GL_DEPTH_BUFFER_BIT |
+                    GL.GL_STENCIL_BUFFER_BIT,
+                    GL.GL_NEAREST)
+
+                # restore binding state
+                if self.useFBO:
+                    GL.glReadBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)
+
+            GL.glFinish()  # wait until buffer can accept new draw commands
+        else:
+            if clearBuffer:
+                GL.glClear(
+                    GL.GL_COLOR_BUFFER_BIT |
+                    GL.GL_DEPTH_BUFFER_BIT |
+                    GL.GL_STENCIL_BUFFER_BIT)
 
         # get timestamp
         self._frameTime = now = logging.defaultClock.getTime()
@@ -2169,11 +2197,10 @@ class Window(object):
     def _afterFBOrender(self):
         pass
 
-    def _endOfFlip(self, clearBuffer):
+    def _endOfFlip(self):
         """Override end of flip with custom color channel masking if required.
         """
-        if clearBuffer:
-            GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        pass
 
 
 def getMsPerFrame(myWin, nFrames=60, showVisual=False, msg='', msDelay=0.):
