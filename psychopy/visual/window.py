@@ -652,7 +652,7 @@ class Window(object):
         """
         setAttribute(self, 'recordFrameIntervals', value, log)
 
-    def saveFrameIntervals(self, fileName=None, clear=True):
+    def saveFrameIntervals(self, fileName=None, clear=True, transpose=False):
         """Save recorded screen frame intervals to disk, as comma-separated
         values.
 
@@ -664,15 +664,21 @@ class Window(object):
         clear : bool
             Clear buffer frames intervals were stored after saving. Default is
             `True`.
+        transpose : bool, optional
+            Output frame intervals in `long` format. Where values are placed on
+            separate lines.
 
         """
         if not fileName:
             fileName = 'lastFrameIntervals.log'
-        if len(self.frameIntervals):
-            intervalStr = str(self.frameIntervals)[1:-1]
-            f = open(fileName, 'w')
-            f.write(intervalStr)
-            f.close()
+        if self.frameIntervals:
+            with open(fileName, 'w') as f:
+                if transpose:
+                    f.writelines(
+                        [str(line) + '\n' for line in self.frameIntervals[1:-1]])
+                else:
+                    intervalStr = str(self.frameIntervals)
+                    f.write(intervalStr)
         if clear:
             self.frameIntervals = []
             self.frameClock.reset()
@@ -986,46 +992,43 @@ class Window(object):
 
         self._endOfFlip()
 
-        # waitBlanking
-        if self.waitBlanking and flipThisFrame:
+        # clear the draw buffer
+        if flipThisFrame:
             if clearBuffer:
-                GL.glBegin(GL.GL_POINTS)
-                GL.glColor4f(0, 0, 0, 0)
-                if sys.platform == 'win32' and self.glVendor.startswith('ati'):
-                    pass
-                else:
-                    # this corrupts text rendering on win with some ATI cards :-(
-                    GL.glVertex2i(10, 10)
-                GL.glEnd()
+                GL.glClear(GL.GL_COLOR_BUFFER_BIT |
+                           GL.GL_DEPTH_BUFFER_BIT |
+                           GL.GL_STENCIL_BUFFER_BIT)
             else:
-                # Have rendered content from the current frame appear on the
-                # next instead of clearing it.
-                GL.glReadBuffer(GL.GL_FRONT)
+                # for image persistence when useFBO is `False`
                 if not self.useFBO:
+                    # draw the front buffer to the back or FBO
+                    GL.glReadBuffer(GL.GL_FRONT)
                     GL.glDrawBuffer(GL.GL_BACK)
-                else:
-                    GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)
 
-                # copy contents of the front buffer to the back
-                GL.glBlitFramebuffer(
-                    0, 0, self.size[0], self.size[1],
-                    0, 0, self.size[0], self.size[1],
-                    GL.GL_COLOR_BUFFER_BIT |
-                    GL.GL_DEPTH_BUFFER_BIT |
-                    GL.GL_STENCIL_BUFFER_BIT,
-                    GL.GL_NEAREST)
+                    # copy contents of the front buffer, waits until `glFinish`
+                    GL.glBlitFramebuffer(
+                        0, 0, self.size[0], self.size[1],
+                        0, 0, self.size[0], self.size[1],
+                        GL.GL_COLOR_BUFFER_BIT |
+                        GL.GL_DEPTH_BUFFER_BIT |
+                        GL.GL_STENCIL_BUFFER_BIT,
+                        GL.GL_NEAREST)
 
-                # restore binding state
-                if self.useFBO:
-                    GL.glReadBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)
+                    GL.glReadBuffer(GL.GL_BACK)
 
-            GL.glFinish()  # wait until buffer can accept new draw commands
-        else:
-            if clearBuffer:
-                GL.glClear(
-                    GL.GL_COLOR_BUFFER_BIT |
-                    GL.GL_DEPTH_BUFFER_BIT |
-                    GL.GL_STENCIL_BUFFER_BIT)
+            # wait blanking
+            if self.waitBlanking:
+                if clearBuffer:
+                    GL.glBegin(GL.GL_POINTS)
+                    GL.glColor4f(0, 0, 0, 0)
+                    if sys.platform == 'win32' and self.glVendor.startswith('ati'):
+                        pass
+                    else:
+                        # this corrupts text rendering on win with some ATI cards :-(
+                        GL.glVertex2i(10, 10)
+                    GL.glEnd()
+
+                GL.glFinish()  # waits on blit to end
 
         # get timestamp
         self._frameTime = now = logging.defaultClock.getTime()
