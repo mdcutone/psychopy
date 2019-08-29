@@ -22,6 +22,7 @@ import io
 # keep track of OpenGL states here instead of using `glGet`
 _MAPPED_BUFFERS_ = {GL.GL_ARRAY_BUFFER: None, GL.GL_ELEMENT_ARRAY_BUFFER: None}
 _BOUND_BUFFERS_ = {GL.GL_ARRAY_BUFFER: None, GL.GL_ELEMENT_ARRAY_BUFFER: None}
+_QUERY_OBJECTS_ = {}
 
 
 # compatible Numpy and OpenGL types for common GL type enums
@@ -868,6 +869,81 @@ def getAttribLocations(program, builtins=False):
                 attribLoc[attribName.value] = loc
 
     return attribLoc
+
+# -----------------------------------
+# GL Query Objects
+# -----------------------------------
+
+
+class QueryObjectInfo(object):
+    """Object for querying information. This includes GPU timing information."""
+    __slots__ = ['name', 'target']
+
+    def __init__(self, name, target):
+        self.name = name
+        self.target = target
+
+    def isValid(self):
+        """Check if the name associated with this object is valid."""
+        return GL.glIsQuery(self.name) == GL.GL_TRUE
+
+
+def createQueryObject(target=GL.GL_TIME_ELAPSED):
+    """Create a GL query object.
+
+    Parameters
+    ----------
+    target : Glenum or int
+        Target for the query.
+
+    Returns
+    -------
+    QueryObjectInfo
+        Query object.
+
+    """
+    result = GL.GLuint()
+    GL.glGenQueries(1, ctypes.byref(result))
+
+    # register a new target is being used
+    if target not in _QUERY_OBJECTS_.keys():
+        global _QUERY_OBJECTS_
+        _QUERY_OBJECTS_[target] = None
+
+    return QueryObjectInfo(result, target)
+
+
+def beginQuery(query):
+    """Begin query.
+
+    """
+    if isinstance(query, (QueryObjectInfo,)):
+        if _QUERY_OBJECTS_[query.target] is None:
+            global _QUERY_OBJECTS_
+            _QUERY_OBJECTS_[query.target] = query.name
+
+            GL.glBeginQuery(query.target, query.name)
+        else:
+            raise ValueError('Cannot begin query, already active.')
+    else:
+        raise TypeError('Type of `query` must be `QueryObjectInfo`.')
+
+
+def endQuery(query):
+    """End a query.
+
+    """
+    if isinstance(query, (QueryObjectInfo,)):
+        if _QUERY_OBJECTS_[query.target] == query.name:
+            global _QUERY_OBJECTS_
+            _QUERY_OBJECTS_[query.target] = None
+
+            GL.glEndQuery(query.target)
+        else:
+            raise ValueError('Cannot end query, another query is active.')
+    else:
+        raise TypeError('Type of `query` must be `QueryObjectInfo`.')
+
 
 # -----------------------------------
 # Framebuffer Objects (FBO) Functions
