@@ -1829,23 +1829,30 @@ def createVAO(attribBuffers, indexBuffer=None, legacy=False):
     activeAttribs = {}
     bufferIndices = []
     for i, buffer in attribBuffers.items():
-        size = buffer.shape[1]
-        offset = 0
-        normalize = False
         if isinstance(buffer, (list, tuple,)):
             if len(buffer) == 1:
                 buffer = buffer[0]  # size 1 tuple or list eg. (buffer,)
+                size = buffer.shape[1]
+                offset = 0
+                normalize = False
             elif len(buffer) == 2:
                 buffer, size = buffer
+                offset = 0
+                normalize = False
             elif len(buffer) == 3:
                 buffer, size, offset = buffer
+                normalize = False
             elif len(buffer) == 4:
                 buffer, size, offset, normalize = buffer
             else:
                 raise ValueError('Invalid attribute values.')
+        else:
+            size = buffer.shape[1]
+            offset = 0
+            normalize = False
 
         enableVertexAttribArray(i, legacy)
-        setVertexAttribPointer(i, buffer, size, offset, normalize, True)
+        setVertexAttribPointer(i, buffer, size, offset, normalize, legacy)
 
         activeAttribs[i] = buffer
         bufferIndices.append(buffer.shape[0])
@@ -1854,7 +1861,10 @@ def createVAO(attribBuffers, indexBuffer=None, legacy=False):
     if indexBuffer is not None:
         if indexBuffer.target == GL.GL_ELEMENT_ARRAY_BUFFER:
             GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, indexBuffer.name)
-            count = indexBuffer.shape[0]
+            if len(indexBuffer.shape) > 1:
+                count = indexBuffer.shape[0] * indexBuffer.shape[1]
+            else:
+                count = indexBuffer.shape[0]
         else:
             raise ValueError(
                 'Index buffer does not have target `GL_ELEMENT_ARRAY_BUFFER`.')
@@ -1905,7 +1915,6 @@ def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, flush=False):
     """
     # draw the array
     GL.glBindVertexArray(vao.name)
-
     if count is None:
         count = vao.count
     else:
@@ -1915,6 +1924,7 @@ def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, flush=False):
                     vao.count - start))
 
     if vao.indexBuffer is not None:
+        print(count)
         GL.glDrawElements(mode, count, vao.indexBuffer.dataType, start)
     else:
         GL.glDrawArrays(mode, start, count)
@@ -2176,7 +2186,11 @@ def createVBO(data,
 
     # get buffer size and pointer
     bufferSize = data.size * ctypes.sizeof(glType)
-    bufferStride = data.shape[1] * ctypes.sizeof(glType)
+    if data.ndim > 1:
+        bufferStride = data.shape[1] * ctypes.sizeof(glType)
+    else:
+        bufferStride = 0
+
     bufferPtr = data.ctypes.data_as(ctypes.POINTER(glType))
 
     # create a vertex buffer ID
@@ -2959,7 +2973,7 @@ def loadObjFile(objFile):
         objVAOs = {}  # dictionary for VAOs
         # for each material create a VAO
         # keys are material names, values are index buffers
-        for key, val in objModel.faces:
+        for key, val in objModel.faces.items():
             objVAOs[key] = createVAO({0: vertexPosVBO,
                                       8: texCoordVBO,
                                       2: normalsVBO},
@@ -2980,7 +2994,7 @@ def loadObjFile(objFile):
         useMaterial(None)
 
     Optionally, you can create a single-storage, interleaved VBO by using
-    `numpy.hstack`. On some GL impimentations, using single-storage buffers
+    `numpy.hstack`. On some GL implementations, using single-storage buffers
     offer better performance::
 
         interleavedData = numpy.hstack(
@@ -2991,7 +3005,7 @@ def loadObjFile(objFile):
     additional information, such as `size` and `offset`::
 
         objVAOs = {}
-        for key, val in objModel.faces:
+        for key, val in objModel.faces.items():
             objVAOs[key] = createVAO({0: (vertexData, 3, 0),
                                       8: (vertexData, 2, 3),
                                       2: (vertexData, 3, 5},
@@ -3014,8 +3028,8 @@ def loadObjFile(objFile):
     vertexAttrs = {}
 
     # material groups
-    materialGroup = 'None'
-    materialGroups = {'None': []}
+    materialGroup = None
+    materialGroups = {}
 
     nVertices = nTextureCoords = nNormals = nFaces = 0
     vertexIdx = 0
