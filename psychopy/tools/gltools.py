@@ -20,9 +20,14 @@ import warnings
 import io
 
 # keep track of OpenGL states here instead of using `glGet`
-_MAPPED_BUFFERS_ = {GL.GL_ARRAY_BUFFER: None, GL.GL_ELEMENT_ARRAY_BUFFER: None}
-_BOUND_BUFFERS_ = {GL.GL_ARRAY_BUFFER: None, GL.GL_ELEMENT_ARRAY_BUFFER: None}
+_MAPPED_BUFFERS_ = {}
+_BOUND_BUFFERS_ = {}
 _QUERY_OBJECTS_ = {}
+
+
+# create a query counter to get absolute GPU time
+QUERY_COUNTER = GL.GLuint()
+GL.glGenQueries(1, ctypes.byref(QUERY_COUNTER))
 
 
 # compatible Numpy and OpenGL types for common GL type enums
@@ -52,7 +57,6 @@ GL_COMPAT_TYPES = {
 # Shader Program Helper Functions
 # -------------------------------
 #
-
 
 def createProgram():
     """Create an empty program object for shaders.
@@ -901,13 +905,49 @@ def createQueryObject(target=GL.GL_TIME_ELAPSED):
     QueryObjectInfo
         Query object.
 
+    Examples
+    --------
+
+    Get GPU time elapsed executing rendering/GL calls associated with some
+    stimuli (this is not the difference in absolute time between consecutive
+    `beginQuery` and `endQuery` calls!)::
+
+        # create a new query object
+        qGPU = createQueryObject(GL_TIME_ELAPSED)
+
+        beginQuery(query)
+        myStim.draw()  # OpenGL calls here
+        endQuery(query)
+
+        # get time elapsed in seconds spent on the GPU
+        timeRendering = getQueryValue(qGPU) * 1e-9
+
+    You can also use queries to test if vertices are occluded, as their samples
+    would be rejected during depth testing::
+
+        drawVAO(shape0, GL_TRIANGLES)  # draw the first object
+
+        # check if the object was completely occluded
+        qOcclusion = createQueryObject(GL_ANY_SAMPLES_PASSED​​)
+
+        # draw the next shape within query context
+        beginQuery(qOcclusion)
+        drawVAO(shape1, GL_TRIANGLES)  # draw the second object
+        endQuery(qOcclusion)
+
+        isOccluded = getQueryValue(qOcclusion) == 1
+
+    This can be leveraged to perform occlusion testing/culling, where you can
+    render a `cheap` version of your mesh/shape, then the more expensive version
+    if samples were passed.
+
     """
     result = GL.GLuint()
     GL.glGenQueries(1, ctypes.byref(result))
 
     # register a new target is being used
+    global _QUERY_OBJECTS_
     if target not in _QUERY_OBJECTS_.keys():
-        global _QUERY_OBJECTS_
         _QUERY_OBJECTS_[target] = None
 
     return QueryObjectInfo(result, target)
@@ -916,10 +956,15 @@ def createQueryObject(target=GL.GL_TIME_ELAPSED):
 def beginQuery(query):
     """Begin query.
 
+    Parameters
+    ----------
+    query : QueryObjectInfo
+        Query object descriptor returned by :func:`createQueryObject`.
+
     """
     if isinstance(query, (QueryObjectInfo,)):
+        global _QUERY_OBJECTS_
         if _QUERY_OBJECTS_[query.target] is None:
-            global _QUERY_OBJECTS_
             _QUERY_OBJECTS_[query.target] = query.name
 
             GL.glBeginQuery(query.target, query.name)
@@ -932,10 +977,16 @@ def beginQuery(query):
 def endQuery(query):
     """End a query.
 
+    Parameters
+    ----------
+    query : QueryObjectInfo
+        Query object descriptor returned by :func:`createQueryObject`,
+        previously passed to :func:`beginQuery`.
+
     """
     if isinstance(query, (QueryObjectInfo,)):
+        global _QUERY_OBJECTS_
         if _QUERY_OBJECTS_[query.target] == query.name:
-            global _QUERY_OBJECTS_
             _QUERY_OBJECTS_[query.target] = None
 
             GL.glEndQuery(query.target)
@@ -943,6 +994,61 @@ def endQuery(query):
             raise ValueError('Cannot end query, another query is active.')
     else:
         raise TypeError('Type of `query` must be `QueryObjectInfo`.')
+
+
+def getQuery(query):
+    """Get the value stored in a query object.
+
+    Parameters
+    ----------
+    query : QueryObjectInfo
+        Query object descriptor returned by :func:`createQueryObject`,
+        previously passed to :func:`endQuery`.
+
+    """
+    params = GL.GLuint64(0)
+    if isinstance(query, QueryObjectInfo):
+        GL.glGetQueryObjectui64v(
+            query.name,
+            GL.GL_QUERY_RESULT,
+            ctypes.byref(params))
+
+        return params.value
+    else:
+        raise TypeError('Argument `query` must be `QueryObjectInfo` instance.')
+
+
+def getAbsTimeGPU():
+    """Get the absolute GPU time in nanoseconds.
+
+    Returns
+    -------
+    int
+        Time elapsed in nanoseconds since the OpenGL context was fully realized.
+
+    Examples
+    --------
+    Get the current GPU time in seconds::
+
+        timeInSeconds = getAbsTimeGPU() * 1e-9
+
+    Get the GPU time elapsed::
+
+        t0 = getAbsTimeGPU()
+        # some drawing commands here ...
+        t1 = getAbsTimeGPU()
+        timeElapsed = (t1 - t0) * 1e-9  # take difference, convert to seconds
+
+    """
+    GL.glQueryCounter(QUERY_COUNTER, GL.GL_TIMESTAMP)
+
+    params = GL.GLuint64(0)
+    GL.glGetQueryObjectui64v(
+        QUERY_COUNTER,
+        GL.GL_QUERY_RESULT,
+        ctypes.byref(params))
+
+    return params.value
 
 
 # -----------------------------------
@@ -1602,6 +1708,7 @@ class VertexArrayInfo(object):
     activeAttribs : dict
         Attributes and buffers defined as part of this VAO state. Keys are
         attribute pointer indices or capabilities (ie. GL_VERTEX_ARRAY).
+        Modifying these values will not update the VAO state.
     isLegacy : bool
         Array pointers were defined using the deprecated OpenGL API. If `True`,
         the VAO may work with older GLSL shaders versions and the fixed-function
@@ -1738,7 +1845,7 @@ def createVAO(attribBuffers, indexBuffer=None, legacy=False):
                 raise ValueError('Invalid attribute values.')
 
         enableVertexAttribArray(i, legacy)
-        setVertexAttribPointer(i, buffer, size, offset, normalize, True, legacy)
+        setVertexAttribPointer(i, buffer, size, offset, normalize, True)
 
         activeAttribs[i] = buffer
         bufferIndices.append(buffer.shape[0])
@@ -1770,8 +1877,8 @@ def createVAO(attribBuffers, indexBuffer=None, legacy=False):
 
 
 def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, flush=False):
-    """Draw a vertex array using glDrawArrays. This method does not require
-    shaders.
+    """Draw a vertex array using `glDrawArrays` or `glDrawElements`. This method
+    does not require shaders.
 
     Parameters
     ----------
@@ -1804,7 +1911,8 @@ def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, flush=False):
     else:
         if count > vao.count - start:
             raise ValueError(
-                "Value of `count` cannot exceed `{}`.".format(vao.count))
+                "Value of `count` cannot exceed `{}`.".format(
+                    vao.count - start))
 
     if vao.indexBuffer is not None:
         GL.glDrawElements(mode, count, vao.indexBuffer.dataType, start)
@@ -2079,6 +2187,16 @@ def createVBO(data,
     GL.glBindBuffer(target, bufferName)
     GL.glBufferData(target, bufferSize, bufferPtr, usage)
     GL.glBindBuffer(target, 0)
+
+    # add target state tracking
+    global _BOUND_BUFFERS_
+    if target not in _BOUND_BUFFERS_.keys():
+        _BOUND_BUFFERS_[target] = None
+
+    # add target to mapping state tracking
+        global _MAPPED_BUFFERS_
+    if target not in _MAPPED_BUFFERS_.keys():
+        _MAPPED_BUFFERS_[target] = None
 
     vboInfo = VertexBufferInfo(
         bufferName,
