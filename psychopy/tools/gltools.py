@@ -2500,11 +2500,11 @@ def setVertexAttribPointer(index,
         # ... before rendering, set the attribute pointers
         GL.glBindBuffer(vboInterleaved.target, vboInterleaved.name)
         gltools.setVertexAttribPointer(
-            0, vboInterleaved, size=3, offset=0, bind=False)  # vertex pointer
+            0, vboInterleaved, size=3, offset=0)  # vertex pointer
         gltools.setVertexAttribPointer(
-            8, vboInterleaved, size=2, offset=3, bind=False)  # texture pointer
+            8, vboInterleaved, size=2, offset=3)  # texture pointer
         gltools.setVertexAttribPointer(
-            3, vboInterleaved, size=3, offset=5, bind=False)  # normals pointer
+            3, vboInterleaved, size=3, offset=5)  # normals pointer
 
         # Note, we specified `bind=False` since we are managing the binding
         # state. It is recommended that you do this when setting up interleaved
@@ -2907,6 +2907,16 @@ class ObjMeshInfo(object):
 def loadObjFile(objFile):
     """Load a Wavefront OBJ file (*.obj).
 
+    Loads vertex, normals, and texture coordinates from the provided *.obj file
+    into arrays. These arrays can be processed then loaded into vertex buffer
+    objects (VBOs) for rendering. The *.obj file must at least specify vertex
+    position data to be loaded successfully. Normals and texture coordinates are
+    optional.
+
+    Faces can be either triangles or quads, but not both. Faces are grouped by
+    their materials. Index arrays are generated for each material present in the
+    file.
+
     Parameters
     ----------
     objFile : :obj:`str`
@@ -2917,11 +2927,15 @@ def loadObjFile(objFile):
     ObjMeshInfo
         Mesh data.
 
+    See Also
+    --------
+    loadMtlFile : Load a *.mtl file.
+
     Notes
     -----
-    1. This importer should work fine for most sanely generated files.
-       Export your model with Blender for best results, even if you used some
-       other package to create it.
+    1. This importer should work fine for most sanely generated files. Export
+       your model with Blender for best results, even if you used some other
+       package to create it.
     2. The mesh cannot contain both triangles and quads.
 
     Examples
@@ -2931,13 +2945,60 @@ def loadObjFile(objFile):
         objModel = loadObjFile('/path/to/file.obj')
 
         # load the material (*.mtl) file, textures are also loaded
-        materials = loadMtl('/path/to/' + objModel.mtlFile)
+        mtllib = loadMtl('/path/to/' + objModel.mtlFile)
 
-    Getting the vertex positions of the `n`-th face of material 'metal'::
+    Creating separate vertex buffer objects (VBOs) for each vertex attribute::
 
-        n = 0
-        objFile.vertices[objFile.faces['metal'], :]
+        vertexPosVBO = createVBO(objModel.vertexPos)
+        texCoordVBO = createVBO(objModel.texCoords)
+        normalsVBO = createVBO(objModel.normals)
 
+    Create vertex array objects (VAOs) to draw the mesh. We create VAOs for each
+    face material::
+
+        objVAOs = {}  # dictionary for VAOs
+        # for each material create a VAO
+        # keys are material names, values are index buffers
+        for key, val in objModel.faces:
+            objVAOs[key] = createVAO({0: vertexPosVBO,
+                                      8: texCoordVBO,
+                                      2: normalsVBO},
+                                      indexBuffer=val)
+
+            # if using legacy attribute pointers, do this instead ...
+            # objVAOs[key] = createVAO({GL_VERTEX_ARRAY: vertexPosVBO,
+            #                           GL_TEXTURE_COORD_ARRAY: texCoordVBO,
+            #                           GL_NORMAL_ARRAY: normalsVBO},
+            #                           indexBuffer=val, legacy=True)
+
+    To render the VAOs using `objVAOs` created above, do the following::
+
+        for materialName, vao in objVAOs.items():
+            useMaterial(mtllib[materialName])
+            drawVAO(vao)
+
+        useMaterial(None)
+
+    Optionally, you can create a single-storage, interleaved VBO by using
+    `numpy.hstack`. On some GL impimentations, using single-storage buffers
+    offer better performance::
+
+        interleavedData = numpy.hstack(
+            (objModel.vertexPos, objModel.texCoords, objModel.normals))
+        vertexData = createVBO(interleavedData)
+
+    Creating VAOs with interleaved, single-storage buffers require specifying
+    additional information, such as `size` and `offset`::
+
+        objVAOs = {}
+        for key, val in objModel.faces:
+            objVAOs[key] = createVAO({0: (vertexData, 3, 0),
+                                      8: (vertexData, 2, 3),
+                                      2: (vertexData, 3, 5},
+                                      indexBuffer=val)
+
+    Drawing VAOs with interleaved buffers is exactly the same as shown before
+    with separate buffers.
 
     """
     # open the file, read it into memory
