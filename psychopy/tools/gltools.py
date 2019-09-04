@@ -2957,7 +2957,6 @@ def loadObjFile(objFile):
     Loading a *.OBJ mode from file::
 
         objModel = loadObjFile('/path/to/file.obj')
-
         # load the material (*.mtl) file, textures are also loaded
         mtllib = loadMtl('/path/to/' + objModel.mtlFile)
 
@@ -2973,29 +2972,37 @@ def loadObjFile(objFile):
         objVAOs = {}  # dictionary for VAOs
         # for each material create a VAO
         # keys are material names, values are index buffers
-        for key, val in objModel.faces.items():
-            objVAOs[key] = createVAO({0: vertexPosVBO,
-                                      8: texCoordVBO,
-                                      2: normalsVBO},
-                                      indexBuffer=val)
+        for material, faces in objModel.faces.items():
+            # convert index buffer to VAO
+            indexBuffer = \
+                gltools.createVBO(
+                    faces.flatten(),  # flatten face index for element array
+                    target=GL.GL_ELEMENT_ARRAY_BUFFER,
+                    dataType=GL.GL_UNSIGNED_INT)
+
+            objVAOs[material] = gltools.createVAO(
+                {0: vertexPosVBO,
+                 8: texCoordVBO,
+                 2: normalsVBO}, indexBuffer=indexBuffer)
 
             # if using legacy attribute pointers, do this instead ...
             # objVAOs[key] = createVAO({GL_VERTEX_ARRAY: vertexPosVBO,
             #                           GL_TEXTURE_COORD_ARRAY: texCoordVBO,
             #                           GL_NORMAL_ARRAY: normalsVBO},
-            #                           indexBuffer=val, legacy=True)
+            #                           indexBuffer=indexBuffer,
+            #                           legacy=True)  # this needs to be `True`
 
     To render the VAOs using `objVAOs` created above, do the following::
 
-        for materialName, vao in objVAOs.items():
-            useMaterial(mtllib[materialName])
+        for material, vao in objVAOs.items():
+            useMaterial(mtllib[material])
             drawVAO(vao)
 
-        useMaterial(None)
+        useMaterial(None)  # disable materials when done
 
     Optionally, you can create a single-storage, interleaved VBO by using
     `numpy.hstack`. On some GL implementations, using single-storage buffers
-    offer better performance::
+    offers better performance::
 
         interleavedData = numpy.hstack(
             (objModel.vertexPos, objModel.texCoords, objModel.normals))
@@ -3006,9 +3013,15 @@ def loadObjFile(objFile):
 
         objVAOs = {}
         for key, val in objModel.faces.items():
-            objVAOs[key] = createVAO({0: (vertexData, 3, 0),
-                                      8: (vertexData, 2, 3),
-                                      2: (vertexData, 3, 5},
+            indexBuffer = \
+                gltools.createVBO(
+                    faces.flatten(),
+                    target=GL.GL_ELEMENT_ARRAY_BUFFER,
+                    dataType=GL.GL_UNSIGNED_INT)
+
+            objVAOs[key] = createVAO({0: (vertexData, 3, 0),  # size=3, offset=0
+                                      8: (vertexData, 2, 3),  # size=2, offset=3
+                                      2: (vertexData, 3, 5),  # size=3, offset=5
                                       indexBuffer=val)
 
     Drawing VAOs with interleaved buffers is exactly the same as shown before
@@ -3116,12 +3129,48 @@ def loadObjFile(objFile):
                        mtlFile)
 
 
-def loadMtlFile(mtlFilePath, texParameters=None):
-    """Load a material library (*.mtl).
+def loadMtlFile(mtllib, texParameters=None):
+    """Load a material library file (*.mtl).
+
+    Parameters
+    ----------
+    mtllib : str
+        Path to the material library file.
+    texParameters : list or tuple
+        Optional texture parameters for loaded textures. Texture parameters are
+        specified as a list of tuples. Each item specifies the option and
+        parameter. For instance,
+        `[(GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR), ...]`. By default, linear
+        filtering is used for both the minifying and magnification filter
+        functions. This is adequate for most uses.
+
+    Returns
+    -------
+    dict
+        Dictionary of materials. Where each key is the material name found in
+        the file, and values are `Material` namedtuple objects.
+
+    See Also
+    --------
+    loadObjFile : Load an *.OBJ file.
+
+    Examples
+    --------
+    Load material associated with an *.OBJ file::
+
+        objModel = loadObjFile('/path/to/file.obj')
+        # load the material (*.mtl) file, textures are also loaded
+        mtllib = loadMtl('/path/to/' + objModel.mtlFile)
+
+    Use a material when rendering vertex arrays::
+
+        useMaterial(mtllib[material])
+        drawVAO(vao)
+        useMaterial(None)  # disable materials when done
 
     """
     # open the file, read it into memory
-    with open(mtlFilePath, 'r') as mtlFile:
+    with open(mtllib, 'r') as mtlFile:
         mtlBuffer = StringIO(mtlFile.read())
 
     # default texture parameters
@@ -3154,7 +3203,7 @@ def loadMtlFile(mtlFilePath, texParameters=None):
             textureName = line[7:]
             if textureName not in foundTextures.keys():
                 im = Image.open(
-                    os.path.join(os.path.split(mtlFilePath)[0], textureName))
+                    os.path.join(os.path.split(mtllib)[0], textureName))
                 im = im.transpose(Image.FLIP_TOP_BOTTOM)
                 im = im.convert("RGBA")
                 pixelData = np.array(im).ctypes
