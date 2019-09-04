@@ -2980,10 +2980,13 @@ def loadObjFile(objFile):
                     target=GL.GL_ELEMENT_ARRAY_BUFFER,
                     dataType=GL.GL_UNSIGNED_INT)
 
+            # see `setVertexAttribPointer` for more information about attribute
+            # pointer indices
             objVAOs[material] = gltools.createVAO(
-                {0: vertexPosVBO,
-                 8: texCoordVBO,
-                 2: normalsVBO}, indexBuffer=indexBuffer)
+                {0: vertexPosVBO,  # 0 = gl_Vertex
+                 8: texCoordVBO,   # 8 = gl_MultiTexCoord0
+                 2: normalsVBO},   # 2 = gl_Normal
+                 indexBuffer=indexBuffer)
 
             # if using legacy attribute pointers, do this instead ...
             # objVAOs[key] = createVAO({GL_VERTEX_ARRAY: vertexPosVBO,
