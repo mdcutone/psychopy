@@ -19,12 +19,6 @@ import os, sys
 import warnings
 import io
 
-# keep track of OpenGL states here instead of using `glGet`
-_MAPPED_BUFFERS_ = {}
-_BOUND_BUFFERS_ = {}
-_QUERY_OBJECTS_ = {}
-
-
 # create a query counter to get absolute GPU time
 QUERY_COUNTER = GL.GLuint()
 GL.glGenQueries(1, ctypes.byref(QUERY_COUNTER))
@@ -945,11 +939,6 @@ def createQueryObject(target=GL.GL_TIME_ELAPSED):
     result = GL.GLuint()
     GL.glGenQueries(1, ctypes.byref(result))
 
-    # register a new target is being used
-    global _QUERY_OBJECTS_
-    if target not in _QUERY_OBJECTS_.keys():
-        _QUERY_OBJECTS_[target] = None
-
     return QueryObjectInfo(result, target)
 
 
@@ -963,13 +952,7 @@ def beginQuery(query):
 
     """
     if isinstance(query, (QueryObjectInfo,)):
-        global _QUERY_OBJECTS_
-        if _QUERY_OBJECTS_[query.target] is None:
-            _QUERY_OBJECTS_[query.target] = query.name
-
-            GL.glBeginQuery(query.target, query.name)
-        else:
-            raise ValueError('Cannot begin query, already active.')
+        GL.glBeginQuery(query.target, query.name)
     else:
         raise TypeError('Type of `query` must be `QueryObjectInfo`.')
 
@@ -985,13 +968,7 @@ def endQuery(query):
 
     """
     if isinstance(query, (QueryObjectInfo,)):
-        global _QUERY_OBJECTS_
-        if _QUERY_OBJECTS_[query.target] == query.name:
-            _QUERY_OBJECTS_[query.target] = None
-
-            GL.glEndQuery(query.target)
-        else:
-            raise ValueError('Cannot end query, another query is active.')
+        GL.glEndQuery(query.target)
     else:
         raise TypeError('Type of `query` must be `QueryObjectInfo`.')
 
@@ -2202,16 +2179,6 @@ def createVBO(data,
     GL.glBufferData(target, bufferSize, bufferPtr, usage)
     GL.glBindBuffer(target, 0)
 
-    # add target state tracking
-    global _BOUND_BUFFERS_
-    if target not in _BOUND_BUFFERS_.keys():
-        _BOUND_BUFFERS_[target] = None
-
-    # add target to mapping state tracking
-        global _MAPPED_BUFFERS_
-    if target not in _MAPPED_BUFFERS_.keys():
-        _MAPPED_BUFFERS_[target] = None
-
     vboInfo = VertexBufferInfo(
         bufferName,
         target,
@@ -2239,14 +2206,8 @@ def bindVBO(vbo):
         was not changed due to the buffer already  being bound.
 
     """
-    global _BOUND_BUFFERS_
     if isinstance(vbo, VertexBufferInfo):
-        if _BOUND_BUFFERS_[vbo.target] != vbo.name:
-            _BOUND_BUFFERS_[vbo.target] = vbo.name
-            GL.glBindBuffer(vbo.target, vbo.name)
-            return True
-        else:
-            return False
+        GL.glBindBuffer(vbo.target, vbo.name)
     else:
         raise TypeError('Specified `vbo` is not at `VertexBufferInfo`.')
 
@@ -2260,13 +2221,10 @@ def unbindVBO(vbo):
         VBO descriptor to unbind.
 
     """
-    global _BOUND_BUFFERS_
     if isinstance(vbo, VertexBufferInfo):
-        if _BOUND_BUFFERS_[vbo.target] == vbo.name:
-            _BOUND_BUFFERS_[vbo.target] = None
-            GL.glBindBuffer(vbo.target, 0)
-        else:
-            raise ValueError('Vertex buffer was not currently bound.')
+        GL.glBindBuffer(vbo.target, 0)
+    else:
+        raise TypeError('Specified `vbo` is not at `VertexBufferInfo`.')
 
 
 def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False):
@@ -2330,10 +2288,6 @@ def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False):
         unmapBuffer(vbo)
 
     """
-    global _MAPPED_BUFFERS_
-    if _MAPPED_BUFFERS_[vbo.target] is not None:
-        raise RuntimeError("Vertex buffer already mapped.")
-
     npType, glType = GL_COMPAT_TYPES[vbo.dataType]
     start *= ctypes.sizeof(glType)
 
@@ -2364,8 +2318,6 @@ def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False):
         ctypes.cast(bufferPtr, ctypes.POINTER(glType)),
         shape=vbo.shape)
 
-    _MAPPED_BUFFERS_[vbo.target] = vbo.name
-
     return bufferArray
 
 
@@ -2387,13 +2339,8 @@ def unmapBuffer(vbo):
         data was corrupted for some reason and needs to be resubmitted.
 
     """
-    global _MAPPED_BUFFERS_
+    return GL.glUnmapBuffer(vbo.target) == GL.GL_TRUE
 
-    if _MAPPED_BUFFERS_[vbo.target] == vbo.name:
-        _MAPPED_BUFFERS_[vbo.target] = None
-        return GL.glUnmapBuffer(vbo.target) == GL.GL_TRUE
-    else:
-        return False
 
 
 def deleteVBO(vbo):
