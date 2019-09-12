@@ -233,16 +233,15 @@ class GLFWBackend(BaseBackend):
             useDisplay = None
 
         # configure stereo
-        useStereo = 0
-        if win.stereo:
+        useQuadBufferedStereo = int(win.stereo == 'QuadBuffered')
+        if useQuadBufferedStereo:
             # provide warning if stereo buffers are requested but unavailable
             if not glfw.extension_supported('GL_STEREO'):
                 logging.warning(
                     'A stereo window was requested but the graphics '
                     'card does not appear to support GL_STEREO')
+                logging.flush()
                 win.stereo = False
-            else:
-                useStereo = 1
 
         # setup multisampling
         # This enables multisampling on the window backbuffer, not on other
@@ -274,7 +273,7 @@ class GLFWBackend(BaseBackend):
         glfw.window_hint(glfw.GREEN_BITS, win.bpc[1])
         glfw.window_hint(glfw.BLUE_BITS, win.bpc[2])
         glfw.window_hint(glfw.REFRESH_RATE, win.refreshHz)
-        glfw.window_hint(glfw.STEREO, useStereo)
+        glfw.window_hint(glfw.STEREO, useQuadBufferedStereo)
         glfw.window_hint(glfw.SAMPLES, msaaSamples)
         glfw.window_hint(glfw.STENCIL_BITS, win.stencilBits)
         glfw.window_hint(glfw.DEPTH_BITS, win.depthBits)
@@ -286,8 +285,8 @@ class GLFWBackend(BaseBackend):
 
         # create the window
         self.winHandle = glfw.create_window(
-            width=win.size[0],
-            height=win.size[1],
+            width=win._size[0],
+            height=win._size[1],
             title=str(kwargs.get('winTitle', "PsychoPy (GLFW)")),
             monitor=useDisplay,
             share=shareContext)
@@ -319,7 +318,7 @@ class GLFWBackend(BaseBackend):
         glfw.set_window_icon(self.winHandle, 1, _WINDOW_ICON_)
 
         # set the window size to the framebuffer size
-        win.size = np.array(glfw.get_framebuffer_size(self.winHandle))
+        win._frameBufferSize = np.array(glfw.get_framebuffer_size(self.winHandle))
 
         if win.useFBO:  # check for necessary extensions
             if not glfw.extension_supported('GL_EXT_framebuffer_object'):

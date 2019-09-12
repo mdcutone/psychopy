@@ -296,7 +296,8 @@ class Window(object):
 
         self.autoLog = False  # to suppress log msg during init
         self.name = name
-        self.size = numpy.array(size, numpy.int)
+        self._clientSize = numpy.array(size, numpy.int)
+        self._frameBufferSize = self._clientSize  # set when the backend loads
         self.pos = pos
         # this will get overridden once the window is created
         self.winHandle = None
@@ -357,7 +358,15 @@ class Window(object):
         if self.viewOri != 0. and self.viewPos is not None:
             msg = "Window: viewPos & viewOri are currently incompatible"
             raise NotImplementedError(msg)
-        self.stereo = stereo  # use quad buffer if requested (and if possible)
+
+        # set the stereo rendering mode
+        if stereo in ['QuadBuffered', 'SideBySide', True, False]:
+            # For backwards compatibility, we want `True` to indicate quad
+            # buffered stereo. The backends will know what to do when they get
+            # 'quad' for `win.stereo`.
+            self.stereo = 'QuadBuffered' if stereo is True else stereo
+        else:
+            raise ValueError('Unsupported stereo mode `{}`.'.format(stereo))
 
         # enable multisampling
         self.multiSample = multiSample
@@ -454,6 +463,10 @@ class Window(object):
         self._setupGL()
 
         self.blendMode = self.blendMode
+
+        # current view buffer, default to back when starting
+        self._drawBuffer = None
+        self.setBuffer('back')
 
         # gamma
         self.bits = None  # this may change in a few lines time!
@@ -614,6 +627,43 @@ class Window(object):
         self.__dict__['fullscr'] = value
         self._isFullScr = value
 
+    @property
+    def clientSize(self):
+        """Client dimensions of the window in screen coordinates, usually
+        pixels.
+
+        """
+        return self._clientSize
+
+    @clientSize.setter
+    def clientSize(self, value):
+        self._clientSize = numpy.asarray(value, dtype=numpy.int)
+
+    @property
+    def frameBufferSize(self):
+        """Dimensions of the window's framebuffer. On MacOS, this can differ
+        from `clientSize` (ie. retina displays).
+
+        """
+        return self._frameBufferSize
+
+    @frameBufferSize.setter
+    def frameBufferSize(self, value):
+        self._frameBufferSize = numpy.asarray(value, dtype=numpy.int)
+
+    @property
+    def size(self):
+        """Size property to get the dimensions of the view buffer instead of
+        the window. If there are no view buffers, always return the dims of the
+        window.
+
+        """
+        if self.stereo == 'SideBySide':
+            w, h = self.frameBufferSize
+            return numpy.array([w / 2, h], numpy.int)
+        else:
+            return self.frameBufferSize
+
     @attributeSetter
     def waitBlanking(self, value):
         """After a call to :py:attr:`~Window.flip()` should we wait for the
@@ -709,15 +759,12 @@ class Window(object):
             GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
 
         # setup retina display if applicable
-        global retinaContext
-        if retinaContext is not None:
-           view = retinaContext.view()
-           bounds = view.convertRectToBacking_(view.bounds()).size
-           bufferWidth, bufferHeight = (int(bounds.width), int(bounds.height))
-        else:
-           bufferWidth, bufferHeight = self.size
+        bufferWidth, bufferHeight = self.frameBufferSize
 
         # set these to match the current window or buffer's settings
+        #if self.stereo:
+        #    self._configStereo()
+        #else:
         GL.glViewport(0, 0, bufferWidth, bufferHeight)
         GL.glScissor(0, 0, bufferWidth, bufferHeight)
         GL.glEnable(GL.GL_SCISSOR_TEST)
@@ -911,8 +958,8 @@ class Window(object):
             self.backend.setCurrent()
 
             # set these to match the current window or buffer's settings
-            GL.glViewport(0, 0, self.size[0], self.size[1])
-            GL.glScissor(0, 0, self.size[0], self.size[1])
+            GL.glViewport(0, 0, self._clientSize[0], self._clientSize[1])
+            GL.glScissor(0, 0, self._clientSize[0], self._clientSize[1])
             GL.glEnable(GL.GL_SCISSOR_TEST)
 
             # clear the projection and modelview matrix for FBO blit
@@ -958,10 +1005,9 @@ class Window(object):
         if self.useFBO:
             if flipThisFrame:
                 # set rendering back to the framebuffer object
-                GL.glBindFramebufferEXT(
-                    GL.GL_FRAMEBUFFER_EXT, self.frameBuffer)
+                self.setBuffer('back')
                 GL.glReadBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)
-                GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)
+                #GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)
                 # set to no active rendering texture
                 GL.glActiveTexture(GL.GL_TEXTURE0)
                 GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
@@ -1124,24 +1170,52 @@ class Window(object):
         # Do the flipping with last flip as special case
         for _ in range(flips - 1):
             self.flip(clearBuffer=False)
+
         self.flip(clearBuffer=clearBuffer)
 
+    def _configStereo(self):
+        """Configure the buffer for rendering with the current stereo mode.
+        """
+        bufferWidth, bufferHeight = self.size
+        if self.stereo == 'SideBySide':
+            if self.drawBuffer == 'left':
+                viewport = [0, 0, bufferWidth, bufferHeight]
+            elif self.drawBuffer == 'right':
+                viewport = [bufferWidth,
+                            0,
+                            bufferWidth,
+                            bufferHeight]
+            else:
+                viewport = [0, 0, self.clientSize[0], self.clientSize[1]]
+        else:
+            viewport = [0, 0, self.clientSize[0], self.clientSize[1]]
+
+        GL.glViewport(*viewport)
+        GL.glScissor(*viewport)
+        GL.glEnable(GL.GL_SCISSOR_TEST)
+
     def setBuffer(self, buffer, clear=True):
-        """Choose which buffer to draw to ('left' or 'right').
+        """Choose which buffer to draw to.
 
-        Requires the Window to be initialised with stereo=True and requires a
-        graphics card that supports quad buffering (e,g nVidia Quadro series)
+        Valid buffer names may be 'back', 'front', 'left', and 'right'. Buffers
+        'left' and 'right' require the Window to be initialised with
+        `stereo=True` and requires a graphics card that supports quad buffering
+        (e,g nVidia Quadro series).
 
-        PsychoPy always draws to the back buffers, so 'left' will use
-        ``GL_BACK_LEFT`` This then needs to be flipped once both eye's buffers
-        have been rendered.
+        PsychoPy always draws to the stereo back buffers, so 'left' will use
+        ``GL_BACK_LEFT``, and right uses ``GL_BACK_RIGHT``. This then needs to
+        be flipped once both eye's buffers have been rendered.
+
+        If `useFBO=True`, 'back' refers to the framebuffer instead of the
+        actual window back buffer.
 
         Parameters
         ----------
         buffer : str
             Buffer to draw to. Can either be 'left' or 'right'.
         clear : bool, optional
-            Clear the buffer before drawing. Default is ``True``.
+            Clear color data from the buffer before drawing. Default is
+            ``True``.
 
         Examples
         --------
@@ -1156,13 +1230,59 @@ class Window(object):
                 # do drawing for right eye
                 win.flip()
 
+        Alternatively, you can use a for-loop to set the buffers for
+        stereoscopic rendering::
+
+            win = visual.Window(...., stereo=True)
+            while True:
+                for eye in ['left', 'right']:
+                    win.setBuffer(eye, clear=True)
+                    # draw stuff that appears in both eyes
+
+                    # if there is something drawn conditionally
+                    if win.drawBuffer == 'left':
+                        # left eye only draw commands ...
+                    else:
+                        # right eye only ...
+
+                win.flip()
+
         """
         if buffer == 'left':
-            GL.glDrawBuffer(GL.GL_BACK_LEFT)
+            if self.stereo == 'QuadBuffered':
+                GL.glDrawBuffer(GL.GL_BACK_LEFT)
+            else:
+                if self.useFBO:
+                    GL.glBindFramebufferEXT(GL.GL_FRAMEBUFFER_EXT, self.frameBuffer)
+                    GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)
+                else:
+                    GL.glDrawBuffer(GL.GL_BACK)
         elif buffer == 'right':
-            GL.glDrawBuffer(GL.GL_BACK_RIGHT)
+            if self.stereo == 'QuadBuffered':
+                GL.glDrawBuffer(GL.GL_BACK_RIGHT)
+            else:
+                if self.useFBO:
+                    GL.glBindFramebufferEXT(GL.GL_FRAMEBUFFER_EXT, self.frameBuffer)
+                    GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)
+                else:
+                    GL.glDrawBuffer(GL.GL_BACK)
+        elif buffer == 'back':
+            if self.useFBO:
+                GL.glBindFramebufferEXT(GL.GL_FRAMEBUFFER_EXT, self.frameBuffer)
+                GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0_EXT)
+            else:
+                GL.glDrawBuffer(GL.GL_BACK)
+        elif buffer == 'front':
+            if self.useFBO:
+                GL.glBindFramebufferEXT(GL.GL_FRAMEBUFFER_EXT, 0)
+            GL.glDrawBuffer(GL.GL_FRONT)
         else:
             raise "Unknown buffer '%s' requested in Window.setBuffer" % buffer
+
+        self._drawBuffer = buffer
+        if not buffer == 'back':
+            self._configStereo()
+
         if clear:
             self.clearBuffer()
 
@@ -1176,10 +1296,14 @@ class Window(object):
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
     @property
+    def drawBuffer(self):
+        """Presently active draw buffer (`str`). Use `setBuffer` to change this.
+        """
+        return self._drawBuffer
+
+    @property
     def nearClip(self):
         """Distance to the near clipping plane in meters."""
-        # internally stored as meters, but PsychoPy uses centimeters elsewhere
-        # so let's keep that consistent.
         return self._nearClip
 
     @nearClip.setter
@@ -1235,9 +1359,10 @@ class Window(object):
         """Convergence offset from monitor in centimeters.
 
         This is value corresponds to the offset from screen plane to set the
-        convergence plane. Positive offsets move the plane farther away from the
-        viewer, while negative offsets nearer. This value is used by
-        `setPerspectiveView` and should be set before calling it to take effect.
+        convergence plane (or point for `toe-in` projections). Positive offsets
+        move the plane farther away from the viewer, while negative offsets
+        nearer. This value is used by `setPerspectiveView` and should be set
+        before calling it to take effect.
 
         Notes
         -----
@@ -1273,15 +1398,8 @@ class Window(object):
             Clear the depth buffer.
 
         """
-        if self.scrDistCM is None:
-            scrDistM = 0.5
-        else:
-            scrDistM = self.scrDistCM / 100.0
-
-        if self.scrWidthCM is None:
-            scrWidthM = 0.5
-        else:
-            scrWidthM = self.scrWidthCM / 100.0
+        scrDistM = 0.5 if self.scrDistCM is None else self.scrDistCM / 100.0
+        scrWidthM = 0.5 if self.scrWidthCM is None else self.scrWidthCM / 100.0
 
         # Not in full screen mode? Need to compute the dimensions of the display
         # area to ensure disparities are correct even when in windowed-mode.
@@ -1315,7 +1433,7 @@ class Window(object):
         `viewMatrix` and `projectionMatrix` accordingly so the scene origin is
         on the screen plane. The value of `convergeOffset` will define the
         convergence point of the view, which is offset perpendicular to the
-        center of the screen. Points falling on a vertical line at the
+        center of the screen plane. Points falling on a vertical line at the
         convergence point will have zero disparity. The eye origin will be
         determined using the value of `eyeOffset`.
 
@@ -1336,15 +1454,8 @@ class Window(object):
           something the viewer can look around the screen comfortably.
 
         """
-        if self.scrDistCM is None:
-            scrDistM = 0.5
-        else:
-            scrDistM = self.scrDistCM / 100.0
-
-        if self.scrWidthCM is None:
-            scrWidthM = 0.5
-        else:
-            scrWidthM = self.scrWidthCM / 100.0
+        scrDistM = 0.5 if self.scrDistCM is None else self.scrDistCM / 100.0
+        scrWidthM = 0.5 if self.scrWidthCM is None else self.scrWidthCM / 100.0
 
         # Not in full screen mode? Need to compute the dimensions of the display
         # area to ensure disparities are correct even when in windowed-mode.
@@ -1407,15 +1518,8 @@ class Window(object):
         # NB - we should eventually compute these matrices lazily since they may
         # not change over the course of an experiment under most circumstances.
         #
-        if self.scrDistCM is None:
-            scrDistM = 0.5
-        else:
-            scrDistM = self.scrDistCM / 100.0
-
-        if self.scrWidthCM is None:
-            scrWidthM = 0.5
-        else:
-            scrWidthM = self.scrWidthCM / 100.0
+        scrDistM = 0.5 if self.scrDistCM is None else self.scrDistCM / 100.0
+        scrWidthM = 0.5 if self.scrWidthCM is None else self.scrWidthCM / 100.0
 
         # Not in full screen mode? Need to compute the dimensions of the display
         # area to ensure disparities are correct even when in windowed-mode.
@@ -1981,7 +2085,7 @@ class Window(object):
         self.color = self.color  # call attributeSetter
         GL.glClearDepth(1.0)
 
-        GL.glViewport(0, 0, int(self.size[0]), int(self.size[1]))
+        GL.glViewport(0, 0, int(self._clientSize[0]), int(self._clientSize[1]))
 
         GL.glMatrixMode(GL.GL_PROJECTION)  # Reset The Projection Matrix
         GL.glLoadIdentity()
@@ -2071,7 +2175,7 @@ class Window(object):
                            GL.GL_TEXTURE_MIN_FILTER,
                            GL.GL_LINEAR)
         GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA32F_ARB,
-                        int(self.size[0]), int(self.size[1]), 0,
+                        int(self._clientSize[0]), int(self._clientSize[1]), 0,
                         GL.GL_RGBA, GL.GL_FLOAT, None)
         # attach texture to the frame buffer
         GL.glFramebufferTexture2DEXT(GL.GL_FRAMEBUFFER_EXT,
@@ -2085,7 +2189,7 @@ class Window(object):
         GL.glBindRenderbufferEXT(GL.GL_RENDERBUFFER_EXT, self._stencilTexture)
         GL.glRenderbufferStorageEXT(GL.GL_RENDERBUFFER_EXT,
                                     GL.GL_DEPTH24_STENCIL8_EXT,
-                                    int(self.size[0]), int(self.size[1]))
+                                    int(self._clientSize[0]), int(self._clientSize[1]))
         GL.glFramebufferRenderbufferEXT(GL.GL_FRAMEBUFFER_EXT,
                                         GL.GL_DEPTH_ATTACHMENT_EXT,
                                         GL.GL_RENDERBUFFER_EXT,

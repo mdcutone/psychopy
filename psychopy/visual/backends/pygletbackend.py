@@ -64,12 +64,14 @@ class PygletBackend(BaseBackend):
             stencil_size = 0
         vsync = 0
 
+        useQuadBufferedStereo = win.stereo == 'QuadBuffered'
         # provide warning if stereo buffers are requested but unavailable
-        if win.stereo and not GL.gl_info.have_extension('GL_STEREO'):
+        if useQuadBufferedStereo and not GL.gl_info.have_extension('GL_STEREO'):
             logging.warning(
                 'A stereo window was requested but the graphics '
                 'card does not appear to support GL_STEREO')
-            win.stereo = False
+            logging.flush()
+            win.stereo = useQuadBufferedStereo = False
 
         if sys.platform=='darwin' and not win.useRetina and pyglet.version >= "1.3":
             raise ValueError("As of PsychoPy 1.85.3 OSX windows should all be "
@@ -102,7 +104,7 @@ class PygletBackend(BaseBackend):
         config = GL.Config(depth_size=8, double_buffer=True,
                            sample_buffers=sample_buffers,
                            samples=aa_samples, stencil_size=stencil_size,
-                           stereo=win.stereo,
+                           stereo=useQuadBufferedStereo,
                            vsync=vsync)
 
         if pyglet.version < '1.4':
@@ -122,11 +124,11 @@ class PygletBackend(BaseBackend):
                 logging.info('configured pyglet screen %i' % self.screen)
         # if fullscreen check screen size
         if win._isFullScr:
-            win._checkMatchingSizes(win.size, [thisScreen.width,
-                                                 thisScreen.height])
+            win._checkMatchingSizes(win._size, [thisScreen.width,
+                                                thisScreen.height])
             w = h = None
         else:
-            w, h = win.size
+            w, h = win.clientSize
         if win.allowGUI:
             style = None
         else:
@@ -169,9 +171,9 @@ class PygletBackend(BaseBackend):
                 retinaContext = self.winHandle.context._nscontext
                 view = retinaContext.view()
                 bounds = view.convertRectToBacking_(view.bounds()).size
-                if win.size[0] == bounds.width:
+                if win.clientSize[0] == bounds.width:
                     win.useRetina = False  # the screen is not a retina display
-                win.size = np.array([int(bounds.width), int(bounds.height)])
+                win._frameBufferSize = np.array([int(bounds.width), int(bounds.height)], np.int)
             try:
                 # python 32bit (1.4. or 1.2 pyglet)
                 win._hw_handle = self.winHandle._window.value
@@ -212,13 +214,14 @@ class PygletBackend(BaseBackend):
             self.winHandle.set_mouse_visible(False)
         self.winHandle.on_resize = _onResize  # avoid circular reference
         if not win.pos:
-            # work out where the centre should be 
+            # work out where the centre should be
+            w, h = win.clientSize
             if win.useRetina:
-                win.pos = [(thisScreen.width - win.size[0]/2) / 2,
-                            (thisScreen.height - win.size[1]/2) / 2]
+                win.pos = [(thisScreen.width - w / 2) / 2,
+                           (thisScreen.height - h / 2) / 2]
             else:
-                win.pos = [(thisScreen.width - win.size[0]) / 2,
-                            (thisScreen.height - win.size[1]) / 2]
+                win.pos = [(thisScreen.width - w) / 2,
+                            (thisScreen.height - h) / 2]
         if not win._isFullScr:
             # add the necessary amount for second screen
             self.winHandle.set_location(int(win.pos[0] + thisScreen.x),
