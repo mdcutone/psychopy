@@ -291,12 +291,12 @@ class LightSource(object):
         """Setup a light source."""
         # convert data in light class to ctypes
         # pos = numpy.ctypeslib.as_ctypes(light.pos)
-        diffuse = np.ctypeslib.as_ctypes(self.diffuseRGB)
-        specular = np.ctypeslib.as_ctypes(self.specularRGB)
-        ambient = np.ctypeslib.as_ctypes(self.ambientRGB)
+        diffuse = np.ctypeslib.as_ctypes(self._diffuseRGB)
+        specular = np.ctypeslib.as_ctypes(self._specularRGB)
+        ambient = np.ctypeslib.as_ctypes(self._ambientRGB)
         pos = np.ctypeslib.as_ctypes(self._pos)
 
-        if shaderProg is not None:
+        if shaderProg is None:
             enumLight = GL.GL_LIGHT0 + index
             GL.glLightfv(enumLight, GL.GL_DIFFUSE, diffuse)
             GL.glLightfv(enumLight, GL.GL_SPECULAR, specular)
@@ -308,20 +308,26 @@ class LightSource(object):
             GL.glLightf(enumLight, GL.GL_LINEAR_ATTENUATION, linear)
             GL.glLightf(enumLight, GL.GL_QUADRATIC_ATTENUATION, quadratic)
         else:
+            idxBytes = str(index).encode('ascii')
             GL.glUniform4fv(
-                GL.glGetUniformLocation(shaderProg, b"sceneLights[0].diffuse"),
+                GL.glGetUniformLocation(
+                    shaderProg, b"sceneLights[" + idxBytes + b"].diffuse"),
                 1, diffuse)
             GL.glUniform4fv(
-                GL.glGetUniformLocation(shaderProg, b"sceneLights[0].specular"),
+                GL.glGetUniformLocation(
+                    shaderProg, b"sceneLights[" + idxBytes + b"].specular"),
                 1, specular)
             GL.glUniform4fv(
-                GL.glGetUniformLocation(shaderProg, b"sceneLights[0].ambient"),
+                GL.glGetUniformLocation(
+                    shaderProg, b"sceneLights[" + idxBytes + b"].ambient"),
                 1, ambient)
             GL.glUniform4fv(
-                GL.glGetUniformLocation(shaderProg, b"sceneLights[0].position"),
+                GL.glGetUniformLocation(
+                    shaderProg, b"sceneLights[" + idxBytes + b"].position"),
                 1, pos)
             GL.glUniform3f(
-                GL.glGetUniformLocation(shaderProg, b"sceneLights[0].attenuation"),
+                GL.glGetUniformLocation(
+                    shaderProg, b"sceneLights[" + idxBytes + b"].attenuation"),
                 *self._kAttenuation)
 
 
@@ -661,12 +667,11 @@ class PhongMaterial(object):
             GL.glUniform1f(
                 GL.glGetUniformLocation(shader, b"material.shininess"), self._shininess)
 
-
-
-
             GL.glUniform4fv(
                 GL.glGetUniformLocation(shader, b"sceneAmbient"), 1,
                 np.ctypeslib.as_ctypes(self.obj.win.ambientLight))
+
+            self.obj.win.lights[0].setupLight(0, shaderProg=shader)
 
         # pass values to OpenGL
         GL.glMaterialfv(face, GL.GL_DIFFUSE, self._ptrDiffuse)
