@@ -1391,9 +1391,9 @@ class Window(object):
 
             # convert data in light class to ctypes
             # pos = numpy.ctypeslib.as_ctypes(light.pos)
-            diffuse = numpy.ctypeslib.as_ctypes(light.diffuse)
-            specular = numpy.ctypeslib.as_ctypes(light.specular)
-            ambient = numpy.ctypeslib.as_ctypes(light.ambient)
+            diffuse = numpy.ctypeslib.as_ctypes(light.diffuseRGB)
+            specular = numpy.ctypeslib.as_ctypes(light.specularRGB)
+            ambient = numpy.ctypeslib.as_ctypes(light.ambientRGB)
 
             # pass values to OpenGL
             # GL.glLightfv(enumLight, GL.GL_POSITION, pos)
@@ -2471,6 +2471,10 @@ class Window(object):
             _shaders.vertSimple, _shaders.fragImageStim)
         self._shaders['imageStim_adding'] = _shaders.compileProgram(
             _shaders.vertSimple, _shaders.fragImageStim_adding)
+        self._shaders['stim3d_depthMap'] = _shaders.compileProgram(
+            _shaders.vertDepthMap, _shaders.fragNull)
+        self._shaders['stim3d_depthToTexture'] = _shaders.compileProgram(
+            _shaders.vertSimple, _shaders.fragDepthToTexture)
         self._shaders['stim3d_phong'] = {}
 
         # Create shader flags, these are used as keys to pick the appropriate
