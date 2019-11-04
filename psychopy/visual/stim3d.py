@@ -290,13 +290,12 @@ class LightSource(object):
     def setupLight(self, index=0, shaderProg=None):
         """Setup a light source."""
         # convert data in light class to ctypes
-        # pos = numpy.ctypeslib.as_ctypes(light.pos)
         diffuse = np.ctypeslib.as_ctypes(self.diffuseRGB)
         specular = np.ctypeslib.as_ctypes(self.specularRGB)
         ambient = np.ctypeslib.as_ctypes(self.ambientRGB)
         pos = np.ctypeslib.as_ctypes(self._pos)
 
-        if shaderProg is not None:
+        if shaderProg is None:
             enumLight = GL.GL_LIGHT0 + index
             GL.glLightfv(enumLight, GL.GL_DIFFUSE, diffuse)
             GL.glLightfv(enumLight, GL.GL_SPECULAR, specular)
@@ -582,6 +581,91 @@ class PhongMaterial(object):
     def shininess(self, value):
         self._shininess = float(value)
 
+    def _setupMaterialShader(self, useTextures=False):
+        """Setup the material for use without shaders.
+        """
+        # get the appropriate shader for this material
+        nLights = len(self.obj.win.lights)
+        shaderKey = (nLights, useTextures)
+        shader = self.obj.win._shaders['stim3d_phong'][shaderKey]
+        gt.useProgram(shader)
+
+        self.obj.win.lights[0].setupLight(0, shader)
+
+        # handle cast shadow
+        if self._castShadow:
+            lightMatrix = mt.concatenate(
+                [self.obj.win.lights[0].thePose.getViewMatrix(),
+                 vt.orthoProjectionMatrix(-5, 5, -5, 5, -5, 10)],
+                dtype=np.float32)
+            GL.glUniformMatrix4fv(
+                GL.glGetUniformLocation(shader, b"lightSpaceMatrix"),
+                1, GL.GL_TRUE, at.array2pointer(lightMatrix))
+
+        # set shader uniforms
+        GL.glUniformMatrix4fv(
+            GL.glGetUniformLocation(shader, b"modelMatrix"),
+            1, GL.GL_TRUE, at.array2pointer(self.obj.thePose.modelMatrix))
+        GL.glUniformMatrix4fv(
+            GL.glGetUniformLocation(shader, b"viewMatrix"),
+            1, GL.GL_TRUE, at.array2pointer(self.obj.win.viewMatrix))
+        GL.glUniformMatrix4fv(
+            GL.glGetUniformLocation(shader, b"projectionMatrix"),
+            1, GL.GL_TRUE, at.array2pointer(self.obj.win.projectionMatrix))
+        GL.glUniform4fv(
+            GL.glGetUniformLocation(
+                shader, b"material.diffuse"), 1, self._ptrDiffuse)
+        GL.glUniform4fv(
+            GL.glGetUniformLocation(
+                shader, b"material.specular"), 1, self._ptrSpecular)
+        GL.glUniform4fv(
+            GL.glGetUniformLocation(
+                shader, b"material.ambient"), 1, self._ptrAmbient)
+        GL.glUniform1f(
+            GL.glGetUniformLocation(
+                shader, b"material.shininess"), self._shininess)
+        GL.glUniform4fv(
+            GL.glGetUniformLocation(shader, b"sceneAmbient"), 1,
+            np.ctypeslib.as_ctypes(self.obj.win.ambientLight))
+
+        if useTextures and self.diffuseTexture is not None:
+            self._useTextures = True
+            GL.glEnable(GL.GL_TEXTURE_2D)
+            GL.glActiveTexture(GL.GL_TEXTURE0)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, self.diffuseTexture.name)
+            GL.glUniform1i(GL.glGetUniformLocation(shader, b"diffTexture"), 0)
+        else:
+            self._useTextures = False
+
+        if self._castShadow:
+            GL.glActiveTexture(GL.GL_TEXTURE1)
+            GL.glBindTexture(GL.GL_TEXTURE_2D,
+                             self.obj.win.lights[0]._shadowDepthTex)
+            GL.glUniform1i(GL.glGetUniformLocation(shader, b"shadowMap"), 1)
+
+        self._useShaders = True
+
+    def _setupMaterialNoShader(self, useTextures=False):
+        # pass values to OpenGL
+        GL.glDisable(GL.GL_COLOR_MATERIAL)  # disable color tracking
+        face = self._face
+        GL.glMaterialfv(face, GL.GL_DIFFUSE, self._ptrDiffuse)
+        GL.glMaterialfv(face, GL.GL_SPECULAR, self._ptrSpecular)
+        GL.glMaterialfv(face, GL.GL_AMBIENT, self._ptrAmbient)
+        GL.glMaterialfv(face, GL.GL_EMISSION, self._ptrEmission)
+        GL.glMaterialf(face, GL.GL_SHININESS, self.shininess)
+
+        # setup textures
+        if useTextures and self.diffuseTexture is not None:
+            self._useTextures = True
+            GL.glEnable(GL.GL_TEXTURE_2D)
+            GL.glActiveTexture(GL.GL_TEXTURE0)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, self.diffuseTexture.name)
+        else:
+            self._useTextures = False
+
+        self._useShaders = False
+
     def begin(self, useTextures=True, useShaders=False):
         """Use this material for successive rendering calls.
 
@@ -591,103 +675,41 @@ class PhongMaterial(object):
             Enable textures.
 
         """
-        GL.glDisable(GL.GL_COLOR_MATERIAL)  # disable color tracking
-        face = self._face
-
         if useShaders:
             # number of scene lights
-            self._useShaders = True
-            nLights = len(self.obj.win.lights)
-
-            if self._castShadow and nLights > 0:
-                oldViewport = self.obj.win.viewport
-                for light in self.obj.win.lights:
-                    if light._castShadow:
-                        lightMatrix = mt.concatenate(
-                            [self.obj.win.lights[0].thePose.getViewMatrix(),
-                             vt.orthoProjectionMatrix(-5,5,-5,5,-5,10)],
-                            dtype=np.float32)
-                        shader = self.obj.win._shaders['stim3d_depthMap']
-                        gt.useProgram(shader)
-
-                        GL.glUniformMatrix4fv(
-                            GL.glGetUniformLocation(shader, b"modelMatrix"),
-                            1, GL.GL_TRUE, at.array2pointer(self.obj.thePose.modelMatrix))
-                        GL.glUniformMatrix4fv(
-                            GL.glGetUniformLocation(shader, b"lightMatrix"),
-                            1, GL.GL_TRUE, at.array2pointer(lightMatrix))
-
-                        self.obj.win.viewport = self.obj.win.scissor = (0, 0, light._shadowRes, light._shadowRes)
-                        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, light._shadowFBO)
-                        GL.glClearDepth(1.0)
-                        GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
-                        #GL.glCullFace(GL.GL_FRONT)
-                        for materialName, materialDesc in self.obj.material.items():
-                            gt.drawVAO(self.obj._vao[materialName], GL.GL_TRIANGLES)
-                        #GL.glCullFace(GL.GL_BACK)
-                        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
-
-                self.obj.win.viewport = self.obj.win.scissor = oldViewport
-
-            useTextures = useTextures and self.diffuseTexture is not None
-            shaderKey = (nLights, useTextures)
-            shader = self.obj.win._shaders['stim3d_phong'][shaderKey]
-            gt.useProgram(shader)
-            if self._castShadow:
-                lightMatrix = mt.concatenate(
-                    [self.obj.win.lights[0].thePose.getViewMatrix(),
-                     vt.orthoProjectionMatrix(-5,5,-5,5,-5,10)],
-                    dtype=np.float32)
-                GL.glUniformMatrix4fv(
-                    GL.glGetUniformLocation(shader, b"lightSpaceMatrix"),
-                    1, GL.GL_TRUE, at.array2pointer(lightMatrix))
-
-            GL.glUniformMatrix4fv(
-                GL.glGetUniformLocation(shader, b"modelMatrix"),
-                    1, GL.GL_TRUE, at.array2pointer(self.obj.thePose.modelMatrix))
-            GL.glUniformMatrix4fv(
-                GL.glGetUniformLocation(shader, b"viewMatrix"),
-                    1, GL.GL_TRUE, at.array2pointer(self.obj.win.viewMatrix))
-            GL.glUniformMatrix4fv(
-                GL.glGetUniformLocation(shader, b"projectionMatrix"),
-                    1, GL.GL_TRUE, at.array2pointer(self.obj.win.projectionMatrix))
-
-            GL.glUniform4fv(
-                GL.glGetUniformLocation(shader, b"material.diffuse"), 1, self._ptrDiffuse)
-            GL.glUniform4fv(
-                GL.glGetUniformLocation(shader, b"material.specular"), 1, self._ptrSpecular)
-            GL.glUniform4fv(
-                GL.glGetUniformLocation(shader, b"material.ambient"), 1, self._ptrAmbient)
-            GL.glUniform1f(
-                GL.glGetUniformLocation(shader, b"material.shininess"), self._shininess)
-
-
-
-
-            GL.glUniform4fv(
-                GL.glGetUniformLocation(shader, b"sceneAmbient"), 1,
-                np.ctypeslib.as_ctypes(self.obj.win.ambientLight))
-
-        # pass values to OpenGL
-        GL.glMaterialfv(face, GL.GL_DIFFUSE, self._ptrDiffuse)
-        GL.glMaterialfv(face, GL.GL_SPECULAR, self._ptrSpecular)
-        GL.glMaterialfv(face, GL.GL_AMBIENT, self._ptrAmbient)
-        GL.glMaterialfv(face, GL.GL_EMISSION, self._ptrEmission)
-        GL.glMaterialf(face, GL.GL_SHININESS, self.shininess)
-
-        # setup textures
-        if useTextures and self.diffuseTexture is not None:
-            shader = self.obj.win._shaders['stim3d_phong'][shaderKey]
-            self._useTextures = True
-            GL.glEnable(GL.GL_TEXTURE_2D)
-            GL.glActiveTexture(GL.GL_TEXTURE0)
-            GL.glBindTexture(GL.GL_TEXTURE_2D, self.diffuseTexture.name)
-            GL.glUniform1i(GL.glGetUniformLocation(shader, b"diffTexture"), 0)
-
-            if self._castShadow:
-                GL.glActiveTexture(GL.GL_TEXTURE1)
-                GL.glBindTexture(GL.GL_TEXTURE_2D, self.obj.win.lights[0]._shadowDepthTex)
-                GL.glUniform1i(GL.glGetUniformLocation(shader, b"shadowMap"), 1)
+            #
+            # if self._castShadow and nLights > 0:
+            #     oldViewport = self.obj.win.viewport
+            #     for light in self.obj.win.lights:
+            #         if light._castShadow:
+            #             lightMatrix = mt.concatenate(
+            #                 [self.obj.win.lights[0].thePose.getViewMatrix(),
+            #                  vt.orthoProjectionMatrix(-5,5,-5,5,-5,10)],
+            #                 dtype=np.float32)
+            #             shader = self.obj.win._shaders['stim3d_depthMap']
+            #             gt.useProgram(shader)
+            #
+            #             GL.glUniformMatrix4fv(
+            #                 GL.glGetUniformLocation(shader, b"modelMatrix"),
+            #                 1, GL.GL_TRUE, at.array2pointer(self.obj.thePose.modelMatrix))
+            #             GL.glUniformMatrix4fv(
+            #                 GL.glGetUniformLocation(shader, b"lightMatrix"),
+            #                 1, GL.GL_TRUE, at.array2pointer(lightMatrix))
+            #
+            #             self.obj.win.viewport = self.obj.win.scissor = (0, 0, light._shadowRes, light._shadowRes)
+            #             GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, light._shadowFBO)
+            #             GL.glClearDepth(1.0)
+            #             GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
+            #             #GL.glCullFace(GL.GL_FRONT)
+            #             for materialName, materialDesc in self.obj.material.items():
+            #                 gt.drawVAO(self.obj._vao[materialName], GL.GL_TRIANGLES)
+            #             #GL.glCullFace(GL.GL_BACK)
+            #             GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+            #
+            #     self.obj.win.viewport = self.obj.win.scissor = oldViewport
+            self._setupMaterialShader(useTextures)
+        else:
+            self._setupMaterialNoShader(useTextures)
 
     def end(self, clear=True):
         """Stop using this material.
@@ -730,23 +752,23 @@ class PhongMaterial(object):
                 (GL.GLfloat * 4)(0.0, 0.0, 0.0, 1.0))
             GL.glMaterialf(self._face, GL.GL_SHININESS, 0.0)
 
-        if self._useTextures:
-            self._useTextures = False
-            # gt.unbindTexture(self.diffuseTexture)
-            GL.glActiveTexture(GL.GL_TEXTURE0)
-            GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
-
-            if self._castShadow:
-                GL.glActiveTexture(GL.GL_TEXTURE1)
-                GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
-
-            GL.glDisable(GL.GL_TEXTURE_2D)
-
         if self._useShaders:
             gt.useProgram(0)
             self._useShaders = False
+        else:
+            GL.glEnable(GL.GL_COLOR_MATERIAL)
 
-        GL.glEnable(GL.GL_COLOR_MATERIAL)
+        if self._useTextures:
+            self._useTextures = False
+            GL.glActiveTexture(GL.GL_TEXTURE0)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+
+            if self._useShaders:
+                if self._castShadow:
+                    GL.glActiveTexture(GL.GL_TEXTURE1)
+                    GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+
+            GL.glDisable(GL.GL_TEXTURE_2D)
 
 
 class RigidBodyPose(object):
@@ -1962,8 +1984,9 @@ class ObjMeshStim(BaseRigidBodyStim):
 
         win.draw3d = True
 
-        #GL.glPushMatrix()
-        #GL.glMultTransposeMatrixf(at.array2pointer(self.thePose.modelMatrix))
+        if self._useShaders is False:
+            GL.glPushMatrix()
+            GL.glMultTransposeMatrixf(at.array2pointer(self.thePose.getModelMatrix()))
 
         # iterate over materials, draw associated VAOs
         if self.material is not None:
@@ -2015,7 +2038,8 @@ class ObjMeshStim(BaseRigidBodyStim):
 
                 GL.glDisable(GL.GL_COLOR_MATERIAL)  # enable color tracking
 
-        #GL.glPopMatrix()
+        if self._useShaders is False:
+            GL.glPopMatrix()
 
         win.draw3d = False
 
