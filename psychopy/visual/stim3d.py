@@ -52,19 +52,18 @@ class LightSource(object):
                  lightType='point',
                  kAttenuation=(1, 0, 0),
                  castShadow=True,
-                 shadowRes=1024*2):
+                 shadowRes=1024*2,
+                 shadowClip=(-10., 20.)):
         """
         Parameters
         ----------
         win : `~psychopy.visual.Window`
             Window associated with this light source.
         pos : array_like
-            Position of the light source (x, y, z, w). If `w=1.0` the light will
-            be a point source and `x`, `y`, and `z` is the position in the
-            scene. If `w=0.0`, the light source will be directional and `x`,
-            `y`, and `z` will define the vector pointing to the direction the
-            light source is coming from. For instance, a vector of (0, 1, 0, 0)
-            will indicate that a light source is coming from above.
+            Position of the light source (x, y, z).
+        ori : array_like
+            Orientation of the light, only applicable to directional light
+            sources.
         diffuseColor : array_like
             Diffuse light color.
         specularColor : array_like
@@ -79,7 +78,15 @@ class LightSource(object):
             attenuation.
         castShadow : bool
             If `True` this light source will cast shadows on objects.
-
+        shadowClip : array_like
+            Minimum and maximum distance from the light source to cast shadows
+            in scene units (default is meters). The larger this distance, the
+            coarser the shadow edges will appear due decreasing depth buffer
+            resolution.
+        spotCutoff : float
+            Cutoff angle for the spotlight.
+        spotExponent : float
+            Sptolight exponent, determines how focused the spotligh is.
         """
         self.win = win
 
@@ -103,6 +110,8 @@ class LightSource(object):
         self._lightType = lightType
         self.pos = pos
 
+        self._shadowClip = shadowClip
+
         # attenuation factors
         self._kAttenuation = np.asarray(kAttenuation, np.float32)
 
@@ -121,9 +130,55 @@ class LightSource(object):
         if self._castShadow:
             self._setupShadowFramebuffer()
 
-    def _setupShadowFramebuffer(self):
-        """Setup a framebuffer for cast shadows."""
+        self._shadowProjMatrix = vt.orthoProjectionMatrix(
+            -10, 10, -10, 10, self._shadowClip[0], self._shadowClip[1],
+            dtype=np.float32)
+        self._shadowViewMatrix = self.thePose.getViewMatrix()
+        self._shadowMatrix = np.matmul(self._shadowProjMatrix,
+                                       self._shadowViewMatrix)
 
+        self._shadowMatrixNeedsUpdate = False
+
+        self.thePose.setPosOriUpdateCallback(self._updateShadowMatrix)
+
+    def _updateShadowMatrix(self):
+        """Update the shadow matrix. Users should not call this manually."""
+        self._shadowMatrixNeedsUpdate = True
+
+    @property
+    def shadowMatrix(self):
+        """Shadow view and projection matrix.
+
+        This represents the projection from the light source. Only valid for
+        directional sources.
+
+        """
+        if self._shadowMatrixNeedsUpdate:
+            self._shadowViewMatrix = self.thePose.getViewMatrix()
+            self._shadowProjMatrix = vt.orthoProjectionMatrix(
+                -10, 10, -10, 10, self._shadowClip[0], self._shadowClip[1],
+                dtype=np.float32)
+
+            self._shadowMatrix = np.matmul(self._shadowProjMatrix,
+                      self._shadowViewMatrix)
+
+            self._shadowMatrixNeedsUpdate = False
+
+        return self._shadowMatrix
+
+    def _setupShadowFramebuffer(self):
+        """Setup a framebuffer for cast shadows.
+
+        Each light source gets a framebuffer to sample depth from to determine
+        if a fragment is occluded from the light source. Directional lights get
+        a single 2D framebuffer, while omnidirectional lights get a cube map.
+
+        The shader samples from values from this buffer to determine if a
+        fragment is shadowed. This buffer only needs to be drawn to once per
+        render frame, and doesn't need to be redrawn unless something in the
+        scene changes.
+
+        """
         # framebuffer for rendering shadows
         self._shadowFBO = GL.GLuint()
         GL.glGenFramebuffers(1, ctypes.byref(self._shadowFBO))
@@ -136,6 +191,8 @@ class LightSource(object):
         GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_DEPTH_COMPONENT,
                         self._shadowRes, self._shadowRes, 0,
                         GL.GL_DEPTH_COMPONENT, GL.GL_FLOAT, None)
+
+        # shadow map parameters
         GL.glTexParameteri(
             GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST)
         GL.glTexParameteri(
@@ -144,6 +201,13 @@ class LightSource(object):
             GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_REPEAT)
         GL.glTexParameteri(
             GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_REPEAT)
+        GL.glTexParameteri(
+            GL.GL_TEXTURE_2D, GL.GL_TEXTURE_COMPARE_MODE,
+            GL.GL_COMPARE_R_TO_TEXTURE)
+        GL.glTexParameteri(
+            GL.GL_TEXTURE_2D, GL.GL_TEXTURE_COMPARE_FUNC, GL.GL_LEQUAL)
+        GL.glTexParameteri(
+            GL.GL_TEXTURE_2D, GL.GL_DEPTH_TEXTURE_MODE, GL.GL_INTENSITY)
 
         GL.glFramebufferTexture2D(GL.GL_FRAMEBUFFER, GL.GL_DEPTH_ATTACHMENT,
                                   GL.GL_TEXTURE_2D, self._shadowDepthTex, 0)
@@ -167,6 +231,7 @@ class LightSource(object):
     @property
     def pos(self):
         """Position of the light source in the scene in scene units."""
+        self._shadowMatrixNeedsUpdate = True
         return self.thePose.pos
 
     @pos.setter
@@ -176,33 +241,30 @@ class LightSource(object):
     @property
     def ori(self):
         """Orientation of the light source."""
-        return self._pos[:3]
+        self._shadowMatrixNeedsUpdate = True
+        return self.thePose.ori
 
     @ori.setter
     def ori(self, value):
-        self._pos = np.zeros((4,), np.float32)
-        self._pos[:3] = value
-
-        if self._lightType == 'point':
-            self._pos[3] = 1.0
+        self.thePose.ori = value
 
     @property
     def lightType(self):
         """Type of light source, can be 'point' or 'directional'."""
-        return self._pos[:3]
+        return self._lightType
 
     @lightType.setter
     def lightType(self, value):
         self._lightType = value
 
-        if self._lightType == 'point':
-            self._pos[3] = 1.0
-        elif self._lightType == 'directional':
-            self._pos[3] = 0.0
-        else:
-            raise ValueError(
-                "Unknown `lightType` specified, must be 'directional' or "
-                "'point'.")
+        # if self._lightType == 'point':
+        #     self._pos[3] = 1.0
+        # elif self._lightType == 'directional':
+        #     self._pos[3] = 0.0
+        # else:
+        #     raise ValueError(
+        #         "Unknown `lightType` specified, must be 'directional' or "
+        #         "'point'.")
 
     @property
     def diffuseColor(self):
@@ -290,38 +352,62 @@ class LightSource(object):
     def setupLight(self, index=0, shaderProg=None):
         """Setup a light source."""
         # convert data in light class to ctypes
-        diffuse = np.ctypeslib.as_ctypes(self.diffuseRGB)
-        specular = np.ctypeslib.as_ctypes(self.specularRGB)
-        ambient = np.ctypeslib.as_ctypes(self.ambientRGB)
-        pos = np.ctypeslib.as_ctypes(self._pos)
+        diffuse = np.ctypeslib.as_ctypes(self._diffuseRGB)
+        specular = np.ctypeslib.as_ctypes(self._specularRGB)
+        ambient = np.ctypeslib.as_ctypes(self._ambientRGB)
 
-        if shaderProg is None:
-            enumLight = GL.GL_LIGHT0 + index
-            GL.glLightfv(enumLight, GL.GL_DIFFUSE, diffuse)
-            GL.glLightfv(enumLight, GL.GL_SPECULAR, specular)
-            GL.glLightfv(enumLight, GL.GL_AMBIENT, ambient)
-            GL.glLightfv(enumLight, GL.GL_POSITION, pos)
-
-            constant, linear, quadratic = self._kAttenuation
-            GL.glLightf(enumLight, GL.GL_CONSTANT_ATTENUATION, constant)
-            GL.glLightf(enumLight, GL.GL_LINEAR_ATTENUATION, linear)
-            GL.glLightf(enumLight, GL.GL_QUADRATIC_ATTENUATION, quadratic)
+        if self._lightType == 'directional':
+            at = self.thePose.at
+            pos = np.ctypeslib.as_ctypes(np.asarray([at[0], at[1], at[2], 0.], dtype=np.float32))
+        elif self._lightType == 'spot':
+            pos = self.thePose.pos
+            pos = np.ctypeslib.as_ctypes(np.asarray([pos[0], pos[1], pos[2], 1.], dtype=np.float32))
         else:
-            GL.glUniform4fv(
-                GL.glGetUniformLocation(shaderProg, b"sceneLights[0].diffuse"),
-                1, diffuse)
-            GL.glUniform4fv(
-                GL.glGetUniformLocation(shaderProg, b"sceneLights[0].specular"),
-                1, specular)
-            GL.glUniform4fv(
-                GL.glGetUniformLocation(shaderProg, b"sceneLights[0].ambient"),
-                1, ambient)
-            GL.glUniform4fv(
-                GL.glGetUniformLocation(shaderProg, b"sceneLights[0].position"),
-                1, pos)
-            GL.glUniform3f(
-                GL.glGetUniformLocation(shaderProg, b"sceneLights[0].attenuation"),
-                *self._kAttenuation)
+            pos = self.thePose.pos
+            pos = np.ctypeslib.as_ctypes(np.asarray([pos[0], pos[1], pos[2], 1.], dtype=np.float32))
+
+        at = self.thePose.at
+        at = np.ctypeslib.as_ctypes(np.asarray([at[0], at[1], at[2], 1.], dtype=np.float32))
+
+        #pos[:3] = mt.applyMatrix(self.win.viewMatrix[:3,:3], pos[:3], dtype=np.float32)
+        #print(pos)
+        #pos = np.ctypeslib.as_ctypes(pos)
+
+        #if shaderProg is None:
+        enumLight = GL.GL_LIGHT0 + index
+        GL.glLightfv(enumLight, GL.GL_DIFFUSE, diffuse)
+        GL.glLightfv(enumLight, GL.GL_SPECULAR, specular)
+        GL.glLightfv(enumLight, GL.GL_AMBIENT, ambient)
+        GL.glLightfv(enumLight, GL.GL_POSITION, pos)
+        GL.glLightfv(enumLight, GL.GL_SPOT_DIRECTION, at)
+        GL.glLightfv(enumLight, GL.GL_SPOT_CUTOFF, GL.GLfloat(1.0))
+
+        constant, linear, quadratic = self._kAttenuation
+        GL.glLightf(enumLight, GL.GL_CONSTANT_ATTENUATION, constant)
+        GL.glLightf(enumLight, GL.GL_LINEAR_ATTENUATION, linear)
+        GL.glLightf(enumLight, GL.GL_QUADRATIC_ATTENUATION, quadratic)
+        #else:
+            # idxBytes = str(index).encode('ascii')
+            # GL.glUniform4fv(
+            #     GL.glGetUniformLocation(
+            #         shaderProg, b"sceneLights[" + idxBytes + b"].diffuse"),
+            #     1, diffuse)
+            # GL.glUniform4fv(
+            #     GL.glGetUniformLocation(
+            #         shaderProg, b"sceneLights[" + idxBytes + b"].specular"),
+            #     1, specular)
+            # GL.glUniform4fv(
+            #     GL.glGetUniformLocation(
+            #         shaderProg, b"sceneLights[" + idxBytes + b"].ambient"),
+            #     1, ambient)
+            # GL.glUniform4fv(
+            #     GL.glGetUniformLocation(
+            #         shaderProg, b"sceneLights[" + idxBytes + b"].position"),
+            #     1, pos)
+            # GL.glUniform3f(
+            #     GL.glGetUniformLocation(
+            #         shaderProg, b"sceneLights[" + idxBytes + b"].attenuation"),
+            #     *self._kAttenuation)
 
 
 class PhongMaterial(object):
@@ -584,47 +670,58 @@ class PhongMaterial(object):
     def _setupMaterialShader(self, useTextures=False):
         """Setup the material for use without shaders.
         """
-        # get the appropriate shader for this material
+
         nLights = len(self.obj.win.lights)
+
+        if self._castShadow and nLights > 0:
+            oldViewport = self.obj.win.viewport
+            #for light in self.obj.win.lights:
+            if self.obj.win.lights[0]._castShadow:
+                lightMatrix = self.obj.win.lights[0].shadowMatrix
+                shader = self.obj.win._shaders['stim3d_depthMap']
+                gt.useProgram(shader)
+
+                GL.glUniformMatrix4fv(
+                    GL.glGetUniformLocation(shader, b"modelMatrix"),
+                    1, GL.GL_TRUE, at.array2pointer(self.obj.thePose.modelMatrix))
+                GL.glUniformMatrix4fv(
+                    GL.glGetUniformLocation(shader, b"lightMatrix"),
+                    1, GL.GL_TRUE, at.array2pointer(lightMatrix))
+
+                self.obj.win.viewport = self.obj.win.scissor = (0, 0, self.obj.win.lights[0]._shadowRes, self.obj.win.lights[0]._shadowRes)
+                GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, self.obj.win.lights[0]._shadowFBO)
+                GL.glClearDepth(1.0)
+                GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
+                # GL.glCullFace(GL.GL_FRONT)
+                for materialName, materialDesc in self.obj.material.items():
+                    gt.drawVAO(self.obj._vao[materialName], GL.GL_TRIANGLES)
+                # GL.glCullFace(GL.GL_BACK)
+                GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+
+            gt.useProgram(0)
+            self.obj.win.viewport = self.obj.win.scissor = oldViewport
+
+        # get the appropriate shader for this material
         shaderKey = (nLights, useTextures)
         shader = self.obj.win._shaders['stim3d_phong'][shaderKey]
         gt.useProgram(shader)
-
         self.obj.win.lights[0].setupLight(0, shader)
-
         # handle cast shadow
         if self._castShadow:
-            lightMatrix = mt.concatenate(
-                [self.obj.win.lights[0].thePose.getViewMatrix(),
-                 vt.orthoProjectionMatrix(-5, 5, -5, 5, -5, 10)],
-                dtype=np.float32)
+            lightMatrix = self.obj.win.lights[0].shadowMatrix
             GL.glUniformMatrix4fv(
                 GL.glGetUniformLocation(shader, b"lightSpaceMatrix"),
                 1, GL.GL_TRUE, at.array2pointer(lightMatrix))
 
-        # set shader uniforms
-        GL.glUniformMatrix4fv(
-            GL.glGetUniformLocation(shader, b"modelMatrix"),
-            1, GL.GL_TRUE, at.array2pointer(self.obj.thePose.modelMatrix))
-        GL.glUniformMatrix4fv(
-            GL.glGetUniformLocation(shader, b"viewMatrix"),
-            1, GL.GL_TRUE, at.array2pointer(self.obj.win.viewMatrix))
-        GL.glUniformMatrix4fv(
-            GL.glGetUniformLocation(shader, b"projectionMatrix"),
-            1, GL.GL_TRUE, at.array2pointer(self.obj.win.projectionMatrix))
-        GL.glUniform4fv(
-            GL.glGetUniformLocation(
-                shader, b"material.diffuse"), 1, self._ptrDiffuse)
-        GL.glUniform4fv(
-            GL.glGetUniformLocation(
-                shader, b"material.specular"), 1, self._ptrSpecular)
-        GL.glUniform4fv(
-            GL.glGetUniformLocation(
-                shader, b"material.ambient"), 1, self._ptrAmbient)
-        GL.glUniform1f(
-            GL.glGetUniformLocation(
-                shader, b"material.shininess"), self._shininess)
-        GL.glUniform4fv(
+        GL.glDisable(GL.GL_COLOR_MATERIAL)  # disable color tracking
+        face = self._face
+        GL.glMaterialfv(face, GL.GL_DIFFUSE, self._ptrDiffuse)
+        GL.glMaterialfv(face, GL.GL_SPECULAR, self._ptrSpecular)
+        GL.glMaterialfv(face, GL.GL_AMBIENT, self._ptrAmbient)
+        GL.glMaterialfv(face, GL.GL_EMISSION, self._ptrEmission)
+        GL.glMaterialf(face, GL.GL_SHININESS, self.shininess)
+
+        GL.glUniform3fv(
             GL.glGetUniformLocation(shader, b"sceneAmbient"), 1,
             np.ctypeslib.as_ctypes(self.obj.win.ambientLight))
 
@@ -637,7 +734,7 @@ class PhongMaterial(object):
         else:
             self._useTextures = False
 
-        if self._castShadow:
+        if self._castShadow and self.obj.win.lights[0]._castShadow:
             GL.glActiveTexture(GL.GL_TEXTURE1)
             GL.glBindTexture(GL.GL_TEXTURE_2D,
                              self.obj.win.lights[0]._shadowDepthTex)
@@ -664,6 +761,7 @@ class PhongMaterial(object):
         else:
             self._useTextures = False
 
+
         self._useShaders = False
 
     def begin(self, useTextures=True, useShaders=False):
@@ -676,37 +774,6 @@ class PhongMaterial(object):
 
         """
         if useShaders:
-            # number of scene lights
-            #
-            # if self._castShadow and nLights > 0:
-            #     oldViewport = self.obj.win.viewport
-            #     for light in self.obj.win.lights:
-            #         if light._castShadow:
-            #             lightMatrix = mt.concatenate(
-            #                 [self.obj.win.lights[0].thePose.getViewMatrix(),
-            #                  vt.orthoProjectionMatrix(-5,5,-5,5,-5,10)],
-            #                 dtype=np.float32)
-            #             shader = self.obj.win._shaders['stim3d_depthMap']
-            #             gt.useProgram(shader)
-            #
-            #             GL.glUniformMatrix4fv(
-            #                 GL.glGetUniformLocation(shader, b"modelMatrix"),
-            #                 1, GL.GL_TRUE, at.array2pointer(self.obj.thePose.modelMatrix))
-            #             GL.glUniformMatrix4fv(
-            #                 GL.glGetUniformLocation(shader, b"lightMatrix"),
-            #                 1, GL.GL_TRUE, at.array2pointer(lightMatrix))
-            #
-            #             self.obj.win.viewport = self.obj.win.scissor = (0, 0, light._shadowRes, light._shadowRes)
-            #             GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, light._shadowFBO)
-            #             GL.glClearDepth(1.0)
-            #             GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
-            #             #GL.glCullFace(GL.GL_FRONT)
-            #             for materialName, materialDesc in self.obj.material.items():
-            #                 gt.drawVAO(self.obj._vao[materialName], GL.GL_TRIANGLES)
-            #             #GL.glCullFace(GL.GL_BACK)
-            #             GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
-            #
-            #     self.obj.win.viewport = self.obj.win.scissor = oldViewport
             self._setupMaterialShader(useTextures)
         else:
             self._setupMaterialNoShader(useTextures)
@@ -834,6 +901,7 @@ class RigidBodyPose(object):
         # compute matrices only if `pos` and `ori` attributes have been updated
         self._matrixNeedsUpdate = False
         self._invMatrixNeedsUpdate = False
+        self._posOriUpdateCallback = None
 
         self.pos = pos
         self.ori = ori
@@ -848,6 +916,9 @@ class RigidBodyPose(object):
         self._pos = np.ascontiguousarray(value, dtype=np.float32)
         self._matrixNeedsUpdate = self._invMatrixNeedsUpdate = True
 
+        if self._posOriUpdateCallback is not None:
+            self._posOriUpdateCallback()
+
     @property
     def ori(self):
         """Orientation quaternion (X, Y, Z, W)."""
@@ -857,6 +928,9 @@ class RigidBodyPose(object):
     def ori(self, value):
         self._ori = np.ascontiguousarray(value, dtype=np.float32)
         self._matrixNeedsUpdate = self._invMatrixNeedsUpdate = True
+
+        if self._posOriUpdateCallback is not None:
+            self._posOriUpdateCallback()
 
     @property
     def at(self):
@@ -1187,6 +1261,14 @@ class RigidBodyPose(object):
 
         self.ori = mt.multQuat(
             self._ori, mt.alignTo(fwd, invPos, dtype=np.float32))
+
+    def setPosOriUpdateCallback(self, func):
+        """Set the callback function for if position and orientation changes.
+
+        This allows sub-classes to update accordingly.
+
+        """
+        self._posOriUpdateCallback = func
 
 
 class BaseRigidBodyStim(ColorMixin, WindowMixin):
@@ -1984,9 +2066,9 @@ class ObjMeshStim(BaseRigidBodyStim):
 
         win.draw3d = True
 
-        if self._useShaders is False:
-            GL.glPushMatrix()
-            GL.glMultTransposeMatrixf(at.array2pointer(self.thePose.getModelMatrix()))
+        #if self._useShaders is False:
+        GL.glPushMatrix()
+        GL.glMultTransposeMatrixf(at.array2pointer(self.thePose.getModelMatrix()))
 
         # iterate over materials, draw associated VAOs
         if self.material is not None:
@@ -2038,8 +2120,8 @@ class ObjMeshStim(BaseRigidBodyStim):
 
                 GL.glDisable(GL.GL_COLOR_MATERIAL)  # enable color tracking
 
-        if self._useShaders is False:
-            GL.glPopMatrix()
+        #if self._useShaders is False:
+        GL.glPopMatrix()
 
         win.draw3d = False
 

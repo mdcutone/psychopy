@@ -202,22 +202,20 @@ vertPhongLighting = """
 // Only supports directional and point light sources for now. Spotlights will be
 // added later on.
 //
-#version 120
 varying vec3 N;
 varying vec3 v;
 varying vec4 frontColor;
 varying vec4 ShadowCoord;
 varying vec3 fragPos;
 
-uniform mat4 modelMatrix;
-uniform mat4 viewMatrix;
-uniform mat4 projectionMatrix;
 uniform mat4 lightSpaceMatrix;
 
 void main(void)  
 {     
-    v = vec3(viewMatrix * modelMatrix * gl_Vertex);       
-    N = normalize(transpose(mat3(modelMatrix)) * gl_Normal);
+    v = vec3(gl_ModelViewMatrix * gl_Vertex);       
+    N = normalize(gl_NormalMatrix * gl_Normal);
+    
+    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
     
     mat4 bias = mat4(0.5, 0.0, 0.0, 0.0,
                     0.0, 0.5, 0.0, 0.0,
@@ -225,7 +223,7 @@ void main(void)
                     0.5, 0.5, 0.5, 1.0);
     
     gl_TexCoord[0] = gl_MultiTexCoord0;
-    gl_Position =  projectionMatrix * viewMatrix * modelMatrix * gl_Vertex;
+    
     ShadowCoord = (bias * lightSpaceMatrix) * gl_Vertex;
     frontColor = gl_Color;
 }
@@ -246,30 +244,6 @@ fragPhongLighting = """
 // Only supports directional and point light sources for now. Spotlights will be
 // added later on.
 //
-#version 120
-
-struct Material {
-    vec4 ambient;
-    vec4 diffuse;
-    vec4 specular;
-    float shininess;
-}; 
-  
-uniform Material material;
-
-struct Light {
-    vec4 position;
-    vec4 ambient;
-    vec4 diffuse;
-    vec4 specular;
-    vec3 attenuation;
-};
-
-#if MAX_LIGHTS > 0
-uniform Light sceneLights[MAX_LIGHTS];
-#else
-uniform Light sceneLights;
-#endif
 
 uniform vec3 sceneAmbient;
 
@@ -278,25 +252,6 @@ varying vec3 v;
 varying vec4 frontColor;
 varying vec4 ShadowCoord;
 varying vec4 fragPos;
-
-vec2 poissonDisk[16] = vec2[]( 
-   vec2( -0.94201624, -0.39906216 ), 
-   vec2( 0.94558609, -0.76890725 ), 
-   vec2( -0.094184101, -0.92938870 ), 
-   vec2( 0.34495938, 0.29387760 ), 
-   vec2( -0.91588581, 0.45771432 ), 
-   vec2( -0.81544232, -0.87912464 ), 
-   vec2( -0.38277543, 0.27676845 ), 
-   vec2( 0.97484398, 0.75648379 ), 
-   vec2( 0.44323325, -0.97511554 ), 
-   vec2( 0.53742981, -0.47373420 ), 
-   vec2( -0.26496911, -0.41893023 ), 
-   vec2( 0.79197514, 0.19090188 ), 
-   vec2( -0.24188840, 0.99706507 ), 
-   vec2( -0.81409955, 0.91437590 ), 
-   vec2( 0.19984126, 0.78641367 ), 
-   vec2( 0.14383161, -0.14100790 ) 
-);
 
 #ifdef DIFFUSE_TEXTURE
     uniform sampler2D diffTexture;
@@ -316,7 +271,7 @@ void main (void)
 
 #if MAX_LIGHTS > 0
     vec3 N = normalize(N);
-    vec4 finalColor = vec4(0.0);
+    vec4 finalColor = vec4(0.0, 0.0, 0.0, 1.0);
     // loop over available lights
     for (int i=0; i < MAX_LIGHTS; i++)
     {
@@ -324,38 +279,38 @@ void main (void)
         float attenuation = 1.0;  // default factor, no attenuation
         
         // check if directional, compute attenuation if a point source
-        if (sceneLights[i].position.w == 0.0) 
+        if (gl_LightSource[i].position.w == 0.0) 
         {
             // off at infinity, only use direction
-            L = normalize(sceneLights[i].position.xyz);
+            L = -normalize(gl_LightSource[i].position.xyz);
             // attenuation is 1.0 (no attenuation for directional sources)
         } 
         else 
         {
-            L = normalize(sceneLights[i].position.xyz - v);
+            L = normalize(gl_LightSource[i].position.xyz - v);
             attenuation = calcAttenuation(
-                sceneLights[i].attenuation[0],
-                sceneLights[i].attenuation[1],
-                sceneLights[i].attenuation[2],
-                length(sceneLights[i].position.xyz - v));
+                gl_LightSource[i].constantAttenuation,
+                gl_LightSource[i].linearAttenuation,
+                gl_LightSource[i].quadraticAttenuation,
+                length(gl_LightSource[i].position.xyz - v));
         }
         
         vec3 E = normalize(-v);
         
         // combine scene ambient with object
-        vec4 ambient = sceneLights[i].ambient; 
-        
+        vec4 ambient = gl_LightModel.ambient; 
+        vec4 diffuse;
         // calculate diffuse component
-        vec4 diffuse = material.diffuse * max(dot(N,L), 0.0);
-        
+        diffuse = gl_FrontLightProduct[i].diffuse * max(dot(N,L), 0.0);
+
 #ifdef DIFFUSE_TEXTURE
         // multiply in material texture colors if specified
         diffuse *= diffTexColor;
         ambient *= diffTexColor;  // ambient should be modulated by diffuse color
 #endif
         vec3 halfwayVec = normalize(L + E);  
-        vec4 specular = material.specular * sceneLights[i].specular *
-            pow(max(dot(N, halfwayVec), 0.0), material.shininess);
+        vec4 specular = gl_FrontLightProduct[i].specular *
+            pow(max(dot(N, halfwayVec), 0.0), gl_FrontMaterial.shininess);
     
         // clamp color values for specular and diffuse
         ambient = clamp(ambient, 0.0, 1.0); 
@@ -363,33 +318,25 @@ void main (void)
         specular = clamp(specular, 0.0, 1.0); 
         
         float cosTheta = clamp( dot( N, L ), 0, 1 );
-        //float bias = clamp(0.005 * tan(acos(cosTheta)), 0, 0.01);
-        float bias = max(0.1 * (1.0 - dot(N, L)), 0.005);
+        float bias = clamp(0.005 * tan(acos(cosTheta)), 0, 0.01);
+        //float bias = max(0.01 * (1.0 - dot(N, L)), 0.005);
         
         // find if a fragment is in shadow
-        float shadow = 1.0;
-        if ( texture2D( shadowMap, ShadowCoord.xy ).z < ShadowCoord.z - bias) {
-            shadow = 0.0;
-        }
-
-        //for (int i=0;i<10;i++){
-         // if ( texture2D( shadowMap, ShadowCoord.xy + poissonDisk[i]/700.0 ).z  <  ShadowCoord.z-bias ){
-        //    shadow -= 0.1;
-         // }
-       // }
-
+        float shadow = (textureProj(shadowMap, ShadowCoord.xyw).z < 
+            (ShadowCoord.z - 5e-3) / ShadowCoord.w) ? 0.0 : 1.0;
+        
         // falloff with distance from eye? might be something to consider for 
         // realism
         //vec4 emission = clamp(gl_FrontMaterial.emission, 0.0, 1.0);
         
-        // finalColor += vec4(1.) * visibility;
+        // finalColor += vec4(1.) * shadow;
         finalColor += ambient + shadow * (diffuse + specular);
-        // finalColor += ambient + (diffuse + specular);
+        //finalColor += ambient + (diffuse + specular);
     }
     gl_FragColor = finalColor;  // use texture alpha
 #else
     // no lights, only track ambient component, frontColor modulates ambient
-    vec4 ambient = vec4(sceneAmbient, 1.0); 
+    vec4 ambient = gl_FrontLightProduct[0].ambient; 
     ambient = clamp(ambient, 0.0, 1.0); 
 //#ifdef DIFFUSE_TEXTURE
 //    gl_FragColor = ambient * texture2D(diffTexture, gl_TexCoord[0].st);
@@ -407,7 +354,7 @@ uniform mat4 modelMatrix;
 uniform mat4 lightMatrix;
 
 void main() {
-    gl_Position = lightMatrix * gl_Vertex;
+    gl_Position = lightMatrix * modelMatrix * gl_Vertex;
 }  
 
 """
