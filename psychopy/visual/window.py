@@ -1293,13 +1293,13 @@ class Window(object):
             enumLight = GL.GL_LIGHT0 + index
 
             # convert data in light class to ctypes
-            #pos = numpy.ctypeslib.as_ctypes(light.pos)
+            pos = numpy.ctypeslib.as_ctypes(light.pos)
             diffuse = numpy.ctypeslib.as_ctypes(light._diffuseRGB)
             specular = numpy.ctypeslib.as_ctypes(light._specularRGB)
             ambient = numpy.ctypeslib.as_ctypes(light._ambientRGB)
 
             # pass values to OpenGL
-            #GL.glLightfv(enumLight, GL.GL_POSITION, pos)
+            GL.glLightfv(enumLight, GL.GL_POSITION, pos)
             GL.glLightfv(enumLight, GL.GL_DIFFUSE, diffuse)
             GL.glLightfv(enumLight, GL.GL_SPECULAR, specular)
             GL.glLightfv(enumLight, GL.GL_AMBIENT, ambient)
