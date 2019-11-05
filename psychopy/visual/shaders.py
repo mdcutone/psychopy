@@ -253,6 +253,9 @@ varying vec4 frontColor;
 varying vec4 ShadowCoord;
 varying vec4 fragPos;
 
+
+// This define the value to move one pixel up or down
+
 #ifdef DIFFUSE_TEXTURE
     uniform sampler2D diffTexture;
 #endif
@@ -298,7 +301,7 @@ void main (void)
         vec3 E = normalize(-v);
         
         // combine scene ambient with object
-        vec4 ambient = gl_LightModel.ambient; 
+        vec4 ambient = gl_LightModel.ambient + gl_FrontLightProduct[i].ambient; 
         vec4 diffuse;
         // calculate diffuse component
         diffuse = gl_FrontLightProduct[i].diffuse * max(dot(N,L), 0.0);
@@ -317,19 +320,18 @@ void main (void)
         diffuse = clamp(diffuse, 0.0, 1.0); 
         specular = clamp(specular, 0.0, 1.0); 
         
-        float cosTheta = clamp( dot( N, L ), 0, 1 );
+        float cosTheta = clamp( dot( N, L ), 0.0, 1.0 );
         float bias = clamp(0.005 * tan(acos(cosTheta)), 0, 0.01);
         //float bias = max(0.01 * (1.0 - dot(N, L)), 0.005);
         
         // find if a fragment is in shadow
-        float shadow = (textureProj(shadowMap, ShadowCoord.xyw).z < 
-            (ShadowCoord.z - 5e-3) / ShadowCoord.w) ? 0.0 : 1.0;
-        
+        float shadow = (texture2D( shadowMap, ShadowCoord).z  <  ShadowCoord.z - bias) ? 0.0 : 1.0;
+
         // falloff with distance from eye? might be something to consider for 
         // realism
         //vec4 emission = clamp(gl_FrontMaterial.emission, 0.0, 1.0);
         
-        // finalColor += vec4(1.) * shadow;
+        //finalColor += vec4(1.) * texture2D( shadowMap, ShadowCoord.xy ).r;
         finalColor += ambient + shadow * (diffuse + specular);
         //finalColor += ambient + (diffuse + specular);
     }
@@ -348,13 +350,12 @@ void main (void)
 
 # render only a depth map
 vertDepthMap = """
-#version 110
 
 uniform mat4 modelMatrix;
 uniform mat4 lightMatrix;
 
 void main() {
-    gl_Position = lightMatrix * modelMatrix * gl_Vertex;
+    gl_Position =  lightMatrix * modelMatrix * gl_Vertex;
 }  
 
 """
@@ -362,7 +363,7 @@ void main() {
 # pass-through fragment shader for vertex shader only operations
 fragNull = """
 void main() {
-    gl_FragDepth = gl_FragCoord.z;
+    //gl_FragDepth = gl_FragCoord.z;
 }
 """
 

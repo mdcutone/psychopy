@@ -1309,6 +1309,9 @@ class Window(object):
             GL.glLightf(enumLight, GL.GL_LINEAR_ATTENUATION, linear)
             GL.glLightf(enumLight, GL.GL_QUADRATIC_ATTENUATION, quadratic)
 
+            if light._castShadow:
+                light.resolveShadow()
+
             # enable the light
             GL.glEnable(enumLight)
 
