@@ -84,7 +84,8 @@ __all__ = [
     'bindTexture',
     'unbindTexture',
     'createCubeMap',
-    'TexCubeMap'
+    'TexCubeMap',
+    'ShaderProgram'
 ]
 
 import ctypes
@@ -131,6 +132,156 @@ GL_COMPAT_TYPES = {
 # Shader Program Helper Functions
 # -------------------------------
 #
+
+class ShaderProgram(object):
+    """Class for GLSL shader programs.
+
+    """
+    def __init__(self, vertSrc, fragSrc, geomSrc=None, define=None,
+                 validate=False, legacy=False):
+        """
+        Parameters
+        ----------
+        vertSrc : str
+            Vertex shader GLSL source code.
+        fragSrc : str
+            Fragment shader GLSL source code.
+        geomSrc : str, optional
+            Geometry shader GLSL source code.
+        define : dict, optional
+            Names and values to generate ``#define`` statements. Keys must all be
+            valid GLSL preprocessor variable names of type `str`. Values can only be
+            `int`, `float`, `str`, `bytes`, or `bool` types. Boolean values `True`
+            and `False` are converted to integers `1` and `0`, respectively.
+        validate : bool, optional
+            Validate the shader program. Checks for errors and other issues with
+            the shader program even if it successfully builds. The output from
+            the validator is output to sderr, and an exception is raised if
+            validation fails. The formatting and verbosity of the output is
+            platform-dependent.
+        legacy : bool, optional
+            Build a shader which is backwards compatible. Not all platforms or
+            GL versions allow this, but it might be useful if the shader is
+            using obsolete functionality to get it working.
+        """
+        self._legacy = legacy
+
+        if not self._legacy:
+            self._id = createProgram()
+
+            if define:
+                vertSrc = embedShaderSourceDefs(vertSrc, define)
+                fragSrc = embedShaderSourceDefs(fragSrc, define)
+
+            # compile the shader programs
+            vertexShader = compileShader(vertSrc, GL.GL_VERTEX_SHADER)
+            fragmentShader = compileShader(fragSrc, GL.GL_FRAGMENT_SHADER)
+            attachShader(self._id, vertexShader)
+            attachShader(self._id, fragmentShader)
+
+            geometryShader = None
+            if geomSrc is not None:
+                if define:
+                    geomSrc = embedShaderSourceDefs(geomSrc, define)
+
+                geometryShader = compileShader(geomSrc, GL.GL_GEOMETRY_SHADER)
+                attachShader(self._id, geometryShader)
+
+            linkProgram(self._id)
+
+            if validate:
+                validateProgram(self._id)
+
+            detachShader(self._id, vertexShader)
+            detachShader(self._id, fragmentShader)
+            deleteObject(vertexShader)
+            deleteObject(fragmentShader)
+
+            if geometryShader is not None:
+                detachShader(self._id, geometryShader)
+                deleteObject(geometryShader)
+        else:
+            self._id = createProgramObjectARB()
+
+            if define:
+                vertSrc = embedShaderSourceDefs(vertSrc, define)
+                fragSrc = embedShaderSourceDefs(fragSrc, define)
+
+            # compile vertex and fragment shader sources
+            vertexShader = compileShaderObjectARB(
+                vertSrc, GL.GL_VERTEX_SHADER_ARB)
+            fragmentShader = compileShaderObjectARB(
+                fragSrc, GL.GL_FRAGMENT_SHADER_ARB)
+            attachObjectARB(self._id, vertexShader)
+            attachObjectARB(self._id, fragmentShader)
+
+            geometryShader = None
+            if geomSrc is not None:
+                if define:
+                    geomSrc = embedShaderSourceDefs(geomSrc, define)
+
+                geometryShader = compileShader(
+                    geomSrc, GL.GL_GEOMETRY_SHADER_ARB)
+                attachObjectARB(self._id, geometryShader)
+
+            linkProgramObjectARB(self._id)
+
+            if validate:
+                validateProgramARB(self._id)
+
+            # optional, detach and discard shader objects
+            detachObjectARB(self._id, vertexShader)
+            detachObjectARB(self._id, fragmentShader)
+            deleteObjectARB(vertexShader)
+            deleteObjectARB(fragmentShader)
+
+            if geometryShader is not None:
+                detachObjectARB(self._id, geometryShader)
+                deleteObjectARB(geometryShader)
+
+        # get uniform and attribute locations
+        self._unifLoc = getUniformLocations(self._id)
+        self._attribLoc = getAttribLocations(self._id)
+
+        # flags
+        self._enabled = False
+
+    @property
+    def isLegacy(self):
+        """`True` if the shader has legacy compatibility."""
+        return self._legacy
+
+    def begin(self):
+        """Use a shader for successive drawing operations."""
+        if not self._enabled:
+            GL.glUseProgram(self._id)
+            self._enabled = True
+
+    def end(self):
+        """Disable this shader."""
+        if self._enabled:
+            GL.glUseProgram(0)
+            self._enabled = False
+
+    def setUniform(self, name, value):
+        pass
+
+    def getAttributeLoc(self, name):
+        """Get the binding ID for an attribute by name.
+
+        Parameters
+        ----------
+        name : str
+            Attribute name as a string.
+
+        Returns
+        -------
+        int
+            Attribute binding location for `name`.
+
+        """
+        return self._attribLoc[name.encode('UTF-8')]
+
 
 def createProgram():
     """Create an empty program object for shaders.
