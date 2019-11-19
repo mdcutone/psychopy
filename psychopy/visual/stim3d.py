@@ -25,6 +25,12 @@ import numpy as np
 
 import pyglet.gl as GL
 
+try:
+    import pygltflib
+    _HAS_GLTF_IMPORTER_ = True
+except ImportError:
+    _HAS_GLTF_IMPORTER_ = False
+
 
 class LightSource(object):
     """Class for representing a light source in a scene.
@@ -2337,3 +2343,114 @@ class ObjMeshStim(BaseRigidBodyStim):
 
         win.draw3d = False
 
+
+class GLTFMeshStim(BaseRigidBodyStim):
+    """Class for loading and presenting 3D stimuli from glTF files.
+
+    The glTF (GL Transmission Format) is an extensible format for storing 3D
+    geometry and scene information. However, this class only loads mesh and
+    material data at this time (data about scene lights and cameras are
+    ignored). The `pygltflib` package is required to use this class.
+
+    Only a single mesh can be loaded from a glTF file for use as a stimuli. The
+    mesh must be explicitly specified by name or index. If not, the first mesh
+    to appear in the file will be imported.
+
+    """
+    def __init__(self, win, gltfFile, meshId='Cube.001'):
+        if not _HAS_GLTF_IMPORTER_:
+            raise ImportError("Package `pygltflib` not installed.")
+
+        super(GLTFMeshStim, self).__init__(win)
+
+        # new handle to glTF object
+        gltf = pygltflib.GLTF2().load(gltfFile)
+
+        # if a mesh name was specified, get the index
+        if isinstance(meshId, str):
+            for i, mesh in enumerate(gltf.meshes):
+                if mesh.name == meshId:
+                    meshIndex = i
+                    break
+            else:
+                raise ValueError("Cannot find mesh '{}' in glTF file.")
+        else:
+            meshIndex = meshId
+
+        # get vertex, texture coordinates, normals, indices, etc.
+        mesh = gltf.meshes[meshIndex]
+        posIdx = mesh.primitives[0].attributes.POSITION
+        texCoord0Idx = mesh.primitives[0].attributes.TEXCOORD_0
+        normalsIdx = mesh.primitives[0].attributes.NORMAL
+        indiciesIdx = mesh.primitives[0].indices
+
+        # read the glTF buffer associated with the mesh
+        bufferPath = os.path.join(os.path.split(gltfFile)[0],
+                                  gltf.buffers[0].uri)
+        self._bufferData = None
+        with open(bufferPath, mode='rb') as f:
+            self._bufferData = f.read()
+
+        bvPos = gltf.bufferViews[posIdx]
+        posData = np.frombuffer(
+            self._readBuffer(bvPos.byteOffset, bvPos.byteLength),
+            dtype=np.float32)
+        posData = np.reshape(posData, (-1, 3))
+
+        tex0Data = None
+        if texCoord0Idx is not None:
+            bvTex0 = gltf.bufferViews[texCoord0Idx]
+            d = self._bufferData[bvTex0.byteOffset:bvTex0.byteLength]
+            if len(d) > 0:
+                tex0Data = np.frombuffer(
+                    self._readBuffer(bvTex0.byteOffset, bvTex0.byteLength),
+                    dtype=np.float32)
+                tex0Data = np.reshape(tex0Data, (-1, 2))
+
+        normData = None
+        if normalsIdx is not None:
+            bvNorm = gltf.bufferViews[normalsIdx]
+            normData = np.frombuffer(
+                self._readBuffer(bvNorm.byteOffset, bvNorm.byteLength),
+                dtype=np.float32)
+            normData = np.reshape(normData, (-1, 3))
+
+        indicesData = None
+        if indiciesIdx is not None:
+            bvIndices = gltf.bufferViews[indiciesIdx]
+            indicesData = np.frombuffer(
+                self._readBuffer(bvIndices.byteOffset, bvIndices.byteLength),
+                dtype=np.uint16)
+
+        self.thePose.bounds = BoundingBox()
+        self.thePose.bounds.fit(posData)
+
+        # upload to buffers
+        vertexVBO = gt.createVBO(posData)
+        if tex0Data is not None:
+            texCoordVBO = gt.createVBO(tex0Data)
+
+        normalsVBO = gt.createVBO(normData)
+
+        # create an index buffer with faces
+        indexBuffer = gt.createVBO(
+            indicesData,
+            target=GL.GL_ELEMENT_ARRAY_BUFFER,
+            dataType=GL.GL_UNSIGNED_INT)
+
+        if tex0Data is not None:
+            self._vao = gt.createVAO(
+                {GL.GL_VERTEX_ARRAY: vertexVBO,
+                 GL.GL_TEXTURE_COORD_ARRAY: texCoordVBO,
+                 GL.GL_NORMAL_ARRAY: normalsVBO},
+                indexBuffer=indexBuffer, legacy=True)
+        else:
+            self._vao = gt.createVAO(
+                {GL.GL_VERTEX_ARRAY: vertexVBO,
+                 GL.GL_NORMAL_ARRAY: normalsVBO},
+                indexBuffer=indexBuffer, legacy=True)
+
+    def _readBuffer(self, byteOffset, nBytes):
+        """Read attribute data from the loaded buffer and get an `ndarray`.
+        """
+        return self._bufferData[byteOffset:byteOffset + nBytes]

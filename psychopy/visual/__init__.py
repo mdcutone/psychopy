@@ -95,6 +95,7 @@ from psychopy.visual.stim3d import SphereStim
 from psychopy.visual.stim3d import BoxStim
 from psychopy.visual.stim3d import PlaneStim
 from psychopy.visual.stim3d import ObjMeshStim
+from psychopy.visual.stim3d import GLTFMeshStim
 
 """
 try:
