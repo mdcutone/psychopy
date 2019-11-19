@@ -2305,6 +2305,7 @@ def createVAO(attribBuffers, indexBuffer=None, attribDivisors=None, legacy=False
             else:
                 raise ValueError('Invalid attribute values.')
         else:
+            print(buffer.shape)
             size = buffer.shape[1]
             offset = 0
             normalize = False
