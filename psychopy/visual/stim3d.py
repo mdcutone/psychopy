@@ -2341,21 +2341,50 @@ class GLTFMeshStim(BaseRigidBodyStim):
 
         # read all buffers associated with the mesh
         buffers = {}
-        for buffer in gltf.buffers:
+        for idx, buffer in enumerate(gltf.buffers):
             # read the glTF buffer associated with the mesh
             bufferPath = os.path.join(os.path.split(gltfFile)[0], buffer.uri)
             with open(bufferPath, mode='rb') as f:
-                buffers[buffer] = f.read()
+                buffers[idx] = f.read()
+
+        # load textures used for materials
+        textures = {}
+        for idx, tex in enumerate(gltf.textures):
+            textureFile = os.path.join(os.path.split(gltfFile)[0],
+                                       gltf.images[tex.source].uri)
+            textures[idx] = gt.createTexImage2dFromFile(textureFile)
 
         # Get materials, these are usually PBR in the file but they need to be
         # converted to Blinn-Phong for now.
-        print(gltf.materials)
+        materials = {}
+        for idx, mat in enumerate(gltf.materials):
+            pbr = mat.pbrMetallicRoughness
+            diffuseColor = 2.0 * np.asarray(pbr.baseColorFactor[:3]) - 1.0
+            diffuseColor *= pbr.metallicFactor
+            specularColor = np.zeros((3,))
+            specularColor[:] = 2.0 * pbr.roughnessFactor - 1.0
+
+            diffuseTexture = None
+            if pbr.baseColorTexture is not None:
+                diffuseTexture = textures[pbr.baseColorTexture]
+
+            materials[idx] = BlinnPhongMaterial(
+                diffuseColor=diffuseColor,
+                specularColor=specularColor,
+                shininess=pbr.roughnessFactor * 128.0,
+                diffuseTexture=diffuseTexture
+            )
 
         # for a given mesh, get all the indices for its primitives
         attribVBOs = {}
         mesh = gltf.meshes[meshIndex]
 
+        # must have position
         posIdx = mesh.primitives[0].attributes.POSITION
+        if posIdx is not None:
+            pass
+
+
         texCoord0Idx = mesh.primitives[0].attributes.TEXCOORD_0
         normalsIdx = mesh.primitives[0].attributes.NORMAL
         indiciesIdx = mesh.primitives[0].indices
