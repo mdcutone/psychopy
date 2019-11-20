@@ -2350,7 +2350,13 @@ class GLTFMeshStim(BaseRigidBodyStim):
     The glTF (GL Transmission Format) is an extensible format for storing 3D
     geometry and scene information. However, this class only loads mesh and
     material data at this time (data about scene lights and cameras are
-    ignored). The `pygltflib` package is required to use this class.
+    ignored). The `pygltflib` package is required to use this class. How this
+    class treats data loaded from glTF files isn't 100% compliant with the
+    specification given its flexibility, therefore the import routines are not
+    fully
+
+     it only loads glTF files correctly if they were exported from
+    Blender assuming.
 
     Only a single mesh can be loaded from a glTF file for use as a stimuli. The
     mesh must be explicitly specified by name or index. If not, the first mesh
@@ -2421,7 +2427,18 @@ class GLTFMeshStim(BaseRigidBodyStim):
         # must have position
         posIdx = mesh.primitives[0].attributes.POSITION
         if posIdx is not None:
-            pass
+            acc = gltf.accessors[posIdx]
+            bv = gltf.bufferViews[acc.bufferView]
+
+            # always vec3
+
+
+            offsetL = bvOffset + gltf.bufferViews[posIdx].byteOffset
+            offsetH = offsetL + gltf.bufferViews[posIdx].count
+
+            bufferData =
+
+            attribVBOs[GL.GL_VERTEX_ARRAY] =
 
 
         texCoord0Idx = mesh.primitives[0].attributes.TEXCOORD_0
