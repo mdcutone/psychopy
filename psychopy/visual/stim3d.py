@@ -2363,26 +2363,50 @@ class GLTFMeshStim(BaseRigidBodyStim):
     to appear in the file will be imported.
 
     """
-    def __init__(self, win, gltfFile, meshId='Cube.001'):
+    def __init__(self,
+                 win,
+                 gltfFile,
+                 meshId=0,
+                 pos=(0, 0, 0),
+                 ori=(0, 0, 0, 1),
+                 useMaterial=None,
+                 color=(0.0, 0.0, 0.0),
+                 colorSpace='rgb',
+                 contrast=1.0,
+                 opacity=1.0,
+                 useShaders=False,
+                 name='',
+                 autoLog=True):
+
         # check if we have a GLTF importer library installed and loaded
         if not _HAS_GLTF_IMPORTER_:
             raise ImportError("Package `pygltflib` not installed.")
 
-        super(GLTFMeshStim, self).__init__(win)
+        super(GLTFMeshStim, self).__init__(
+            win,
+            pos=pos,
+            ori=ori,
+            color=color,
+            colorSpace=colorSpace,
+            contrast=contrast,
+            opacity=opacity,
+            useShaders=useShaders,
+            name=name,
+            autoLog=autoLog)
 
         # new handle to glTF object
         gltf = pygltflib.GLTF2().load(gltfFile)
 
-        # if a mesh name was specified, get the index
-        if isinstance(meshId, str):
-            for i, mesh in enumerate(gltf.meshes):
-                if mesh.name == meshId:
-                    meshIndex = i
-                    break
-            else:
-                raise ValueError("Cannot find mesh '{}' in glTF file.")
-        else:
-            meshIndex = meshId
+        # # if a mesh name was specified, get the index
+        # if isinstance(meshId, str):
+        #     for i, mesh in enumerate(gltf.meshes):
+        #         if mesh.name == meshId:
+        #             meshIndex = i
+        #             break
+        #     else:
+        #         raise ValueError("Cannot find mesh '{}' in glTF file.")
+        # else:
+        #     meshIndex = meshId
 
         # read all buffers associated with the mesh
         buffers = {}
@@ -2401,8 +2425,8 @@ class GLTFMeshStim(BaseRigidBodyStim):
 
         # Get materials, these are usually PBR in the file but they need to be
         # converted to Blinn-Phong for now.
-        materials = {}
-        for idx, mat in enumerate(gltf.materials):
+        foundMaterials = {}
+        for mat in gltf.materials:
             pbr = mat.pbrMetallicRoughness
             diffuseColor = 2.0 * np.asarray(pbr.baseColorFactor[:3]) - 1.0
             diffuseColor *= pbr.metallicFactor
@@ -2413,7 +2437,8 @@ class GLTFMeshStim(BaseRigidBodyStim):
             if pbr.baseColorTexture is not None:
                 diffuseTexture = textures[pbr.baseColorTexture]
 
-            materials[idx] = BlinnPhongMaterial(
+            foundMaterials[mat.name] = BlinnPhongMaterial(
+                self.win,
                 diffuseColor=diffuseColor,
                 specularColor=specularColor,
                 shininess=pbr.roughnessFactor * 128.0,
@@ -2421,90 +2446,245 @@ class GLTFMeshStim(BaseRigidBodyStim):
             )
 
         # for a given mesh, get all the indices for its primitives
-        attribVBOs = {}
-        mesh = gltf.meshes[meshIndex]
+        #mesh = gltf.meshes[meshIndex]
 
-        # must have position
-        posIdx = mesh.primitives[0].attributes.POSITION
-        if posIdx is not None:
-            acc = gltf.accessors[posIdx]
-            bv = gltf.bufferViews[acc.bufferView]
+        # load primitives to VBOs, if they share the same material, combine the
+        # buffers so they are all drawn at once with the same VAO
+        materialVAOs = {}
 
-            # always vec3
+        for name, mat in foundMaterials.items():
+            attribVBOs = {}
+            indexVBO = None
 
+            # get all primitives in scene meshes which share a material
+            sharedPrimitives = []
 
-            offsetL = bvOffset + gltf.bufferViews[posIdx].byteOffset
-            offsetH = offsetL + gltf.bufferViews[posIdx].count
+            for i, mesh in enumerate(gltf.meshes):
+                for prim in mesh.primitives:
+                    if gltf.materials[prim.material].name == name:
+                        meshNode = None
+                        for node in gltf.nodes:
+                            if node.mesh == i:
+                                meshNode = node
+                        sharedPrimitives.append((prim, meshNode))
 
-            bufferData =
+            if sharedPrimitives:
+                posBufferData = b''
+                normBufferData = b''
+                texCoord0BufferData = b''
+                indexBufferData = b''
 
-            attribVBOs[GL.GL_VERTEX_ARRAY] =
+                lastIndex = 0  # offset for succesive indices
 
+                for prim, node in sharedPrimitives:
+                    if prim.attributes.POSITION is not None:
+                        # accessor an buffer view for attribute
+                        acc = gltf.accessors[prim.attributes.POSITION]
+                        bv = gltf.bufferViews[acc.bufferView]
 
-        texCoord0Idx = mesh.primitives[0].attributes.TEXCOORD_0
-        normalsIdx = mesh.primitives[0].attributes.NORMAL
-        indiciesIdx = mesh.primitives[0].indices
+                        # compute buffer access offests and ranges
+                        accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                        accEnd = acc.count * 4 * 3  # VEC3 FLOAT32
+                        bvOffset = bv.byteOffset
+                        start = bvOffset + accOffset
+                        end = start + accEnd
+                        buffData = buffers[bv.buffer][start:end]
 
-        bvPos = gltf.bufferViews[posIdx]
-        posData = np.frombuffer(
-            self._readBuffer(bvPos.byteOffset, bvPos.byteLength),
-            dtype=np.float32)
-        posData = np.reshape(posData, (-1, 3))
+                        # apply transforms to the data
+                        if node is not None:
+                            if node.rotation:
+                                ori = np.asarray(node.rotation, np.float32)
+                            else:
+                                ori = np.asarray((0, 0, 0, -1), np.float32)
 
-        tex0Data = None
-        if texCoord0Idx is not None:
-            bvTex0 = gltf.bufferViews[texCoord0Idx]
-            d = self._bufferData[bvTex0.byteOffset:bvTex0.byteLength]
-            if len(d) > 0:
-                tex0Data = np.frombuffer(
-                    self._readBuffer(bvTex0.byteOffset, bvTex0.byteLength),
-                    dtype=np.float32)
-                tex0Data = np.reshape(tex0Data, (-1, 2))
+                            if node.translation:
+                                pos = np.asarray(node.translation, np.float32)
+                            else:
+                                pos = np.zeros((3,), np.float32)
 
-        normData = None
-        if normalsIdx is not None:
-            bvNorm = gltf.bufferViews[normalsIdx]
-            normData = np.frombuffer(
-                self._readBuffer(bvNorm.byteOffset, bvNorm.byteLength),
-                dtype=np.float32)
-            normData = np.reshape(normData, (-1, 3))
+                            if node.scale:
+                                scale = np.asarray(node.scale, np.float32)
+                            else:
+                                scale = np.ones((3,), np.float32)
 
-        indicesData = None
-        if indiciesIdx is not None:
-            bvIndices = gltf.bufferViews[indiciesIdx]
-            indicesData = np.frombuffer(
-                self._readBuffer(bvIndices.byteOffset, bvIndices.byteLength),
-                dtype=np.uint16)
+                            points = mt.transform(
+                                pos, ori,
+                                np.frombuffer(buffData, np.float32).reshape(
+                                    (-1, 3)) * scale,
+                                dtype=np.float32)
 
-        self.thePose.bounds = BoundingBox()
-        self.thePose.bounds.fit(posData)
+                            posBufferData += points.tobytes()
+                        else:
+                            posBufferData += buffData
 
-        # upload to buffers
-        vertexVBO = gt.createVBO(posData)
-        if tex0Data is not None:
-            texCoordVBO = gt.createVBO(tex0Data)
+                    if prim.attributes.TEXCOORD_0 is not None:
+                        acc = gltf.accessors[prim.attributes.TEXCOORD_0]
+                        bv = gltf.bufferViews[acc.bufferView]
+                        accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                        accEnd = acc.count * 4 * 2  # VEC2 FLOAT32
+                        bvOffset = bv.byteOffset
+                        start = bvOffset + accOffset
+                        end = start + accEnd
 
-        normalsVBO = gt.createVBO(normData)
+                        texCoord0BufferData += buffers[bv.buffer][start:end]
 
-        # create an index buffer with faces
-        indexBuffer = gt.createVBO(
-            indicesData,
-            target=GL.GL_ELEMENT_ARRAY_BUFFER,
-            dataType=GL.GL_UNSIGNED_INT)
+                    if prim.attributes.NORMAL is not None:
+                        acc = gltf.accessors[prim.attributes.NORMAL]
+                        bv = gltf.bufferViews[acc.bufferView]
+                        accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                        accEnd = acc.count * 4 * 3  # VEC3 FLOAT32
+                        bvOffset = bv.byteOffset
+                        start = bvOffset + accOffset
+                        end = start + accEnd
 
-        if tex0Data is not None:
-            self._vao = gt.createVAO(
-                {GL.GL_VERTEX_ARRAY: vertexVBO,
-                 GL.GL_TEXTURE_COORD_ARRAY: texCoordVBO,
-                 GL.GL_NORMAL_ARRAY: normalsVBO},
-                indexBuffer=indexBuffer, legacy=True)
-        else:
-            self._vao = gt.createVAO(
-                {GL.GL_VERTEX_ARRAY: vertexVBO,
-                 GL.GL_NORMAL_ARRAY: normalsVBO},
-                indexBuffer=indexBuffer, legacy=True)
+                        buffData = buffers[bv.buffer][start:end]
 
-    def _readBuffer(self, byteOffset, nBytes):
-        """Read attribute data from the loaded buffer and get an `ndarray`.
+                        # apply transforms to the data
+                        if node is not None:
+                            if node.rotation:
+                                ori = np.asarray(node.rotation, np.float32)
+                            else:
+                                ori = np.asarray((0, 0, 0, -1), np.float32)
+
+                            points = mt.applyQuat(
+                                ori,
+                                np.frombuffer(buffData, np.float32).reshape((-1, 3)),
+                                dtype=np.float32)
+
+                            normBufferData += points.tobytes()
+                        else:
+                            normBufferData += buffData
+
+                    if prim.indices is not None:
+                        acc = gltf.accessors[prim.indices]
+                        bv = gltf.bufferViews[acc.bufferView]
+                        accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                        accEnd = acc.count * 2  # SCALAR UINT16
+                        bvOffset = bv.byteOffset
+                        start = bvOffset + accOffset
+                        end = start + accEnd
+
+                        buffData = buffers[bv.buffer][start:end]
+                        arr = np.frombuffer(buffData, np.uint16)  # to get max
+
+                        if lastIndex == 0:
+                            indexBufferData += buffData
+                        else:
+                            indexBufferData += (arr + lastIndex).tobytes()
+
+                        lastIndex += arr.max() + 1
+
+                # no position data, can't be drawn so don't create a VAO
+                if len(posBufferData) == 0:
+                    break
+
+                posArr = np.frombuffer(posBufferData, dtype=np.float32)
+                posArr = np.reshape(posArr, (-1, 3))
+                attribVBOs[GL.GL_VERTEX_ARRAY] = gt.createVBO(posArr)
+
+                if len(normBufferData) > 0:
+                    normArr = np.frombuffer(normBufferData, dtype=np.float32)
+                    normArr = np.reshape(normArr, (-1, 3))
+                    attribVBOs[GL.GL_NORMAL_ARRAY] = gt.createVBO(normArr)
+
+                if len(texCoord0BufferData) > 0:
+                    tex0Arr = np.frombuffer(texCoord0BufferData, dtype=np.float32)
+                    tex0Arr = np.reshape(tex0Arr, (-1, 2))
+                    attribVBOs[GL.GL_TEXTURE_COORD_ARRAY] = gt.createVBO(tex0Arr)
+
+                if len(indexBufferData) > 0:
+                    indexArr = np.frombuffer(indexBufferData, dtype=np.uint16)
+                    indexVBO = gt.createVBO(indexArr,
+                                            target=GL.GL_ELEMENT_ARRAY_BUFFER,
+                                            dataType=GL.GL_UNSIGNED_INT)
+
+            if attribVBOs:
+                # create the VAO to render the material
+                materialVAOs[name] = gt.createVAO(
+                    attribVBOs, indexBuffer=indexVBO, legacy=True)
+
+        # remove unused materials
+        unused = []
+        for name in foundMaterials.keys():
+            if name not in materialVAOs.keys():
+                unused.append(name)
+
+        for name in unused:
+            del foundMaterials[name]
+
+        self.material = foundMaterials
+        self._vao = materialVAOs
+
+    def draw(self, win=None):
+        """Draw the mesh.
+
+        Parameters
+        ----------
+        win : `~psychopy.visual.Window`
+            Window this stimulus is associated with. Stimuli cannot be shared
+            across windows unless they share the same context.
+
         """
-        return self._bufferData[byteOffset:byteOffset + nBytes]
+        if win is None:
+            win = self.win
+        else:
+            self._selectWindow(win)
+
+        win.draw3d = True
+
+        GL.glPushMatrix()
+        GL.glMultTransposeMatrixf(at.array2pointer(self.thePose.modelMatrix))
+
+        # iterate over materials, draw associated VAOs
+        if self.material is not None:
+            # if material is a dictionary
+            if isinstance(self.material, dict):
+                for materialName, materialDesc in self.material.items():
+                    materialDesc.begin(useShaders=self._useShaders)
+                    gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
+                    materialDesc.end()
+            else:
+                # material is a single item
+                self.material.begin(useShaders=self._useShaders)
+                for materialName, _ in self._vao.items():
+                    gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
+                self.material.end()
+        else:
+            r, g, b = self._getDesiredRGB(
+                self.rgb, self.colorSpace, self.contrast)
+            color = np.ctypeslib.as_ctypes(
+                np.array((r, g, b, self.opacity), np.float32))
+
+            if self._useShaders:
+                nLights = len(self.win.lights)
+                shaderKey = (nLights, False)
+                gt.useProgram(self.win._shaders['stim3d_phong'][shaderKey])
+
+                # pass values to OpenGL as material
+                GL.glColor4f(r, g, b, self.opacity)
+                GL.glMaterialfv(GL.GL_FRONT, GL.GL_DIFFUSE, color)
+                GL.glMaterialfv(GL.GL_FRONT, GL.GL_AMBIENT, color)
+
+                for materialName, _ in self._vao.items():
+                    gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
+
+                gt.useProgram(0)
+            else:
+                # material tracks color
+                GL.glEnable(GL.GL_COLOR_MATERIAL)  # enable color tracking
+                GL.glDisable(GL.GL_TEXTURE_2D)
+                GL.glColorMaterial(GL.GL_FRONT, GL.GL_AMBIENT_AND_DIFFUSE)
+                GL.glMaterialfv(GL.GL_FRONT, GL.GL_DIFFUSE, color)
+                GL.glMaterialfv(GL.GL_FRONT, GL.GL_AMBIENT, color)
+                # 'rgb' is created and set when color is set
+                GL.glColor4f(r, g, b, self.opacity)
+
+                # draw the shape
+                for materialName, _ in self._vao.items():
+                    gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
+
+                GL.glDisable(GL.GL_COLOR_MATERIAL)  # enable color tracking
+
+        GL.glPopMatrix()
+
+        win.draw3d = False
