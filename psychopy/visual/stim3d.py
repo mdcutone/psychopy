@@ -2397,17 +2397,6 @@ class GLTFMeshStim(BaseRigidBodyStim):
         # new handle to glTF object
         gltf = pygltflib.GLTF2().load(gltfFile)
 
-        # # if a mesh name was specified, get the index
-        # if isinstance(meshId, str):
-        #     for i, mesh in enumerate(gltf.meshes):
-        #         if mesh.name == meshId:
-        #             meshIndex = i
-        #             break
-        #     else:
-        #         raise ValueError("Cannot find mesh '{}' in glTF file.")
-        # else:
-        #     meshIndex = meshId
-
         # read all buffers associated with the mesh
         buffers = {}
         for idx, buffer in enumerate(gltf.buffers):
@@ -2421,37 +2410,40 @@ class GLTFMeshStim(BaseRigidBodyStim):
         for idx, tex in enumerate(gltf.textures):
             textureFile = os.path.join(os.path.split(gltfFile)[0],
                                        gltf.images[tex.source].uri)
-            textures[idx] = gt.createTexImage2dFromFile(textureFile)
+
+            # don't transpose since texture coords in glTF differ from *.OBJ
+            textures[idx] = gt.createTexImage2dFromFile(
+                textureFile, transpose=False)
 
         # Get materials, these are usually PBR in the file but they need to be
         # converted to Blinn-Phong for now.
         foundMaterials = {}
         for mat in gltf.materials:
             pbr = mat.pbrMetallicRoughness
-            diffuseColor = 2.0 * np.asarray(pbr.baseColorFactor[:3]) - 1.0
-            diffuseColor *= pbr.metallicFactor
+            if pbr.baseColorFactor:
+                diffuseColor = 2.0 * np.asarray(pbr.baseColorFactor[:3]) - 1.0
+
+            else:
+                diffuseColor = np.asarray((1., 1., 1.))
+
             specularColor = np.zeros((3,))
             specularColor[:] = 2.0 * pbr.roughnessFactor - 1.0
 
             diffuseTexture = None
             if pbr.baseColorTexture is not None:
-                diffuseTexture = textures[pbr.baseColorTexture]
+                print(pbr.baseColorTexture.texCoord)
+                diffuseTexture = textures[pbr.baseColorTexture.index]
 
             foundMaterials[mat.name] = BlinnPhongMaterial(
                 self.win,
                 diffuseColor=diffuseColor,
                 specularColor=specularColor,
                 shininess=pbr.roughnessFactor * 128.0,
-                diffuseTexture=diffuseTexture
-            )
-
-        # for a given mesh, get all the indices for its primitives
-        #mesh = gltf.meshes[meshIndex]
+                diffuseTexture=diffuseTexture)
 
         # load primitives to VBOs, if they share the same material, combine the
         # buffers so they are all drawn at once with the same VAO
         materialVAOs = {}
-
         for name, mat in foundMaterials.items():
             attribVBOs = {}
             indexVBO = None
@@ -2527,6 +2519,10 @@ class GLTFMeshStim(BaseRigidBodyStim):
                         end = start + accEnd
 
                         texCoord0BufferData += buffers[bv.buffer][start:end]
+                    # else:
+                    #     # fill with empty data matching size of vertex data
+                    #     acc = gltf.accessors[prim.attributes.POSITION]
+                    #     texCoord0BufferData += b'\x00' * acc.count * 4 * 2
 
                     if prim.attributes.NORMAL is not None:
                         acc = gltf.accessors[prim.attributes.NORMAL]
