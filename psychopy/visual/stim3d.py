@@ -2319,6 +2319,7 @@ class GLTFMeshStim(BaseRigidBodyStim):
 
     """
     def __init__(self, win, gltfFile, meshId='Cube.001'):
+        # check if we have a GLTF importer library installed and loaded
         if not _HAS_GLTF_IMPORTER_:
             raise ImportError("Package `pygltflib` not installed.")
 
@@ -2338,19 +2339,26 @@ class GLTFMeshStim(BaseRigidBodyStim):
         else:
             meshIndex = meshId
 
-        # get vertex, texture coordinates, normals, indices, etc.
+        # read all buffers associated with the mesh
+        buffers = {}
+        for buffer in gltf.buffers:
+            # read the glTF buffer associated with the mesh
+            bufferPath = os.path.join(os.path.split(gltfFile)[0], buffer.uri)
+            with open(bufferPath, mode='rb') as f:
+                buffers[buffer] = f.read()
+
+        # Get materials, these are usually PBR in the file but they need to be
+        # converted to Blinn-Phong for now.
+        print(gltf.materials)
+
+        # for a given mesh, get all the indices for its primitives
+        attribVBOs = {}
         mesh = gltf.meshes[meshIndex]
+
         posIdx = mesh.primitives[0].attributes.POSITION
         texCoord0Idx = mesh.primitives[0].attributes.TEXCOORD_0
         normalsIdx = mesh.primitives[0].attributes.NORMAL
         indiciesIdx = mesh.primitives[0].indices
-
-        # read the glTF buffer associated with the mesh
-        bufferPath = os.path.join(os.path.split(gltfFile)[0],
-                                  gltf.buffers[0].uri)
-        self._bufferData = None
-        with open(bufferPath, mode='rb') as f:
-            self._bufferData = f.read()
 
         bvPos = gltf.bufferViews[posIdx]
         posData = np.frombuffer(
