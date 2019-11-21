@@ -133,7 +133,6 @@ class LightSource(object):
                 "Unknown `lightType` specified, must be 'directional' or "
                 "'point'.")
 
-
     @property
     def diffuseColor(self):
         """Diffuse color of the material."""
@@ -742,6 +741,140 @@ class BlinnPhongMaterial(object):
             self._useShaders = False
 
         GL.glEnable(GL.GL_COLOR_MATERIAL)
+
+
+class MetallicRoughnessMaterial(object):
+    """Class for materials using Physically-Based Rendering (PBR) of micro-facet
+    surfaces.
+
+    The appearance of a material will be determined by `roughness` or scattering
+    of incident light due to micro-facets on the surface and `metallic` which
+    represents the dielectric property of the material.
+
+    """
+    def __init__(self,
+                 win=None,
+                 roughnessFactor=0.0,
+                 metallicFactor=0.0,
+                 reflectanceColor=(0, 0, 0),
+                 grazingReflectanceColor=(0, 0, 0),
+                 alphaRoughness=0.0,
+                 diffuseColor=(0, 0, 0),
+                 specularColor=(0, 0, 0)):
+
+        self.win = win
+        self._roughnessFactor = roughnessFactor
+        self._metallicFactor = metallicFactor
+        self._reflectanceColor = np.asarray(reflectanceColor, np.float32)
+        self._grazingReflectanceColor = np.asarray(grazingReflectanceColor, np.float32)
+        self._alphaRoughness = alphaRoughness
+        self._diffuseColor = np.asarray(diffuseColor, np.float32)
+        self._specularColor = np.asarray(specularColor, np.float32)
+
+        includes = [r'psychopy\visual\shaders\tonemapping.glsl',
+                    r'psychopy\visual\shaders\textures.glsl',
+                    r'psychopy\visual\shaders\functions.glsl',
+                    r'psychopy\visual\shaders\animation.glsl']
+
+        defines = {#'MATERIAL_SPECULARGLOSSINESS': 1,
+                   'MATERIAL_METALLICROUGHNESS': 1,
+                   'LIGHT_COUNT': 1,
+                   "USE_PUNCTUAL": 1,
+                   'HAS_NORMALS': 1}
+
+        shaderProg = gt.createProgram()
+
+        with open(r'psychopy\visual\shaders\metallic-roughness.frag', 'r') as f:
+            fragShaderSrc = f.read()
+
+        fragShaderSrc = gt.embedShaderIncludes(fragShaderSrc, includes)
+        fragShaderSrc = gt.embedShaderSourceDefs(fragShaderSrc, defines)
+        fragShader = gt.compileShader(fragShaderSrc, GL.GL_FRAGMENT_SHADER)
+
+        with open(r'psychopy\visual\shaders\primitive.vert', 'r') as f:
+            vertShaderSrc = f.read()
+
+        vertShaderSrc = gt.embedShaderIncludes(vertShaderSrc, includes)
+        vertShaderSrc = gt.embedShaderSourceDefs(vertShaderSrc, defines)
+        vertShader = gt.compileShader(vertShaderSrc, GL.GL_VERTEX_SHADER)
+
+        # attach shaders to program
+        gt.attachShader(shaderProg, vertShader)
+        gt.attachShader(shaderProg, fragShader)
+
+        # link the shader, makes `myProgram` attachments executable by their
+        # respective processors and available for use
+        gt.linkProgram(shaderProg)
+
+        # optional, validate the program
+        gt.validateProgram(shaderProg)
+
+        # optional, detach and discard shader objects
+        gt.detachShader(shaderProg, vertShader)
+        gt.detachShader(shaderProg, fragShader)
+
+        gt.deleteObject(vertShader)
+        gt.deleteObject(fragShader)
+
+        self._shaderProg = shaderProg
+
+    def begin(self, modelMatrix, useTextures=True, useShaders=False):
+        """Use this material for successive rendering calls.
+
+        Parameters
+        ----------
+        useTextures : bool
+            Enable textures.
+
+        """
+        gt.useProgram(self._shaderProg)
+        GL.glUniform1f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_MetallicFactor'), 0.1)
+        GL.glUniform1f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_RoughnessFactor'), 0.4)
+        GL.glUniform4f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_BaseColorFactor'), 1.0, 1.0, 1.0, 1.0)
+        GL.glUniform1i(
+            GL.glGetUniformLocation(self._shaderProg, b'u_MipCount'), 1)
+
+        GL.glUniform1f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_GlossinessFactor'), 0.9)
+        GL.glUniform3f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_SpecularFactor'), 0.5, 0.5, 1.0)
+        GL.glUniform4f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_DiffuseFactor'), 1.0, 0.6, 0.5, 1.0)
+
+        GL.glUniform3f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_Lights[0].direction'), 1., -1., -1.)
+        GL.glUniform1i(
+            GL.glGetUniformLocation(self._shaderProg, b'u_Lights[0].type'), 1)
+        GL.glUniform1f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_Lights[0].intensity'), 20.)
+        GL.glUniform3f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_Lights[0].position'), 1., 3., 3.)
+        GL.glUniform1f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_Lights[0].range'), 100.0)
+        GL.glUniform3f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_Lights[0].color'), 1., 1., 1.)
+
+        GL.glUniform3f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_Camera'), 0., 0., 0.5)
+        GL.glUniform1f(
+            GL.glGetUniformLocation(self._shaderProg, b'u_Exposure'), 1.0)
+
+        GL.glUniformMatrix4fv(
+            GL.glGetUniformLocation(self._shaderProg, b'u_ViewProjectionMatrix'), 1, GL.GL_TRUE, at.array2pointer(
+                mt.concatenate([self.win.viewMatrix, self.win.projectionMatrix], dtype=np.float32)))
+        GL.glUniformMatrix4fv(
+            GL.glGetUniformLocation(self._shaderProg, b'u_ModelMatrix'), 1, GL.GL_TRUE, at.array2pointer(
+                modelMatrix))
+
+        GL.glUniformMatrix4fv(
+            GL.glGetUniformLocation(self._shaderProg, b'u_NormalMatrix'), 1, GL.GL_TRUE, at.array2pointer(
+                np.identity(4, dtype=np.float32)))
+
+    def end(self):
+        gt.useProgram(0)
 
 
 class RigidBodyPose(object):
@@ -2352,21 +2485,20 @@ class GLTFMeshStim(BaseRigidBodyStim):
     material data at this time (data about scene lights and cameras are
     ignored). The `pygltflib` package is required to use this class. How this
     class treats data loaded from glTF files isn't 100% compliant with the
-    specification given its flexibility, therefore the import routines are not
-    fully
+    specification, therefore the import routines are not guaranteed to work in
+    all cases.
 
-     it only loads glTF files correctly if they were exported from
-    Blender assuming.
-
-    Only a single mesh can be loaded from a glTF file for use as a stimuli. The
-    mesh must be explicitly specified by name or index. If not, the first mesh
-    to appear in the file will be imported.
+    Only a single node can be loaded from a glTF file for use as a stimuli. The
+    node must be explicitly specified by name or index. If not, the first node
+    to appear in the file will be imported. Multiple groups of primitives
+    associated with a mesh cannot share the same material. They should be
+    combined in the 3D editor.
 
     """
     def __init__(self,
                  win,
                  gltfFile,
-                 meshId=0,
+                 useNode=0,
                  pos=(0, 0, 0),
                  ori=(0, 0, 0, 1),
                  useMaterial=None,
@@ -2405,208 +2537,193 @@ class GLTFMeshStim(BaseRigidBodyStim):
             with open(bufferPath, mode='rb') as f:
                 buffers[idx] = f.read()
 
-        # load textures used for materials
-        textures = {}
-        for idx, tex in enumerate(gltf.textures):
-            textureFile = os.path.join(os.path.split(gltfFile)[0],
-                                       gltf.images[tex.source].uri)
+        # get the node by index or name
+        if isinstance(useNode, str):
+            for n in gltf.nodes:
+                if n.name == useNode:
+                    node = n
+                    break
+            else:
+                raise ValueError(
+                    "Cannot find specified node '{}' in glTF file.".format(
+                        useNode))
+        else:
+            node = gltf.nodes[useNode]
 
-            # don't transpose since texture coords in glTF differ from *.OBJ
-            textures[idx] = gt.createTexImage2dFromFile(
-                textureFile, transpose=False)
+        # node transformation, only scale is used to transform the data,
+        # position and orientation is used for `thePose`
+        nodeScale = np.ones((3,), np.float32)
+        if node.scale:
+            nodeScale[:] = node.scale
 
+        nodePos = np.zeros((3,), np.float32)
+        if node.translation:
+            nodePos[:] = node.translation
+
+        nodeOri = np.array((0, 0, 0, -1), np.float32)
+        if node.rotation:
+            nodeOri[:] = node.rotation
+
+        self.thePose.pos = nodePos
+        self.thePose.ori = nodeOri
+
+        # primitives associated with the mesh at the node
+        nodeMesh = gltf.meshes[node.mesh]
+        nodePrimitives = nodeMesh.primitives
+
+        # materials used by node primitives
+        nodeMaterials = {}
+        for i, prim in enumerate(nodePrimitives):
+            nodeMaterials[i] = gltf.materials[prim.material]
+
+        # textures used by the materials in the node
+        nodeTextures = {}
+        for idx, mat in nodeMaterials.items():
+            texId = mat.pbrMetallicRoughness.baseColorTexture
+            if texId is not None:
+                textureFile = os.path.join(
+                    os.path.split(gltfFile)[0],
+                    gltf.images[texId.index].uri)
+                # don't transpose since texture coords in glTF differ from *.OBJ
+                nodeTextures[idx] = gt.createTexImage2dFromFile(
+                    textureFile, transpose=False)
+
+        # go over all materials and load the data into VBOs and create a
+        # material VAO
+        materialVAOs = {}
+        for idx, mat in nodeMaterials.items():
+            materialName = mat.name
+            attribVBOs = {}
+            indexVBO = None
+
+            # get the primitive using the material
+            prim = nodePrimitives[idx]
+
+            # buffers for vertex attribute data to be uploaded to GPU
+            posBufferData = b''
+            normBufferData = b''
+            texCoord0BufferData = b''
+            indexBufferData = b''
+
+            if prim.attributes.POSITION is not None:
+                # accessor an buffer view for attribute
+                acc = gltf.accessors[prim.attributes.POSITION]
+                bv = gltf.bufferViews[acc.bufferView]
+
+                # compute buffer access offests and ranges
+                accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                accEnd = acc.count * 4 * 3  # VEC3 FLOAT32
+                bvOffset = bv.byteOffset
+                start = bvOffset + accOffset
+                end = start + accEnd
+                posBufferData += buffers[bv.buffer][start:end]
+
+            if prim.attributes.TEXCOORD_0 is not None:
+                acc = gltf.accessors[prim.attributes.TEXCOORD_0]
+                bv = gltf.bufferViews[acc.bufferView]
+                accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                accEnd = acc.count * 4 * 2  # VEC2 FLOAT32
+                bvOffset = bv.byteOffset
+                start = bvOffset + accOffset
+                end = start + accEnd
+
+                texCoord0BufferData += buffers[bv.buffer][start:end]
+
+            if prim.attributes.NORMAL is not None:
+                acc = gltf.accessors[prim.attributes.NORMAL]
+                bv = gltf.bufferViews[acc.bufferView]
+                accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                accEnd = acc.count * 4 * 3  # VEC3 FLOAT32
+                bvOffset = bv.byteOffset
+                start = bvOffset + accOffset
+                end = start + accEnd
+
+                normBufferData += buffers[bv.buffer][start:end]
+
+            if prim.indices is not None:
+                acc = gltf.accessors[prim.indices]
+                bv = gltf.bufferViews[acc.bufferView]
+                accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                accEnd = acc.count * 2  # SCALAR UINT16
+                bvOffset = bv.byteOffset
+                start = bvOffset + accOffset
+                end = start + accEnd
+
+                indexBufferData += buffers[bv.buffer][start:end]
+
+            # no position data, can't be drawn so don't create a VAO
+            if len(posBufferData) == 0:
+                raise BufferError("Buffer contains no vertex position data.")
+
+            # create buffers for data
+            posArr = np.frombuffer(posBufferData, dtype=np.float32)
+
+            posArr = np.reshape(posArr, (-1, 3)) * nodeScale  # apply scaling
+            posArr2 = np.ones((posArr.shape[0], 4), dtype=np.float32)
+            posArr2[:, :3] = posArr
+            attribVBOs[0] = gt.createVBO(posArr2)
+
+            if len(normBufferData) > 0:
+                normArr = np.frombuffer(normBufferData, dtype=np.float32)
+                normArr = np.reshape(normArr, (-1, 3))
+                normArr2 = np.ones((normArr.shape[0], 4), dtype=np.float32)
+                normArr2[:, :3] = normArr
+                attribVBOs[1] = gt.createVBO(normArr2)
+            else:
+                normArr = np.zeros_like(posArr, np.float32)
+                normArr[:, 2] = -1
+                attribVBOs[1] = gt.createVBO(normArr)
+
+            if len(texCoord0BufferData) > 0:
+                tex0Arr = np.frombuffer(texCoord0BufferData, dtype=np.float32)
+                tex0Arr = np.reshape(tex0Arr, (-1, 2))
+                attribVBOs[2] = gt.createVBO(tex0Arr)
+
+            if len(indexBufferData) > 0:
+                indexArr = np.frombuffer(indexBufferData, dtype=np.uint16)
+                indexVBO = gt.createVBO(indexArr,
+                                        target=GL.GL_ELEMENT_ARRAY_BUFFER,
+                                        dataType=GL.GL_UNSIGNED_INT)
+
+            # create the VAO to render the material
+            materialVAOs[materialName] = gt.createVAO(
+                attribVBOs, indexBuffer=indexVBO, legacy=False)
+
+        # create Blinn-Phong materials for each object
         # Get materials, these are usually PBR in the file but they need to be
         # converted to Blinn-Phong for now.
         foundMaterials = {}
         for mat in gltf.materials:
             pbr = mat.pbrMetallicRoughness
-            if pbr.baseColorFactor:
-                diffuseColor = 2.0 * np.asarray(pbr.baseColorFactor[:3]) - 1.0
-
-            else:
-                diffuseColor = np.asarray((1., 1., 1.))
-
-            specularColor = np.zeros((3,))
-            specularColor[:] = 2.0 * pbr.roughnessFactor - 1.0
-
-            diffuseTexture = None
-            if pbr.baseColorTexture is not None:
-                print(pbr.baseColorTexture.texCoord)
-                diffuseTexture = textures[pbr.baseColorTexture.index]
-
-            foundMaterials[mat.name] = BlinnPhongMaterial(
+            newMaterial = MetallicRoughnessMaterial(
                 self.win,
-                diffuseColor=diffuseColor,
-                specularColor=specularColor,
-                shininess=pbr.roughnessFactor * 128.0,
-                diffuseTexture=diffuseTexture)
+                roughnessFactor=pbr.roughnessFactor,
+                metallicFactor=pbr.metallicFactor,
+                diffuseColor=(1, 1, 1),
+                specularColor=(1, 1, 1)
+            )
 
-        # load primitives to VBOs, if they share the same material, combine the
-        # buffers so they are all drawn at once with the same VAO
-        materialVAOs = {}
-        for name, mat in foundMaterials.items():
-            attribVBOs = {}
-            indexVBO = None
+            # if pbr.baseColorFactor:
+            #     diffuseColor = 2.0 * np.asarray(pbr.baseColorFactor[:3]) - 1.0
+            #
+            # else:
+            #     diffuseColor = np.asarray((1., 1., 1.))
+            #
+            # specularColor = np.zeros((3,))
+            # specularColor[:] = 2.0 * pbr.roughnessFactor - 1.0
+            #
+            # diffuseTexture = None
+            # if pbr.baseColorTexture is not None:
+            #     diffuseTexture = nodeTextures[pbr.baseColorTexture.index]
+            #
+            # foundMaterials[mat.name] = BlinnPhongMaterial(
+            #     self.win,
+            #     diffuseColor=diffuseColor,
+            #     specularColor=specularColor,
+            #     shininess=pbr.roughnessFactor * 128.0,
+            #     diffuseTexture=diffuseTexture)
 
-            # get all primitives in scene meshes which share a material
-            sharedPrimitives = []
-
-            for i, mesh in enumerate(gltf.meshes):
-                for prim in mesh.primitives:
-                    if gltf.materials[prim.material].name == name:
-                        meshNode = None
-                        for node in gltf.nodes:
-                            if node.mesh == i:
-                                meshNode = node
-                        sharedPrimitives.append((prim, meshNode))
-
-            if sharedPrimitives:
-                posBufferData = b''
-                normBufferData = b''
-                texCoord0BufferData = b''
-                indexBufferData = b''
-
-                lastIndex = 0  # offset for succesive indices
-
-                for prim, node in sharedPrimitives:
-                    if prim.attributes.POSITION is not None:
-                        # accessor an buffer view for attribute
-                        acc = gltf.accessors[prim.attributes.POSITION]
-                        bv = gltf.bufferViews[acc.bufferView]
-
-                        # compute buffer access offests and ranges
-                        accOffset = 0 if acc.byteOffset is None else acc.byteOffset
-                        accEnd = acc.count * 4 * 3  # VEC3 FLOAT32
-                        bvOffset = bv.byteOffset
-                        start = bvOffset + accOffset
-                        end = start + accEnd
-                        buffData = buffers[bv.buffer][start:end]
-
-                        # apply transforms to the data
-                        if node is not None:
-                            if node.rotation:
-                                ori = np.asarray(node.rotation, np.float32)
-                            else:
-                                ori = np.asarray((0, 0, 0, -1), np.float32)
-
-                            if node.translation:
-                                pos = np.asarray(node.translation, np.float32)
-                            else:
-                                pos = np.zeros((3,), np.float32)
-
-                            if node.scale:
-                                scale = np.asarray(node.scale, np.float32)
-                            else:
-                                scale = np.ones((3,), np.float32)
-
-                            points = mt.transform(
-                                pos, ori,
-                                np.frombuffer(buffData, np.float32).reshape(
-                                    (-1, 3)) * scale,
-                                dtype=np.float32)
-
-                            posBufferData += points.tobytes()
-                        else:
-                            posBufferData += buffData
-
-                    if prim.attributes.TEXCOORD_0 is not None:
-                        acc = gltf.accessors[prim.attributes.TEXCOORD_0]
-                        bv = gltf.bufferViews[acc.bufferView]
-                        accOffset = 0 if acc.byteOffset is None else acc.byteOffset
-                        accEnd = acc.count * 4 * 2  # VEC2 FLOAT32
-                        bvOffset = bv.byteOffset
-                        start = bvOffset + accOffset
-                        end = start + accEnd
-
-                        texCoord0BufferData += buffers[bv.buffer][start:end]
-                    # else:
-                    #     # fill with empty data matching size of vertex data
-                    #     acc = gltf.accessors[prim.attributes.POSITION]
-                    #     texCoord0BufferData += b'\x00' * acc.count * 4 * 2
-
-                    if prim.attributes.NORMAL is not None:
-                        acc = gltf.accessors[prim.attributes.NORMAL]
-                        bv = gltf.bufferViews[acc.bufferView]
-                        accOffset = 0 if acc.byteOffset is None else acc.byteOffset
-                        accEnd = acc.count * 4 * 3  # VEC3 FLOAT32
-                        bvOffset = bv.byteOffset
-                        start = bvOffset + accOffset
-                        end = start + accEnd
-
-                        buffData = buffers[bv.buffer][start:end]
-
-                        # apply transforms to the data
-                        if node is not None:
-                            if node.rotation:
-                                ori = np.asarray(node.rotation, np.float32)
-                            else:
-                                ori = np.asarray((0, 0, 0, -1), np.float32)
-
-                            points = mt.applyQuat(
-                                ori,
-                                np.frombuffer(buffData, np.float32).reshape((-1, 3)),
-                                dtype=np.float32)
-
-                            normBufferData += points.tobytes()
-                        else:
-                            normBufferData += buffData
-
-                    if prim.indices is not None:
-                        acc = gltf.accessors[prim.indices]
-                        bv = gltf.bufferViews[acc.bufferView]
-                        accOffset = 0 if acc.byteOffset is None else acc.byteOffset
-                        accEnd = acc.count * 2  # SCALAR UINT16
-                        bvOffset = bv.byteOffset
-                        start = bvOffset + accOffset
-                        end = start + accEnd
-
-                        buffData = buffers[bv.buffer][start:end]
-                        arr = np.frombuffer(buffData, np.uint16)  # to get max
-
-                        if lastIndex == 0:
-                            indexBufferData += buffData
-                        else:
-                            indexBufferData += (arr + lastIndex).tobytes()
-
-                        lastIndex += arr.max() + 1
-
-                # no position data, can't be drawn so don't create a VAO
-                if len(posBufferData) == 0:
-                    break
-
-                posArr = np.frombuffer(posBufferData, dtype=np.float32)
-                posArr = np.reshape(posArr, (-1, 3))
-                attribVBOs[GL.GL_VERTEX_ARRAY] = gt.createVBO(posArr)
-
-                if len(normBufferData) > 0:
-                    normArr = np.frombuffer(normBufferData, dtype=np.float32)
-                    normArr = np.reshape(normArr, (-1, 3))
-                    attribVBOs[GL.GL_NORMAL_ARRAY] = gt.createVBO(normArr)
-
-                if len(texCoord0BufferData) > 0:
-                    tex0Arr = np.frombuffer(texCoord0BufferData, dtype=np.float32)
-                    tex0Arr = np.reshape(tex0Arr, (-1, 2))
-                    attribVBOs[GL.GL_TEXTURE_COORD_ARRAY] = gt.createVBO(tex0Arr)
-
-                if len(indexBufferData) > 0:
-                    indexArr = np.frombuffer(indexBufferData, dtype=np.uint16)
-                    indexVBO = gt.createVBO(indexArr,
-                                            target=GL.GL_ELEMENT_ARRAY_BUFFER,
-                                            dataType=GL.GL_UNSIGNED_INT)
-
-            if attribVBOs:
-                # create the VAO to render the material
-                materialVAOs[name] = gt.createVAO(
-                    attribVBOs, indexBuffer=indexVBO, legacy=True)
-
-        # remove unused materials
-        unused = []
-        for name in foundMaterials.keys():
-            if name not in materialVAOs.keys():
-                unused.append(name)
-
-        for name in unused:
-            del foundMaterials[name]
+            foundMaterials[mat.name] = newMaterial
 
         self.material = foundMaterials
         self._vao = materialVAOs
@@ -2628,20 +2745,20 @@ class GLTFMeshStim(BaseRigidBodyStim):
 
         win.draw3d = True
 
-        GL.glPushMatrix()
-        GL.glMultTransposeMatrixf(at.array2pointer(self.thePose.modelMatrix))
+        #GL.glPushMatrix()
+        #GL.glMultTransposeMatrixf(at.array2pointer(self.thePose.modelMatrix))
 
         # iterate over materials, draw associated VAOs
         if self.material is not None:
             # if material is a dictionary
             if isinstance(self.material, dict):
                 for materialName, materialDesc in self.material.items():
-                    materialDesc.begin(useShaders=self._useShaders)
+                    materialDesc.begin(self.thePose.modelMatrix, useShaders=self._useShaders)
                     gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
                     materialDesc.end()
             else:
                 # material is a single item
-                self.material.begin(useShaders=self._useShaders)
+                self.material.begin(self.thePose.modelMatrix, useShaders=self._useShaders)
                 for materialName, _ in self._vao.items():
                     gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
                 self.material.end()
@@ -2681,6 +2798,6 @@ class GLTFMeshStim(BaseRigidBodyStim):
 
                 GL.glDisable(GL.GL_COLOR_MATERIAL)  # enable color tracking
 
-        GL.glPopMatrix()
+        #GL.glPopMatrix()
 
         win.draw3d = False
