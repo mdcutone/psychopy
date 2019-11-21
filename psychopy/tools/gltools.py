@@ -14,6 +14,7 @@ __all__ = [
     'compileShader',
     'compileShaderObjectARB',
     'embedShaderSourceDefs',
+    'embedShaderIncludes',
     'deleteObject',
     'deleteObjectARB',
     'attachShader',
@@ -354,6 +355,80 @@ def compileShaderObjectARB(shaderSrc, shaderType):
         raise RuntimeError("Shader compilation failed, check log output.")
 
     return shaderId
+
+
+def embedShaderIncludes(shaderSrc, includes):
+    """Substitute shader `#include` statements with GLSL source text.
+
+    OpenGL does not support the use of the `#include` directive in GLSL files,
+    however some developers and drivers may permit them. This function allows
+    you to substitute include statements with GLSL source code.
+
+    This only replaces the first occurance of the statement with GLSL source
+    code, all other occurance are deleted. If a provided include statement is
+    not present in the source code, `shaderSrc` will pass-through unmodified.
+
+    Parameters
+    ----------
+    shaderSrc : str
+        GLSL shader source code to modify.
+    includes : dict or list
+        Includes can be specified in two ways. A dictionary can be used where
+        key are strings of the include path and values are GLSL sources to
+        replace them with. A list of file paths can be provided. If so, the
+        include path will be parsed from the file name and sources will be read
+        from disk. The tail of the path is used to determine the name to search
+        for in include directives.
+
+    Returns
+    -------
+    str
+        GLSL source code.
+
+    Examples
+    --------
+    If your GLSL code contains the following statements::
+
+        #include <something.glsl>
+        #include "another.glsl"
+
+    You can substitute it with a string using the following::
+
+        shaderSrc = embedShaderIncludes(
+            shaderSrc, {'something.glsl': subSrc0, 'another.glsl': subSrc1})
+
+    """
+    if includes:
+        # load files if a list of them have been specified
+        if isinstance(includes, (list, tuple,)):
+            loadedFiles = {}
+            for filePath in includes:
+                with open(filePath, 'r') as f:
+                    glslSrc = f.read()
+
+                fname = os.path.split(filePath)[1]
+                loadedFiles[fname] = glslSrc
+
+            includes = loadedFiles
+
+        # go over dictionary and insert text
+        for key, src in includes.items():
+            # try includes surrounded by <> brackets
+            incStmt = '#include <{}>'.format(key)
+            found = shaderSrc.find(incStmt)
+            if found != -1:
+                shaderSrc = shaderSrc.replace(incStmt, src, 1)
+                shaderSrc = shaderSrc.replace(incStmt, "")
+                continue
+
+            # try includes surrounded by quotes
+            incStmt = '#include "{}"'.format(key)
+            found = shaderSrc.find(incStmt)
+            if found != -1:
+                shaderSrc = shaderSrc.replace(incStmt, src, 1)
+                shaderSrc = shaderSrc.replace(incStmt, "")
+
+    return shaderSrc
 
 
 def embedShaderSourceDefs(shaderSrc, defs):
