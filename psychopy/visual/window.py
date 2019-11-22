@@ -391,6 +391,10 @@ class Window(object):
             self._projectionMatrix = viewtools.orthoProjectionMatrix(
                 -1, 1, -1, 1, -1, 1, dtype=numpy.float32)
 
+        if not hasattr(self, '_viewProjectionMatrix'):
+            self._viewProjectionMatrix = \
+                numpy.zeros((4, 4), dtype=numpy.float32)
+
         # set screen color
         self.__dict__['colorSpace'] = colorSpace
         if rgb is not None:
@@ -492,8 +496,10 @@ class Window(object):
         self._nLights = 0
         self._ambientLight = numpy.array([0.0, 0.0, 0.0, 1.0],
                                          dtype=numpy.float32)
+        self._exposure = 1.0  # for PB materials
 
         # stereo rendering settings, set later by the user
+        self._eyePos = numpy.zeros((3,), dtype=numpy.float32)
         self._eyeOffset = 0.0
         self._convergeOffset = 0.0
 
@@ -1346,28 +1352,28 @@ class Window(object):
         # `lights` attribute directly to setup lighting uniforms.
         # The index of the lights is defined by the order it appears in
         # `self._lights`.
-        for index, light in enumerate(self._lights):
-            enumLight = GL.GL_LIGHT0 + index
-
-            # convert data in light class to ctypes
-            #pos = numpy.ctypeslib.as_ctypes(light.pos)
-            diffuse = numpy.ctypeslib.as_ctypes(light._diffuseRGB)
-            specular = numpy.ctypeslib.as_ctypes(light._specularRGB)
-            ambient = numpy.ctypeslib.as_ctypes(light._ambientRGB)
-
-            # pass values to OpenGL
-            #GL.glLightfv(enumLight, GL.GL_POSITION, pos)
-            GL.glLightfv(enumLight, GL.GL_DIFFUSE, diffuse)
-            GL.glLightfv(enumLight, GL.GL_SPECULAR, specular)
-            GL.glLightfv(enumLight, GL.GL_AMBIENT, ambient)
-
-            constant, linear, quadratic = light._kAttenuation
-            GL.glLightf(enumLight, GL.GL_CONSTANT_ATTENUATION, constant)
-            GL.glLightf(enumLight, GL.GL_LINEAR_ATTENUATION, linear)
-            GL.glLightf(enumLight, GL.GL_QUADRATIC_ATTENUATION, quadratic)
-
-            # enable the light
-            GL.glEnable(enumLight)
+        #for index, light in enumerate(self._lights):
+            # enumLight = GL.GL_LIGHT0 + index
+            #
+            # # convert data in light class to ctypes
+            # #pos = numpy.ctypeslib.as_ctypes(light.pos)
+            # diffuse = numpy.ctypeslib.as_ctypes(light._diffuseRGB)
+            # specular = numpy.ctypeslib.as_ctypes(light._specularRGB)
+            # ambient = numpy.ctypeslib.as_ctypes(light._ambientRGB)
+            #
+            # # pass values to OpenGL
+            # #GL.glLightfv(enumLight, GL.GL_POSITION, pos)
+            # GL.glLightfv(enumLight, GL.GL_DIFFUSE, diffuse)
+            # GL.glLightfv(enumLight, GL.GL_SPECULAR, specular)
+            # GL.glLightfv(enumLight, GL.GL_AMBIENT, ambient)
+            #
+            # constant, linear, quadratic = light._kAttenuation
+            # GL.glLightf(enumLight, GL.GL_CONSTANT_ATTENUATION, constant)
+            # GL.glLightf(enumLight, GL.GL_LINEAR_ATTENUATION, linear)
+            # GL.glLightf(enumLight, GL.GL_QUADRATIC_ATTENUATION, quadratic)
+            #
+            # # enable the light
+            # GL.glEnable(enumLight)
 
     @property
     def useLights(self):
@@ -1786,6 +1792,9 @@ class Window(object):
         self._projectionMatrix = \
             viewtools.perspectiveProjectionMatrix(*frustum, dtype=numpy.float32)
 
+        # get the eye position
+        self._eyePos[:] = (-self._eyeOffset, 0.0, -scrDistM)
+
         # translate away from screen
         self._viewMatrix = numpy.identity(4, dtype=numpy.float32)
         self._viewMatrix[0, 3] = -self._eyeOffset  # apply eye offset
@@ -1837,6 +1846,11 @@ class Window(object):
             viewMat = self._viewMatrix.ctypes.data_as(
                 ctypes.POINTER(ctypes.c_float))
             GL.glMultTransposeMatrixf(viewMat)
+
+        # cache the combined view and projection matrix
+        if hasattr(self, '_viewProjectionMatrix'):
+            self._viewProjectionMatrix[:, :] = numpy.matmul(
+                self._projectionMatrix, self._viewMatrix)
 
         oldDepthMask = self.depthMask
         if clearDepth:

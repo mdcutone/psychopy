@@ -31,6 +31,84 @@ try:
 except ImportError:
     _HAS_GLTF_IMPORTER_ = False
 
+# ------------------------------------------------------------------------------
+# Cache for shaders
+#
+# Each shader created by a material is compiled and added to the cache, each key
+# is a tuple indicating the combined shader flags and the number of lights
+# associated with it. Upon creating a material, shaders for its configuration
+# and range of lights are created. These are cached, so changing the number of
+# lights does not require additional shaders to be compiled. If a material was
+# created before another, the newest material will look into the shader cache
+# for a matching configuration before creating a new one.
+#
+
+# shader flags used to specify the configuration of a shader
+SHADER_SPECULARGLOSSINESS = 0x000001
+SHADER_METALLICROUGHNESS = 0x000002
+SHADER_HAS_NORMALS = 0x000004
+SHADER_HAS_UV_SET1 = 0x000008
+SHADER_HAS_UV_SET2 = 0x000010
+SHADER_HAS_TANGENTS = 0x000020
+SHADER_USE_PUNCTUAL = 0x000040
+SHADER_HAS_DIFFUSE_MAP = 0x000080
+SHADER_HAS_SPECULAR_GLOSSINESS_MAP = 0x000100
+SHADER_HAS_METALLIC_ROUGHNESS_MAP = 0x000200
+SHADER_HAS_OCCLUSION_MAP = 0x000400
+SHADER_HAS_EMISSIVE_MAP = 0x000800
+SHADER_USE_IBL = 0x001000
+SHADER_ALPHAMODE_MASK = 0x002000
+SHADER_ALPHAMODE_OPAQUE = 0x004000
+SHADER_TONEMAP_UNCHARTED = 0x008000
+SHADER_TONEMAP_HEJLRICHARD = 0x010000
+SHADER_TONEMAP_ACES = 0x020000
+SHADER_HAS_BASE_COLOR_MAP = 0x040000
+SHADER_USE_HDR = 0x080000
+SHADER_MATERIAL_UNLIT = 0x100000
+SHADER_HAS_NORMAL_MAP = 0x200000
+
+# mapping for define statements in the shader
+SHADER_DEFS = {
+    SHADER_SPECULARGLOSSINESS: "MATERIAL_SPECULARGLOSSINESS",
+    SHADER_METALLICROUGHNESS: "MATERIAL_METALLICROUGHNESS",
+    SHADER_HAS_NORMALS: "HAS_NORMALS",
+    SHADER_HAS_UV_SET1: "HAS_UV_SET1",
+    SHADER_HAS_UV_SET2: "HAS_UV_SET2",
+    SHADER_HAS_TANGENTS: "HAS_TANGENTS",
+    SHADER_USE_PUNCTUAL: "USE_PUNCTUAL",
+    SHADER_HAS_DIFFUSE_MAP: "HAS_DIFFUSE_MAP",
+    SHADER_HAS_BASE_COLOR_MAP: "HAS_BASE_COLOR_MAP",
+    SHADER_HAS_SPECULAR_GLOSSINESS_MAP: "HAS_SPECULAR_GLOSSINESS_MAP",
+    SHADER_HAS_METALLIC_ROUGHNESS_MAP: "HAS_METALLIC_ROUGHNESS_MAP",
+    SHADER_HAS_OCCLUSION_MAP: "HAS_OCCLUSION_MAP",
+    SHADER_HAS_EMISSIVE_MAP: "HAS_EMISSIVE_MAP",
+    SHADER_USE_IBL: "USE_IBL",
+    SHADER_ALPHAMODE_MASK: "ALPHAMODE_MASK",
+    SHADER_ALPHAMODE_OPAQUE: "ALPHAMODE_OPAQUE",
+    SHADER_TONEMAP_UNCHARTED: "TONEMAP_UNCHARTED",
+    SHADER_TONEMAP_HEJLRICHARD: "TONEMAP_HEJLRICHARD",
+    SHADER_TONEMAP_ACES: "TONEMAP_ACES",
+    SHADER_USE_HDR: "USE_HDR",
+    SHADER_MATERIAL_UNLIT: "MATERIAL_UNLIT",
+    SHADER_HAS_NORMAL_MAP: "HAS_NORMAL_MAP"}
+
+
+# Shader GLSL source code, individual materials will use this source and
+# generate the appropriate shader by setting #DEFINE flags
+includes = [r'psychopy\visual\shaders\tonemapping.glsl',
+            r'psychopy\visual\shaders\textures.glsl',
+            r'psychopy\visual\shaders\functions.glsl',
+            r'psychopy\visual\shaders\animation.glsl']
+
+with open(r'psychopy\visual\shaders\metallic-roughness.frag', 'r') as f:
+    GLSL_KHRONOS_PBR_FRAG = gt.embedShaderIncludes(f.read(), includes)
+
+with open(r'psychopy\visual\shaders\primitive.vert', 'r') as f:
+    GLSL_KHRONOS_PBR_VERT = gt.embedShaderIncludes(f.read(), includes)
+
+# the shader cache
+_SHADER_CACHE_ = {}
+
 
 class LightSource(object):
     """Class for representing a light source in a scene.
@@ -47,174 +125,150 @@ class LightSource(object):
     def __init__(self,
                  win,
                  pos=(0., 0., 0.),
-                 diffuseColor=(1., 1., 1.),
-                 specularColor=(1., 1., 1.),
-                 ambientColor=(0., 0., 0.),
+                 direction=(0., -1., 0.),
+                 color=(1., 1., 1.),
                  colorSpace='rgb',
+                 intensity=1.0,
+                 maxDist=10.0,
                  lightType='point',
-                 attenuation=(1, 0, 0)):
+                 innerConeCos=0.0,
+                 outerConeCos=0.1):
         """
         Parameters
         ----------
         win : `~psychopy.visual.Window`
             Window associated with this light source.
         pos : array_like
-            Position of the light source (x, y, z, w). If `w=1.0` the light will
-            be a point source and `x`, `y`, and `z` is the position in the
-            scene. If `w=0.0`, the light source will be directional and `x`,
-            `y`, and `z` will define the vector pointing to the direction the
-            light source is coming from. For instance, a vector of (0, 1, 0, 0)
-            will indicate that a light source is coming from above.
-        diffuseColor : array_like
-            Diffuse light color.
-        specularColor : array_like
-            Specular light color.
-        ambientColor : array_like
-            Ambient light color.
+            Position of the light source (x, y, z).
+        direction : array_like
+            Direction of the lights source as vector (x, y, z). Should be
+            normalized. Only applicable for 'spot' and 'directional'
+            `lightTypes`.
+        color : array_like
+            Light color in linear space.
         colorSpace : str
-            Colorspace for `diffuse`, `specular`, and `ambient` colors.
-        attenuation : array_like
-            Values for the constant, linear, and quadratic terms of the lighting
-            attenuation formula. Default is (1, 0, 0) which results in no
-            attenuation.
+            Colorspace for `color`.
+        intensity : float
+            Intensity or brightness of the light source. For point and spot
+            lights intensity is in candelas (lm/sr) while directional lights use
+            lux (lm/m^2).
+        maxDist : float
+            Distance from light source in meters where it can be considered near
+            to have reached zero. Distance should always be >0.
+        lightType : str
+            Light source type. Valid values are 'point', 'directional', and
+            'spot'.
 
         """
         self.win = win
 
-        self._pos = np.zeros((4,), np.float32)
-        self._diffuseColor = np.zeros((3,), np.float32)
-        self._specularColor = np.zeros((3,), np.float32)
-        self._ambientColor = np.zeros((3,), np.float32)
+        self._pos = np.zeros((3,), np.float32)
+        self._dir = np.zeros((3,), np.float32)
+        self._color = np.zeros((3,), np.float32)
+        self._maxDist = 0.0
+        self._intensity = 0.0
+
+        self._innerConeCos = innerConeCos
+        self._outerConeCos = outerConeCos
 
         # internal RGB values post colorspace conversion
-        self._diffuseRGB = np.array((0., 0., 0., 1.), np.float32)
-        self._specularRGB = np.array((0., 0., 0., 1.), np.float32)
-        self._ambientRGB = np.array((0., 0., 0., 1.), np.float32)
+        self._colorRGB = np.array((0., 0., 0., 1.), np.float32)
 
         self.colorSpace = colorSpace
-        self.diffuseColor = diffuseColor
-        self.specularColor = specularColor
-        self.ambientColor = ambientColor
+        self.color = color
 
-        self._lightType = lightType
+        self._lightType = 0
+        self.lightType = lightType
         self.pos = pos
-
-        # attenuation factors
-        self._kAttenuation = np.asarray(attenuation, np.float32)
+        self.direction = direction
+        self.intensity = intensity
+        self.maxDist = maxDist
 
     @property
     def pos(self):
         """Position of the light source in the scene in scene units."""
-        return self._pos[:3]
+        return self._pos
 
     @pos.setter
     def pos(self, value):
-        self._pos = np.zeros((4,), np.float32)
-        self._pos[:3] = value
+        self._pos[:] = value
 
-        if self._lightType == 'point':
-            self._pos[3] = 1.0
+    @property
+    def direction(self):
+        """Direction vector of a light source."""
+        return self._dir
+
+    @direction.setter
+    def direction(self, value):
+        self._dir[:] = value
+
+    @property
+    def intensity(self):
+        """Intensity or brightness of the light source. For point and spot
+        lights intensity is in candelas (lm/sr) while directional lights use
+        lux (lm/m^2).
+        """
+        return self._intensity
+
+    @intensity.setter
+    def intensity(self, value):
+        self._intensity = value
+
+    @property
+    def maxDist(self):
+        """Maximum distance cut-off of a light source."""
+        return self._maxDist
+
+    @maxDist.setter
+    def maxDist(self, value):
+        self._maxDist = value
 
     @property
     def lightType(self):
-        """Type of light source, can be 'point' or 'directional'."""
-        return self._pos[:3]
+        """Type of light source, can be 'point', 'directional' or 'spot'."""
+        if self._lightType == 0:
+            return 'directional'
+        elif self._lightType == 1:
+            return 'point'
+        else:
+            return 'spot'
 
     @lightType.setter
     def lightType(self, value):
-        self._lightType = value
-
-        if self._lightType == 'point':
-            self._pos[3] = 1.0
-        elif self._lightType == 'directional':
-            self._pos[3] = 0.0
+        if value == 'directional':
+            self._lightType = 0
+        elif value == 'point':
+            self._lightType = 1
+        elif value == 'spot':
+            self._lightType = 2
         else:
             raise ValueError(
-                "Unknown `lightType` specified, must be 'directional' or "
-                "'point'.")
+                "Unknown `lightType` specified, must be 'directional', "
+                "'point' or 'spot'.")
 
     @property
-    def diffuseColor(self):
+    def color(self):
         """Diffuse color of the material."""
-        return self._diffuseColor
+        return self._color
 
-    @diffuseColor.setter
-    def diffuseColor(self, value):
-        self._diffuseColor = np.asarray(value, np.float32)
+    @color.setter
+    def color(self, value):
+        self._color = np.asarray(value, np.float32)
         setColor(self, value, colorSpace=self.colorSpace, operation=None,
-                 rgbAttrib='diffuseRGB', colorAttrib='diffuseColor',
+                 rgbAttrib='colorRGB', colorAttrib='color',
                  colorSpaceAttrib='colorSpace')
 
     @property
-    def diffuseRGB(self):
+    def colorRGB(self):
         """Diffuse color of the material."""
-        return self._diffuseRGB[:3]
+        return self._colorRGB[:3]
 
-    @diffuseRGB.setter
-    def diffuseRGB(self, value):
+    @colorRGB.setter
+    def colorRGB(self, value):
         # make sure the color we got is 32-bit float
-        self._diffuseRGB = np.zeros((4,), np.float32)
-        self._diffuseRGB[:3] = (value + 1) / 2.0
-        self._diffuseRGB[3] = 1.0
-
-    @property
-    def specularColor(self):
-        """Specular color of the material."""
-        return self._specularColor
-
-    @specularColor.setter
-    def specularColor(self, value):
-        self._specularColor = np.asarray(value, np.float32)
-        setColor(self, value, colorSpace=self.colorSpace, operation=None,
-                 rgbAttrib='specularRGB', colorAttrib='specularColor',
-                 colorSpaceAttrib='colorSpace')
-
-    @property
-    def specularRGB(self):
-        """Diffuse color of the material."""
-        return self._specularRGB[:3]
-
-    @specularRGB.setter
-    def specularRGB(self, value):
-        # make sure the color we got is 32-bit float
-        self._specularRGB = np.zeros((4,), np.float32)
-        self._specularRGB[:3] = (value + 1) / 2.0
-        self._specularRGB[3] = 1.0
-
-    @property
-    def ambientColor(self):
-        """Ambient color of the material."""
-        return self._ambientColor
-
-    @ambientColor.setter
-    def ambientColor(self, value):
-        self._ambientColor = np.asarray(value, np.float32)
-        setColor(self, value, colorSpace=self.colorSpace, operation=None,
-                 rgbAttrib='ambientRGB', colorAttrib='ambientColor',
-                 colorSpaceAttrib='colorSpace')
-
-    @property
-    def ambientRGB(self):
-        """Diffuse color of the material."""
-        return self._ambientRGB[:3]
-
-    @ambientRGB.setter
-    def ambientRGB(self, value):
-        # make sure the color we got is 32-bit float
-        self._ambientRGB = np.zeros((4,), np.float32)
-        self._ambientRGB[:3] = (value + 1) / 2.0
-        self._ambientRGB[3] = 1.0
-
-    @property
-    def attenuation(self):
-        """Values for the constant, linear, and quadratic terms of the lighting
-        attenuation formula.
-        """
-        return self._kAttenuation
-
-    @attenuation.setter
-    def attenuation(self, value):
-        self._kAttenuation = np.asarray(value, np.float32)
+        self._colorRGB = np.zeros((4,), np.float32)
+        self._colorRGB[:3] = (value + 1) / 2.0
+        self._colorRGB[3] = 1.0
 
 
 class SceneSkybox(object):
@@ -744,8 +798,11 @@ class BlinnPhongMaterial(object):
 
 
 class MetallicRoughnessMaterial(object):
-    """Class for materials using Physically-Based Rendering (PBR) of micro-facet
+    """Class for materials using Physically-Based Rendering (PBR) of microfacet
     surfaces.
+
+    The shader used here is the reference implementation for Physically Based
+    Shading of a microfacet surface material.
 
     The appearance of a material will be determined by `roughness` or scattering
     of incident light due to micro-facets on the surface and `metallic` which
@@ -754,127 +811,321 @@ class MetallicRoughnessMaterial(object):
     """
     def __init__(self,
                  win=None,
+                 color=(0, 0, 0),
+                 colorSpace='rgb',
                  roughnessFactor=0.0,
                  metallicFactor=0.0,
-                 reflectanceColor=(0, 0, 0),
-                 grazingReflectanceColor=(0, 0, 0),
-                 alphaRoughness=0.0,
-                 diffuseColor=(0, 0, 0),
-                 specularColor=(0, 0, 0)):
+                 colorTexture=None,
+                 metallicRoughnessTexture=None,
+                 normalTexture=None,
+                 occulusionTexture=None,
+                 emissiveTexture=None,
+                 alphaMode=None,
+                 alphaCutoff=1.0,
+                 toneMap=None,
+                 hdr=False,
+                 unlit=False,
+                 useNormals=False,
+                 useTangents=False,
+                 useTexCoord0=False,
+                 useTexCoord1=False):
 
         self.win = win
-        self._roughnessFactor = roughnessFactor
-        self._metallicFactor = metallicFactor
-        self._reflectanceColor = np.asarray(reflectanceColor, np.float32)
-        self._grazingReflectanceColor = np.asarray(grazingReflectanceColor, np.float32)
-        self._alphaRoughness = alphaRoughness
-        self._diffuseColor = np.asarray(diffuseColor, np.float32)
-        self._specularColor = np.asarray(specularColor, np.float32)
 
-        includes = [r'psychopy\visual\shaders\tonemapping.glsl',
-                    r'psychopy\visual\shaders\textures.glsl',
-                    r'psychopy\visual\shaders\functions.glsl',
-                    r'psychopy\visual\shaders\animation.glsl']
+        # set colors
+        self._color = np.zeros((3,), np.float32)
+        self._colorTexture = colorTexture
 
-        defines = {#'MATERIAL_SPECULARGLOSSINESS': 1,
-                   'MATERIAL_METALLICROUGHNESS': 1,
-                   'LIGHT_COUNT': 1,
-                   "USE_PUNCTUAL": 1,
-                   'HAS_NORMALS': 1}
+        # internal RGB values post colorspace conversion
+        self._colorRGB = np.array((0., 0., 0., 1.), np.float32)
+        self._ptrColor = None
 
-        shaderProg = gt.createProgram()
+        self.colorSpace = colorSpace
+        self.color = color
 
-        with open(r'psychopy\visual\shaders\metallic-roughness.frag', 'r') as f:
-            fragShaderSrc = f.read()
+        self._roughnessFactor = float(roughnessFactor)
+        self._metallicFactor = float(metallicFactor)
 
-        fragShaderSrc = gt.embedShaderIncludes(fragShaderSrc, includes)
-        fragShaderSrc = gt.embedShaderSourceDefs(fragShaderSrc, defines)
-        fragShader = gt.compileShader(fragShaderSrc, GL.GL_FRAGMENT_SHADER)
+         # textures
+        self._metallicRoughnessTexture = None
+        self._normalTexture = normalTexture
+        self._occlusionTexture = None
+        self._emissiveTexture = None
 
-        with open(r'psychopy\visual\shaders\primitive.vert', 'r') as f:
-            vertShaderSrc = f.read()
+        # indirect lighting cubemap
+        self._IBLMap = None
 
-        vertShaderSrc = gt.embedShaderIncludes(vertShaderSrc, includes)
-        vertShaderSrc = gt.embedShaderSourceDefs(vertShaderSrc, defines)
-        vertShader = gt.compileShader(vertShaderSrc, GL.GL_VERTEX_SHADER)
+        self._exposure = 1.0
+        self._useNormals = useNormals
+        self._useTangents = useTangents
+        self._useTexCoord0 = useTexCoord0
+        self._useTexCoord1 = useTexCoord1
+        self._useToneMap = toneMap
+        self._useHDR = hdr
 
-        # attach shaders to program
-        gt.attachShader(shaderProg, vertShader)
-        gt.attachShader(shaderProg, fragShader)
+        # setup the shader
+        self._shaderConfig = 0x00000
+        self._cacheShader()
 
-        # link the shader, makes `myProgram` attachments executable by their
-        # respective processors and available for use
-        gt.linkProgram(shaderProg)
+        # Get uniform locations for the shader, reducing overhead looking
+        # these values up when setting uniforms. These need to be updated if the
+        # number of lights changes from the last time the material was used.
+        self._unifLoc = {}
 
-        # optional, validate the program
-        gt.validateProgram(shaderProg)
+    @property
+    def color(self):
+        """Diffuse color of the material."""
+        return self._diffuseColor
 
-        # optional, detach and discard shader objects
-        gt.detachShader(shaderProg, vertShader)
-        gt.detachShader(shaderProg, fragShader)
+    @color.setter
+    def color(self, value):
+        self._diffuseColor = np.asarray(value, np.float32)
+        setColor(self, value, colorSpace=self.colorSpace, operation=None,
+                 rgbAttrib='colorRGB', colorAttrib='color',
+                 colorSpaceAttrib='colorSpace')
 
-        gt.deleteObject(vertShader)
-        gt.deleteObject(fragShader)
+    @property
+    def colorRGB(self):
+        """Diffuse color of the material."""
+        return self._colorRGB[:3]
 
-        self._shaderProg = shaderProg
+    @colorRGB.setter
+    def colorRGB(self, value):
+        # make sure the color we got is 32-bit float
+        self._colorRGB = np.zeros((4,), np.float32)
+        self._colorRGB[:3] = (value + 1) / 2.0
+        self._colorRGB[3] = 1.0
 
-    def begin(self, modelMatrix, useTextures=True, useShaders=False):
+        self._ptrColor = np.ctypeslib.as_ctypes(self._colorRGB)
+
+    @property
+    def colorTexture(self):
+        """Diffuse color of the material."""
+        return self._colorTexture
+
+    @colorTexture.setter
+    def colorTexture(self, value):
+        self._colorTexture = value
+
+    @property
+    def normalTexture(self):
+        """Normal map color of the material."""
+        return self._normalTexture
+
+    @normalTexture.setter
+    def normalTexture(self, value):
+        self._normalTexture = value
+
+    @property
+    def roughnessFactor(self):
+        """Surface roughness for the material."""
+        return self._roughnessFactor
+
+    @roughnessFactor.setter
+    def roughnessFactor(self, value):
+        self._roughnessFactor = float(value)
+
+    def _cacheShader(self):
+        """Create an appropriate shader for this material configuration and
+        cache it.
+
+        Upon creating the shader, `_shaderConfig` is set to generate the key
+        to access it from the cache later.
+
+        """
+        # shader #DEFINE statements to embed, punctual lighting is ALWAYS used
+        shaderDefs = {SHADER_DEFS[SHADER_METALLICROUGHNESS]: 1}
+
+        if self._useNormals:
+            self._shaderConfig |= SHADER_HAS_NORMALS
+            shaderDefs[SHADER_DEFS[SHADER_HAS_NORMALS]] = 1
+
+        if self._useTangents:
+            self._shaderConfig |= SHADER_HAS_TANGENTS
+            shaderDefs[SHADER_DEFS[SHADER_HAS_TANGENTS]] = 1
+
+            if self._normalTexture is not None:
+                self._shaderConfig |= SHADER_HAS_NORMAL_MAP
+                shaderDefs[SHADER_DEFS[SHADER_HAS_NORMAL_MAP]] = 1
+
+        if self._useTexCoord0:
+            self._shaderConfig |= SHADER_HAS_UV_SET1
+            shaderDefs[SHADER_DEFS[SHADER_HAS_UV_SET1]] = 1
+
+        if self._colorTexture is not None:
+            self._shaderConfig |= SHADER_HAS_BASE_COLOR_MAP
+            shaderDefs[SHADER_DEFS[SHADER_HAS_BASE_COLOR_MAP]] = 1
+
+        if self._useHDR:
+            self._shaderConfig |= SHADER_USE_HDR
+            shaderDefs[SHADER_DEFS[SHADER_USE_HDR]] = 1
+
+        # tone mapping, optional
+        if self._useToneMap is not None:
+            if self._useToneMap == 'aces':
+                toneMap = SHADER_TONEMAP_ACES
+            elif self._useToneMap == 'uncharted':
+                toneMap = SHADER_TONEMAP_UNCHARTED
+            elif self._useToneMap == 'hejlrichard':
+                toneMap = SHADER_TONEMAP_HEJLRICHARD
+            else:
+                raise ValueError(
+                    'Invalid tone map `{}` specified.'.format(self._useToneMap))
+
+            self._shaderConfig |= toneMap
+            shaderDefs[SHADER_DEFS[toneMap]] = 1
+
+        global _SHADER_CACHE_
+        # compile a shader for each number of lights
+        for lightIdx in range(0, 8):  # max lights allowed are 8
+            # generate a hashable key for the shader cache
+            shaderKey = (self._shaderConfig, lightIdx)
+
+            # check if a shader of this configuration has been cached already
+            if _SHADER_CACHE_.get(shaderKey, False):
+                continue
+
+            # the shader is not in cache, build it ...
+            shaderProg = gt.createProgram()
+
+            # no lights, unlit condition just shows base color only
+            if lightIdx == 0:
+                fragShaderSrc = gt.embedShaderSourceDefs(
+                    GLSL_KHRONOS_PBR_FRAG, {'MATERIAL_UNLIT': 1})
+                fragShaderSrc = gt.embedShaderSourceDefs(fragShaderSrc, shaderDefs)
+            else:
+                shaderDefs[SHADER_DEFS[SHADER_USE_PUNCTUAL]] = 1
+                fragShaderSrc = gt.embedShaderSourceDefs(
+                    GLSL_KHRONOS_PBR_FRAG, {'LIGHT_COUNT': lightIdx})
+
+            vertShaderSrc = gt.embedShaderSourceDefs(
+                GLSL_KHRONOS_PBR_VERT, shaderDefs)
+            fragShaderSrc = gt.embedShaderSourceDefs(fragShaderSrc, shaderDefs)
+
+            # compile them
+            vertShader = gt.compileShader(vertShaderSrc, GL.GL_VERTEX_SHADER)
+            fragShader = gt.compileShader(fragShaderSrc, GL.GL_FRAGMENT_SHADER)
+
+            # attach shaders to program
+            gt.attachShader(shaderProg, vertShader)
+            gt.attachShader(shaderProg, fragShader)
+
+            # link the shader
+            gt.linkProgram(shaderProg)
+
+            # optional, validate the program
+            #gt.validateProgram(shaderProg)
+
+            # optional, detach and discard shader objects
+            gt.detachShader(shaderProg, vertShader)
+            gt.detachShader(shaderProg, fragShader)
+            gt.deleteObject(vertShader)
+            gt.deleteObject(fragShader)
+
+            # get and cache uniform locations within the shader
+            unifLoc = gt.getUniformLocations(shaderProg)
+
+            # add to shader cache
+            _SHADER_CACHE_[shaderKey] = (shaderProg, unifLoc)
+
+    def begin(self, modelMatrix):
         """Use this material for successive rendering calls.
+
+        The material shader is installed and configured upon calling this
+        function. Successive primitive drawing operations will be affected by
+        the shader. If the material has textures, they will be bound to
+        sequential texture units.
+
+        You must call the `end()` method after the material is no longer
+        needed.
 
         Parameters
         ----------
-        useTextures : bool
-            Enable textures.
+        modelMatrix : array_like
+            4x4 model matrix associated with the mesh. This is required to
+            transform the model within the shader.
 
         """
-        gt.useProgram(self._shaderProg)
-        GL.glUniform1f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_MetallicFactor'), 0.1)
-        GL.glUniform1f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_RoughnessFactor'), 0.4)
-        GL.glUniform4f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_BaseColorFactor'), 1.0, 1.0, 1.0, 1.0)
-        GL.glUniform1i(
-            GL.glGetUniformLocation(self._shaderProg, b'u_MipCount'), 1)
+        # create pointers to model and normal matrix
+        modelMatrix = np.asarray(modelMatrix, dtype=np.float32)
+        normalMatrix = at.array2pointer(
+            np.transpose(np.linalg.inv(modelMatrix)))
+        modelMatrix = at.array2pointer(modelMatrix)
+        viewProjectionMatrix = at.array2pointer(self.win._viewProjectionMatrix)
 
-        GL.glUniform1f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_GlossinessFactor'), 0.9)
-        GL.glUniform3f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_SpecularFactor'), 0.5, 0.5, 1.0)
-        GL.glUniform4f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_DiffuseFactor'), 1.0, 0.6, 0.5, 1.0)
+        # get the key to access the shader in cache
+        hasLights = len(self.win.lights) > 0
+        shaderProg, unifLoc = _SHADER_CACHE_[
+            (self._shaderConfig, len(self.win.lights))]
 
-        GL.glUniform3f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_Lights[0].direction'), 1., -1., -1.)
-        GL.glUniform1i(
-            GL.glGetUniformLocation(self._shaderProg, b'u_Lights[0].type'), 1)
-        GL.glUniform1f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_Lights[0].intensity'), 20.)
-        GL.glUniform3f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_Lights[0].position'), 1., 3., 3.)
-        GL.glUniform1f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_Lights[0].range'), 100.0)
-        GL.glUniform3f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_Lights[0].color'), 1., 1., 1.)
+        # configure shader uniforms
+        gt.useProgram(shaderProg)
 
-        GL.glUniform3f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_Camera'), 0., 0., 0.5)
-        GL.glUniform1f(
-            GL.glGetUniformLocation(self._shaderProg, b'u_Exposure'), 1.0)
+        GL.glUniform4fv(unifLoc[b'u_BaseColorFactor'], 1, self._ptrColor)
+        GL.glUniformMatrix4fv(unifLoc[b'u_ViewProjectionMatrix'],
+                              1, GL.GL_TRUE, viewProjectionMatrix)
+        GL.glUniformMatrix4fv(unifLoc[b'u_ModelMatrix'], 1, GL.GL_TRUE, modelMatrix)
 
-        GL.glUniformMatrix4fv(
-            GL.glGetUniformLocation(self._shaderProg, b'u_ViewProjectionMatrix'), 1, GL.GL_TRUE, at.array2pointer(
-                mt.concatenate([self.win.viewMatrix, self.win.projectionMatrix], dtype=np.float32)))
-        GL.glUniformMatrix4fv(
-            GL.glGetUniformLocation(self._shaderProg, b'u_ModelMatrix'), 1, GL.GL_TRUE, at.array2pointer(
-                modelMatrix))
+        if hasLights:
+            GL.glUniform1f(unifLoc[b'u_MetallicFactor'], self._metallicFactor)
+            GL.glUniform1f(unifLoc[b'u_RoughnessFactor'], self._roughnessFactor)
 
-        GL.glUniformMatrix4fv(
-            GL.glGetUniformLocation(self._shaderProg, b'u_NormalMatrix'), 1, GL.GL_TRUE, at.array2pointer(
-                np.identity(4, dtype=np.float32)))
+            # iterate over all scene lights
+            for idx, light in enumerate(self.win.lights):
+                lb = str(idx).encode()
+
+                GL.glUniform1i(
+                    unifLoc[b'u_Lights[' + lb + b'].type'], light._lightType)
+                GL.glUniform1f(
+                    unifLoc[b'u_Lights[' + lb + b'].intensity'], light._intensity)
+                GL.glUniform3f(
+                    unifLoc[b'u_Lights[' + lb + b'].position'], *light._pos)
+                GL.glUniform1f(
+                    unifLoc[b'u_Lights[' + lb + b'].range'], light._maxDist)
+                GL.glUniform3f(
+                    unifLoc[b'u_Lights[' + lb + b'].color'], *light.colorRGB)
+
+                if light._lightType == 0:  # directional only
+                    GL.glUniform3f(unifLoc[b'u_Lights[' + lb + b'].direction'],
+                                   *light._dir)
+
+                elif light._lightType == 2:  # spotlight only
+                    GL.glUniform3f(unifLoc[b'u_Lights[' + lb + b'].direction'],
+                                   *light._dir)
+                    GL.glUniform1f(unifLoc[b'u_Lights[' + lb + b'].innerConeCos'],
+                                   light._innerConeCos)
+                    GL.glUniform1f(unifLoc[b'u_Lights[' + lb + b'].outerConeCos'],
+                                   light._outerConeCos)
+
+            # camera and eye parameters
+            GL.glUniform3f(unifLoc[b'u_Camera'], *self.win._eyePos)
+            GL.glUniform1f(unifLoc[b'u_Exposure'], self.win._exposure)
+
+            GL.glUniformMatrix4fv(unifLoc[b'u_NormalMatrix'], 1, GL.GL_TRUE, normalMatrix)
+
+        # setup textures
+        sampler = 0
+        #GL.glEnable(GL.GL_BLEND)
+        GL.glEnable(GL.GL_TEXTURE_2D)
+        if self._normalTexture is not None and self._useTangents:
+            gt.bindTexture(self._normalTexture, sampler, enable=False)
+            GL.glUniform1i(unifLoc[b'u_NormalUVSet'], 0)
+            GL.glUniform1f(unifLoc[b'u_NormalScale'], 1.0)
+            sampler += 1
+
+        if self._colorTexture is not None:
+            gt.bindTexture(self._colorTexture, sampler, enable=False)
+            GL.glUniform1i(unifLoc[b'u_BaseColorUVSet'], 0)
+            sampler += 1
 
     def end(self):
         gt.useProgram(0)
+        if self._normalTexture is not None and self._useTangents:
+            gt.unbindTexture(self._normalTexture)
+
+        if self._colorTexture is not None:
+            gt.unbindTexture(self._colorTexture)
+        GL.glDisable(GL.GL_TEXTURE_2D)
 
 
 class RigidBodyPose(object):
@@ -2540,13 +2791,37 @@ class GLTFMeshStim(BaseRigidBodyStim):
         # textures used by the materials in the node
         nodeTextures = {}
         for idx, mat in nodeMaterials.items():
-            texId = mat.pbrMetallicRoughness.baseColorTexture
-            if texId is not None:
+            colorTexId = mat.pbrMetallicRoughness.baseColorTexture
+            if colorTexId is not None:
                 textureFile = os.path.join(
                     os.path.split(gltfFile)[0],
-                    gltf.images[texId.index].uri)
+                    gltf.images[colorTexId.index].uri)
                 # don't transpose since texture coords in glTF differ from *.OBJ
-                nodeTextures[idx] = gt.createTexImage2dFromFile(
+                nodeTextures[colorTexId.index] = gt.createTexImage2dFromFile(
+                    textureFile, transpose=False)
+
+            mrTexId = mat.pbrMetallicRoughness.metallicRoughnessTexture
+            if mrTexId is not None:
+                textureFile = os.path.join(
+                    os.path.split(gltfFile)[0],
+                    gltf.images[mrTexId.index].uri)
+                nodeTextures[mrTexId.index] = gt.createTexImage2dFromFile(
+                    textureFile, transpose=False)
+
+            normalTexId = mat.normalTexture
+            if normalTexId is not None:
+                textureFile = os.path.join(
+                    os.path.split(gltfFile)[0],
+                    gltf.images[normalTexId.index].uri)
+                nodeTextures[normalTexId.index] = gt.createTexImage2dFromFile(
+                    textureFile, transpose=False)
+
+            occulusionTexId = mat.occlusionTexture
+            if occulusionTexId is not None:
+                textureFile = os.path.join(
+                    os.path.split(gltfFile)[0],
+                    gltf.images[occulusionTexId.index].uri)
+                nodeTextures[occulusionTexId.index] = gt.createTexImage2dFromFile(
                     textureFile, transpose=False)
 
         # go over all materials and load the data into VBOs and create a
@@ -2564,6 +2839,7 @@ class GLTFMeshStim(BaseRigidBodyStim):
             posBufferData = b''
             normBufferData = b''
             texCoord0BufferData = b''
+            tangBufferData = b''
             indexBufferData = b''
 
             if prim.attributes.POSITION is not None:
@@ -2601,6 +2877,17 @@ class GLTFMeshStim(BaseRigidBodyStim):
 
                 normBufferData += buffers[bv.buffer][start:end]
 
+            if prim.attributes.NORMAL is not None:
+                acc = gltf.accessors[prim.attributes.TANGENT]
+                bv = gltf.bufferViews[acc.bufferView]
+                accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                accEnd = acc.count * 4 * 3  # VEC3 FLOAT32
+                bvOffset = bv.byteOffset
+                start = bvOffset + accOffset
+                end = start + accEnd
+
+                tangBufferData += buffers[bv.buffer][start:end]
+
             if prim.indices is not None:
                 acc = gltf.accessors[prim.indices]
                 bv = gltf.bufferViews[acc.bufferView]
@@ -2624,21 +2911,43 @@ class GLTFMeshStim(BaseRigidBodyStim):
             posArr2[:, :3] = posArr
             attribVBOs[0] = gt.createVBO(posArr2)
 
-            if len(normBufferData) > 0:
+            hasNormals = len(normBufferData) > 0
+            hasTangents = len(tangBufferData) > 0
+            hasTexCoord0 = len(texCoord0BufferData) > 0
+
+            attribIdx = 1  # additional attributes must be incremented
+
+            if hasNormals:
                 normArr = np.frombuffer(normBufferData, dtype=np.float32)
                 normArr = np.reshape(normArr, (-1, 3))
                 normArr2 = np.ones((normArr.shape[0], 4), dtype=np.float32)
                 normArr2[:, :3] = normArr
-                attribVBOs[1] = gt.createVBO(normArr2)
+                attribVBOs[attribIdx] = gt.createVBO(normArr2)
+                attribIdx += 1
             else:
                 normArr = np.zeros_like(posArr, np.float32)
                 normArr[:, 2] = -1
-                attribVBOs[1] = gt.createVBO(normArr)
+                attribVBOs[attribIdx] = gt.createVBO(normArr)
+                attribIdx += 1
 
-            if len(texCoord0BufferData) > 0:
+            if hasTangents:
+                tangArr = np.frombuffer(tangBufferData, dtype=np.float32)
+                tangArr = np.reshape(tangArr, (-1, 3))
+                tangArr2 = np.ones((tangArr.shape[0], 4), dtype=np.float32)
+                tangArr2[:, :3] = tangArr
+                attribVBOs[attribIdx] = gt.createVBO(tangArr2)
+                attribIdx += 1
+            else:
+                tangArr = np.zeros_like(posArr, np.float32)
+                tangArr[:, 0] = -1
+                attribVBOs[attribIdx] = gt.createVBO(tangArr)
+                attribIdx += 1
+
+            if hasTexCoord0:
                 tex0Arr = np.frombuffer(texCoord0BufferData, dtype=np.float32)
                 tex0Arr = np.reshape(tex0Arr, (-1, 2))
-                attribVBOs[2] = gt.createVBO(tex0Arr)
+                attribVBOs[attribIdx] = gt.createVBO(tex0Arr)
+                attribIdx += 1
 
             if len(indexBufferData) > 0:
                 indexArr = np.frombuffer(indexBufferData, dtype=np.uint16)
@@ -2656,12 +2965,18 @@ class GLTFMeshStim(BaseRigidBodyStim):
         foundMaterials = {}
         for mat in gltf.materials:
             pbr = mat.pbrMetallicRoughness
+
+            normalTexture = nodeTextures[mat.normalTexture.index] if mat.normalTexture is not None else None
             newMaterial = MetallicRoughnessMaterial(
                 self.win,
                 roughnessFactor=pbr.roughnessFactor,
                 metallicFactor=pbr.metallicFactor,
-                diffuseColor=(1, 1, 1),
-                specularColor=(1, 1, 1)
+                color=(1, 1, 1),
+                useNormals=True,
+                useTexCoord0=True,
+                useTangents=True,
+                colorTexture=nodeTextures[mat.pbrMetallicRoughness.baseColorTexture.index],
+                normalTexture=normalTexture
             )
 
             # if pbr.baseColorFactor:
@@ -2714,12 +3029,12 @@ class GLTFMeshStim(BaseRigidBodyStim):
             # if material is a dictionary
             if isinstance(self.material, dict):
                 for materialName, materialDesc in self.material.items():
-                    materialDesc.begin(self.thePose.modelMatrix, useShaders=self._useShaders)
+                    materialDesc.begin(self.thePose.modelMatrix)
                     gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
                     materialDesc.end()
             else:
                 # material is a single item
-                self.material.begin(self.thePose.modelMatrix, useShaders=self._useShaders)
+                self.material.begin(self.thePose.modelMatrix)
                 for materialName, _ in self._vao.items():
                     gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
                 self.material.end()
