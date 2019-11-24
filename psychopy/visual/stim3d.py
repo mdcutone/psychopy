@@ -847,10 +847,10 @@ class MetallicRoughnessMaterial(object):
         self._metallicFactor = float(metallicFactor)
 
          # textures
-        self._metallicRoughnessTexture = None
+        self._metallicRoughnessTexture = metallicRoughnessTexture
         self._normalTexture = normalTexture
         self._occlusionTexture = None
-        self._emissiveTexture = None
+        self._emissiveTexture = emissiveTexture
 
         # indirect lighting cubemap
         self._IBLMap = None
@@ -867,10 +867,29 @@ class MetallicRoughnessMaterial(object):
         self._shaderConfig = 0x00000
         self._cacheShader()
 
-        # Get uniform locations for the shader, reducing overhead looking
-        # these values up when setting uniforms. These need to be updated if the
-        # number of lights changes from the last time the material was used.
-        self._unifLoc = {}
+        self._shaderLightUnifs = {}
+        # cache uniform locations for punctual lights
+        for i in range(8):
+            structField = b'u_Lights[' + str(i).encode() + b'].'
+            self._shaderLightUnifs[i] = (
+                structField + b'direction',
+                structField + b'range',
+                structField + b'color',
+                structField + b'intensity',
+                structField + b'position',
+                structField + b'innerConeCos',
+                structField + b'outerConeCos',
+                structField + b'type')
+
+        # number of active samplers
+        self._nActiveSamplers = 0
+
+        # keep track of the presently active shader
+        self._activeShader = None
+        self._activeUnifLoc = None
+
+        # use lights
+        self._useLights = False
 
     @property
     def color(self):
@@ -952,9 +971,17 @@ class MetallicRoughnessMaterial(object):
             self._shaderConfig |= SHADER_HAS_UV_SET1
             shaderDefs[SHADER_DEFS[SHADER_HAS_UV_SET1]] = 1
 
+        if self._metallicRoughnessTexture is not None:
+            self._shaderConfig |= SHADER_HAS_METALLIC_ROUGHNESS_MAP
+            shaderDefs[SHADER_DEFS[SHADER_HAS_METALLIC_ROUGHNESS_MAP]] = 1
+
         if self._colorTexture is not None:
             self._shaderConfig |= SHADER_HAS_BASE_COLOR_MAP
             shaderDefs[SHADER_DEFS[SHADER_HAS_BASE_COLOR_MAP]] = 1
+
+        if self._emissiveTexture is not None:
+            self._shaderConfig |= SHADER_HAS_EMISSIVE_MAP
+            shaderDefs[SHADER_DEFS[SHADER_HAS_EMISSIVE_MAP]] = 1
 
         if self._useHDR:
             self._shaderConfig |= SHADER_USE_HDR
@@ -1054,78 +1081,204 @@ class MetallicRoughnessMaterial(object):
         viewProjectionMatrix = at.array2pointer(self.win._viewProjectionMatrix)
 
         # get the key to access the shader in cache
-        hasLights = len(self.win.lights) > 0
-        shaderProg, unifLoc = _SHADER_CACHE_[
-            (self._shaderConfig, len(self.win.lights))]
+        self._useLights = len(self.win.lights) > 0
 
-        # configure shader uniforms
-        gt.useProgram(shaderProg)
+        # generate the key to access the shader in cache
+        shaderKey = (self._shaderConfig, len(self.win.lights))
 
-        GL.glUniform4fv(unifLoc[b'u_BaseColorFactor'], 1, self._ptrColor)
-        GL.glUniformMatrix4fv(unifLoc[b'u_ViewProjectionMatrix'],
-                              1, GL.GL_TRUE, viewProjectionMatrix)
-        GL.glUniformMatrix4fv(unifLoc[b'u_ModelMatrix'], 1, GL.GL_TRUE, modelMatrix)
+        # set the active shader and uniform locations
+        self._activeShader, self._unifLoc = _SHADER_CACHE_[shaderKey]
 
-        if hasLights:
-            GL.glUniform1f(unifLoc[b'u_MetallicFactor'], self._metallicFactor)
-            GL.glUniform1f(unifLoc[b'u_RoughnessFactor'], self._roughnessFactor)
+        # install the shader program
+        gt.useProgram(self._activeShader)
 
+        # set matrices, if unlit the normal matrix does not need to be set
+        GL.glUniformMatrix4fv(
+            self._unifLoc[b'u_ViewProjectionMatrix'], 1, GL.GL_TRUE,
+            viewProjectionMatrix)
+        GL.glUniformMatrix4fv(
+            self._unifLoc[b'u_ModelMatrix'], 1, GL.GL_TRUE, modelMatrix)
+
+        if self._useLights:
             # iterate over all scene lights
             for idx, light in enumerate(self.win.lights):
-                lb = str(idx).encode()
+                self._setupLight(idx, light)
 
-                GL.glUniform1i(
-                    unifLoc[b'u_Lights[' + lb + b'].type'], light._lightType)
-                GL.glUniform1f(
-                    unifLoc[b'u_Lights[' + lb + b'].intensity'], light._intensity)
-                GL.glUniform3f(
-                    unifLoc[b'u_Lights[' + lb + b'].position'], *light._pos)
-                GL.glUniform1f(
-                    unifLoc[b'u_Lights[' + lb + b'].range'], light._maxDist)
-                GL.glUniform3f(
-                    unifLoc[b'u_Lights[' + lb + b'].color'], *light.colorRGB)
+            GL.glUniformMatrix4fv(self._unifLoc[b'u_NormalMatrix'],
+                                  1, GL.GL_TRUE, normalMatrix)
 
-                if light._lightType == 0:  # directional only
-                    GL.glUniform3f(unifLoc[b'u_Lights[' + lb + b'].direction'],
-                                   *light._dir)
+        self._setupCamera()
+        self._setupNormalSampler()
+        self._setupEmissiveSampler()
+        self._setupBaseColorSampler()  # always enabled
+        self._setupMetallicRoughnessSampler()
 
-                elif light._lightType == 2:  # spotlight only
-                    GL.glUniform3f(unifLoc[b'u_Lights[' + lb + b'].direction'],
-                                   *light._dir)
-                    GL.glUniform1f(unifLoc[b'u_Lights[' + lb + b'].innerConeCos'],
-                                   light._innerConeCos)
-                    GL.glUniform1f(unifLoc[b'u_Lights[' + lb + b'].outerConeCos'],
-                                   light._outerConeCos)
-
-            # camera and eye parameters
-            GL.glUniform3f(unifLoc[b'u_Camera'], *self.win._eyePos)
-            GL.glUniform1f(unifLoc[b'u_Exposure'], self.win._exposure)
-
-            GL.glUniformMatrix4fv(unifLoc[b'u_NormalMatrix'], 1, GL.GL_TRUE, normalMatrix)
-
-        # setup textures
-        sampler = 0
-        #GL.glEnable(GL.GL_BLEND)
-        GL.glEnable(GL.GL_TEXTURE_2D)
-        if self._normalTexture is not None and self._useTangents:
-            gt.bindTexture(self._normalTexture, sampler, enable=False)
-            GL.glUniform1i(unifLoc[b'u_NormalUVSet'], 0)
-            GL.glUniform1f(unifLoc[b'u_NormalScale'], 1.0)
-            sampler += 1
-
-        if self._colorTexture is not None:
-            gt.bindTexture(self._colorTexture, sampler, enable=False)
-            GL.glUniform1i(unifLoc[b'u_BaseColorUVSet'], 0)
-            sampler += 1
+        if self._nActiveSamplers > 0:
+            GL.glEnable(GL.GL_TEXTURE_2D)
 
     def end(self):
-        gt.useProgram(0)
-        if self._normalTexture is not None and self._useTangents:
-            gt.unbindTexture(self._normalTexture)
+        """Stop using the material.
 
-        if self._colorTexture is not None:
-            gt.unbindTexture(self._colorTexture)
-        GL.glDisable(GL.GL_TEXTURE_2D)
+        Disables using the material for successive primitive draw
+        operations. Any textures which were bound when `begin` was called will
+        be disabled.
+
+        """
+        # uninstall the shader program
+        gt.useProgram(0)
+
+        # if there are any textures in use, disable them all
+        if self._nActiveSamplers > 0:
+            for i in range(self._nActiveSamplers):
+                GL.glActiveTexture(GL.GL_TEXTURE0 + i)
+                GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+
+            GL.glDisable(GL.GL_TEXTURE_2D)
+
+            self._nActiveSamplers = 0
+
+        self._activeShader = self._unifLoc = None
+
+    def _setupLight(self, index, light):
+        """Setup a light in the shader.
+
+        Pass lighting data to the fragment shader for use. This should only be
+        called if the scene specifies at least one light, if the shader has
+        `PUNCTUAL_LIGHTS` and `NUM_LIGHTS` defined, and `MATERIAL_UNLIT` is not
+        defined.
+
+        """
+        uDir, uRange, uColor, uInt, uPos, uInner, uOuter, uType = \
+            self._shaderLightUnifs[index]
+
+        GL.glUniform1i(self._unifLoc[uType], light._lightType)
+        GL.glUniform1f(self._unifLoc[uInt], light._intensity)
+        GL.glUniform1f(self._unifLoc[uRange], light._maxDist)
+        GL.glUniform3f(self._unifLoc[uPos], *light._pos)
+        GL.glUniform3f(self._unifLoc[uColor], 1.0, 1.0, 1.0)
+
+        if light._lightType != 1:  # directional types only
+            GL.glUniform3f(self._unifLoc[uDir], *light._dir)
+
+            if light._lightType == 2:  # spotlights
+                GL.glUniform1f(self._unifLoc[uInner], light._innerConeCos)
+                GL.glUniform1f(self._unifLoc[uOuter], light._outerConeCos)
+
+    def _setupNormalSampler(self, uvSet=0):
+        """Setup the shader to render surface normals.
+
+        This should only be called if the scene specifies at least one light,
+        and if the shader has `PUNCTUAL_LIGHTS` and `NUM_LIGHTS` defined. If
+        not, normals will have no effect on material appearance.
+
+        The number of active samplers `_nActiveSamplers` is incremented upon
+        calling this function.
+
+        Parameters
+        ----------
+        uvSet : int
+            UV set or texture coordinates to use for the normal map.
+
+        """
+        if not self._useLights:
+            return
+
+        if self._normalTexture is None or self._useTangents is False:
+            return
+
+        sampler = self._nActiveSamplers
+        GL.glActiveTexture(GL.GL_TEXTURE0 + sampler)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._normalTexture.name)
+        GL.glUniform1i(self._unifLoc[b'u_NormalSampler'], sampler)
+        GL.glUniform1i(self._unifLoc[b'u_NormalUVSet'], uvSet)
+        GL.glUniform1f(self._unifLoc[b'u_NormalScale'], 1.0)
+        self._nActiveSamplers += 1
+
+    def _setupEmissiveSampler(self, uvSet=0):
+        """Setup the shader to render an emissive map.
+
+        This should only be called if the scene specifies at least one light,
+        and if the shader has `PUNCTUAL_LIGHTS` and `NUM_LIGHTS` defined.
+
+        The number of active samplers `_nActiveSamplers` is incremented upon
+        calling this function.
+
+        Parameters
+        ----------
+        uvSet : int
+            UV set or texture coordinates to use for the emissive map.
+
+        """
+        if not self._useLights:
+            return
+
+        GL.glUniform3f(self._unifLoc[b'u_EmissiveFactor'], 1.0, 1.0, 1.0)
+
+        if self._emissiveTexture is None:
+            return  # nop if model has no normal texture of tangents
+
+        sampler = self._nActiveSamplers
+        GL.glActiveTexture(GL.GL_TEXTURE0 + sampler)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._emissiveTexture.name)
+        GL.glUniform1i(self._unifLoc[b'u_EmissiveSampler'], sampler)
+        GL.glUniform1i(self._unifLoc[b'u_EmissiveUVSet'], uvSet)
+        self._nActiveSamplers += 1
+
+    def _setupBaseColorSampler(self, uvSet=0):
+        """Setup the shader to render an base color/albiedo map.
+
+        The number of active samplers `_nActiveSamplers` is incremented upon
+        calling this function.
+
+        Parameters
+        ----------
+        uvSet : int
+            UV set or texture coordinates to use for the base color map.
+
+        """
+        GL.glUniform4f(self._unifLoc[b'u_BaseColorFactor'], 1.0, 1.0, 1.0, 1.0)
+
+        if self._colorTexture is None:
+            return  # nop if model has no normal texture of tangents
+
+        sampler = self._nActiveSamplers
+        GL.glActiveTexture(GL.GL_TEXTURE0 + sampler)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._colorTexture.name)
+        GL.glUniform1i(self._unifLoc[b'u_BaseColorSampler'], sampler)
+        GL.glUniform1i(self._unifLoc[b'u_BaseColorUVSet'], uvSet)
+        self._nActiveSamplers += 1
+
+    def _setupMetallicRoughnessSampler(self, uvSet=0):
+        if not self._useLights:
+            return
+
+        GL.glUniform1f(self._unifLoc[b'u_MetallicFactor'], 1.0)
+        GL.glUniform1f(self._unifLoc[b'u_RoughnessFactor'], 1.0)
+
+        if self._metallicRoughnessTexture is None:
+            return
+
+        sampler = self._nActiveSamplers
+        GL.glActiveTexture(GL.GL_TEXTURE0 + sampler)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._metallicRoughnessTexture.name)
+        GL.glUniform1i(self._unifLoc[b'u_MetallicRoughnessSampler'], sampler)
+        GL.glUniform1i(self._unifLoc[b'u_MetallicRoughnessUVSet'], uvSet)
+
+        self._nActiveSamplers += 1
+
+    def _setupCamera(self):
+        """Setup camera.
+
+        Passes camera parameters to the shader program such as exposure and
+        position. These values are gathered from the window object associated
+        with the material.
+
+        """
+        if not self._useLights:
+            return
+
+        GL.glUniform3f(self._unifLoc[b'u_Camera'], *self.win._eyePos)
+        GL.glUniform1f(self._unifLoc[b'u_Exposure'], self.win._exposure)
 
 
 class RigidBodyPose(object):
@@ -2816,6 +2969,14 @@ class GLTFMeshStim(BaseRigidBodyStim):
                 nodeTextures[normalTexId.index] = gt.createTexImage2dFromFile(
                     textureFile, transpose=False)
 
+            emissiveTexId = mat.emissiveTexture
+            if normalTexId is not None:
+                textureFile = os.path.join(
+                    os.path.split(gltfFile)[0],
+                    gltf.images[emissiveTexId.index].uri)
+                nodeTextures[emissiveTexId.index] = gt.createTexImage2dFromFile(
+                    textureFile, transpose=False)
+
             occulusionTexId = mat.occlusionTexture
             if occulusionTexId is not None:
                 textureFile = os.path.join(
@@ -2849,8 +3010,8 @@ class GLTFMeshStim(BaseRigidBodyStim):
 
                 # compute buffer access offests and ranges
                 accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
                 accEnd = acc.count * 4 * 3  # VEC3 FLOAT32
-                bvOffset = bv.byteOffset
                 start = bvOffset + accOffset
                 end = start + accEnd
                 posBufferData += buffers[bv.buffer][start:end]
@@ -2859,8 +3020,8 @@ class GLTFMeshStim(BaseRigidBodyStim):
                 acc = gltf.accessors[prim.attributes.TEXCOORD_0]
                 bv = gltf.bufferViews[acc.bufferView]
                 accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
                 accEnd = acc.count * 4 * 2  # VEC2 FLOAT32
-                bvOffset = bv.byteOffset
                 start = bvOffset + accOffset
                 end = start + accEnd
 
@@ -2870,19 +3031,19 @@ class GLTFMeshStim(BaseRigidBodyStim):
                 acc = gltf.accessors[prim.attributes.NORMAL]
                 bv = gltf.bufferViews[acc.bufferView]
                 accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
                 accEnd = acc.count * 4 * 3  # VEC3 FLOAT32
-                bvOffset = bv.byteOffset
                 start = bvOffset + accOffset
                 end = start + accEnd
 
                 normBufferData += buffers[bv.buffer][start:end]
 
-            if prim.attributes.NORMAL is not None:
+            if prim.attributes.TANGENT is not None:
                 acc = gltf.accessors[prim.attributes.TANGENT]
                 bv = gltf.bufferViews[acc.bufferView]
                 accOffset = 0 if acc.byteOffset is None else acc.byteOffset
-                accEnd = acc.count * 4 * 3  # VEC3 FLOAT32
-                bvOffset = bv.byteOffset
+                bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
+                accEnd = acc.count * 4 * 4  # VEC4 FLOAT32
                 start = bvOffset + accOffset
                 end = start + accEnd
 
@@ -2892,8 +3053,8 @@ class GLTFMeshStim(BaseRigidBodyStim):
                 acc = gltf.accessors[prim.indices]
                 bv = gltf.bufferViews[acc.bufferView]
                 accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
                 accEnd = acc.count * 2  # SCALAR UINT16
-                bvOffset = bv.byteOffset
                 start = bvOffset + accOffset
                 end = start + accEnd
 
@@ -2932,14 +3093,12 @@ class GLTFMeshStim(BaseRigidBodyStim):
 
             if hasTangents:
                 tangArr = np.frombuffer(tangBufferData, dtype=np.float32)
-                tangArr = np.reshape(tangArr, (-1, 3))
-                tangArr2 = np.ones((tangArr.shape[0], 4), dtype=np.float32)
-                tangArr2[:, :3] = tangArr
-                attribVBOs[attribIdx] = gt.createVBO(tangArr2)
+                tangArr = np.reshape(tangArr, (-1, 4))
+                attribVBOs[attribIdx] = gt.createVBO(tangArr)
                 attribIdx += 1
             else:
-                tangArr = np.zeros_like(posArr, np.float32)
-                tangArr[:, 0] = -1
+                tangArr = np.zeros_like(posArr2, np.float32)
+                tangArr[:, 3] = 1.0
                 attribVBOs[attribIdx] = gt.createVBO(tangArr)
                 attribIdx += 1
 
@@ -2965,18 +3124,23 @@ class GLTFMeshStim(BaseRigidBodyStim):
         foundMaterials = {}
         for mat in gltf.materials:
             pbr = mat.pbrMetallicRoughness
-
+            colorTexture = nodeTextures[mat.pbrMetallicRoughness.baseColorTexture.index] if mat.pbrMetallicRoughness.baseColorTexture is not None else None
             normalTexture = nodeTextures[mat.normalTexture.index] if mat.normalTexture is not None else None
+            rmTexture = nodeTextures[mat.pbrMetallicRoughness.metallicRoughnessTexture.index] if mat.pbrMetallicRoughness.metallicRoughnessTexture is not None else None
+            emTexture = nodeTextures[mat.emissiveTexture.index] if mat.emissiveTexture is not None else None
+
             newMaterial = MetallicRoughnessMaterial(
                 self.win,
-                roughnessFactor=pbr.roughnessFactor,
-                metallicFactor=pbr.metallicFactor,
+                roughnessFactor=pbr.roughnessFactor if pbr.roughnessFactor is not None else 0.001,
+                metallicFactor=pbr.metallicFactor if pbr.metallicFactor is not None else 0.001,
+                metallicRoughnessTexture=rmTexture,
                 color=(1, 1, 1),
                 useNormals=True,
                 useTexCoord0=True,
                 useTangents=True,
-                colorTexture=nodeTextures[mat.pbrMetallicRoughness.baseColorTexture.index],
-                normalTexture=normalTexture
+                colorTexture=colorTexture,
+                normalTexture=normalTexture,
+                emissiveTexture=emTexture
             )
 
             # if pbr.baseColorFactor:
