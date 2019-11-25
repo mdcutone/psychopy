@@ -1149,7 +1149,7 @@ class MetallicRoughnessMaterial(object):
         self._setupNormalSampler()
         self._setupEmissiveSampler()
         self._setupOcculusionSampler()
-        self._setupBaseColorSampler()  # always enabled
+        self._setupBaseColorSampler()
         self._setupMetallicRoughnessSampler()
 
         if self._nActiveSamplers > 0:
@@ -1251,14 +1251,13 @@ class MetallicRoughnessMaterial(object):
         if not self._useLights:
             return
 
-        GL.glUniform3f(self._unifLoc[b'u_EmissiveFactor'], 1.0, 1.0, 1.0)
-
         if self._emissiveTexture is None:
             return  # nop if model has no normal texture of tangents
 
         sampler = self._nActiveSamplers
         GL.glActiveTexture(GL.GL_TEXTURE0 + sampler)
         GL.glBindTexture(GL.GL_TEXTURE_2D, self._emissiveTexture.name)
+        GL.glUniform3f(self._unifLoc[b'u_EmissiveFactor'], 1.0, 1.0, 1.0)
         GL.glUniform1i(self._unifLoc[b'u_EmissiveSampler'], sampler)
         GL.glUniform1i(self._unifLoc[b'u_EmissiveUVSet'], uvSet)
         self._nActiveSamplers += 1
@@ -3061,7 +3060,7 @@ class GLTFMeshStim(BaseRigidBodyStim):
                     textureFile, transpose=False)
 
             emissiveTexId = mat.emissiveTexture
-            if normalTexId is not None:
+            if emissiveTexId is not None:
                 textureFile = os.path.join(
                     os.path.split(gltfFile)[0],
                     gltf.images[emissiveTexId.index].uri)
@@ -3089,20 +3088,24 @@ class GLTFMeshStim(BaseRigidBodyStim):
 
             # buffers for vertex attribute data to be uploaded to GPU
             attribBuffers = {
-                pygltflib.POSITION: b'',
-                pygltflib.TEXCOORD_0: b'',
-                pygltflib.TEXCOORD_1: b'',
-                pygltflib.NORMAL: b'',
-                pygltflib.TANGENT: b''
+                pygltflib.POSITION: [prim.attributes.POSITION, b''],
+                pygltflib.TEXCOORD_0: [prim.attributes.TEXCOORD_0, b''],
+                pygltflib.TEXCOORD_1: [prim.attributes.TEXCOORD_1, b''],
+                pygltflib.NORMAL: [prim.attributes.NORMAL, b''],
+                pygltflib.TANGENT: [prim.attributes.TANGENT, b'']
             }
+            indexBufferData = b''
 
             for attrib, buffer in attribBuffers.items():
+                if buffer[0] is None:  # nop if there is no buffer
+                    continue
 
-                acc = gltf.accessors[attrib]
+                acc = gltf.accessors[buffer[0]]
                 bv = gltf.bufferViews[acc.bufferView]
 
                 # attribute element size
-                attribSize = _GLTF_COMPONENT_TYPE_[acc.componentType] * _GLTF_TYPE_SIZE_[acc.type]
+                attribSize = _GLTF_COMPONENT_TYPE_[acc.componentType] * \
+                             _GLTF_TYPE_SIZE_[acc.type]
 
                 # compute buffer access offests and ranges
                 accOffset = 0 if acc.byteOffset is None else acc.byteOffset
@@ -3111,72 +3114,7 @@ class GLTFMeshStim(BaseRigidBodyStim):
                 start = bvOffset + accOffset
                 end = start + accEnd
 
-                buffer += buffers[bv.buffer][start:end]
-
-            posBufferData = attribBuffers[]
-            normBufferData = b''
-            texCoord0BufferData = b''
-            texCoord1BufferData = b''
-            tangBufferData = b''
-            indexBufferData = b''
-
-            if prim.attributes.POSITION is not None:
-                # accessor an buffer view for attribute
-                acc = gltf.accessors[prim.attributes.POSITION]
-                bv = gltf.bufferViews[acc.bufferView]
-
-                # compute buffer access offests and ranges
-                accOffset = 0 if acc.byteOffset is None else acc.byteOffset
-                bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
-                accEnd = acc.count * 4 * 3  # VEC3 FLOAT32
-                start = bvOffset + accOffset
-                end = start + accEnd
-                posBufferData += buffers[bv.buffer][start:end]
-
-            if prim.attributes.TEXCOORD_0 is not None:
-                acc = gltf.accessors[prim.attributes.TEXCOORD_0]
-                bv = gltf.bufferViews[acc.bufferView]
-                accOffset = 0 if acc.byteOffset is None else acc.byteOffset
-                bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
-
-                accEnd = acc.count * 4 * 2  # VEC2 FLOAT32
-                start = bvOffset + accOffset
-                end = start + accEnd
-
-                texCoord0BufferData += buffers[bv.buffer][start:end]
-
-            if prim.attributes.TEXCOORD_1 is not None:
-                acc = gltf.accessors[prim.attributes.TEXCOORD_1]
-                bv = gltf.bufferViews[acc.bufferView]
-                accOffset = 0 if acc.byteOffset is None else acc.byteOffset
-                bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
-                accEnd = acc.count * 4 * 2  # VEC2 FLOAT32
-                start = bvOffset + accOffset
-                end = start + accEnd
-
-                texCoord1BufferData += buffers[bv.buffer][start:end]
-
-            if prim.attributes.NORMAL is not None:
-                acc = gltf.accessors[prim.attributes.NORMAL]
-                bv = gltf.bufferViews[acc.bufferView]
-                accOffset = 0 if acc.byteOffset is None else acc.byteOffset
-                bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
-                accEnd = acc.count * 4 * 3  # VEC3 FLOAT32
-                start = bvOffset + accOffset
-                end = start + accEnd
-
-                normBufferData += buffers[bv.buffer][start:end]
-
-            if prim.attributes.TANGENT is not None:
-                acc = gltf.accessors[prim.attributes.TANGENT]
-                bv = gltf.bufferViews[acc.bufferView]
-                accOffset = 0 if acc.byteOffset is None else acc.byteOffset
-                bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
-                accEnd = acc.count * 4 * 4  # VEC4 FLOAT32
-                start = bvOffset + accOffset
-                end = start + accEnd
-
-                tangBufferData += buffers[bv.buffer][start:end]
+                buffer[1] += buffers[bv.buffer][start:end]
 
             if prim.indices is not None:
                 acc = gltf.accessors[prim.indices]
@@ -3188,6 +3126,12 @@ class GLTFMeshStim(BaseRigidBodyStim):
                 end = start + accEnd
 
                 indexBufferData += buffers[bv.buffer][start:end]
+
+            posBufferData = attribBuffers[pygltflib.POSITION][1]
+            normBufferData = attribBuffers[pygltflib.TEXCOORD_0][1]
+            texCoord0BufferData = attribBuffers[pygltflib.TEXCOORD_1][1]
+            texCoord1BufferData = attribBuffers[pygltflib.NORMAL][1]
+            tangBufferData = attribBuffers[pygltflib.TANGENT][1]
 
             # no position data, can't be drawn so don't create a VAO
             if len(posBufferData) == 0:
