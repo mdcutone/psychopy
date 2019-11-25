@@ -22,12 +22,36 @@ from io import StringIO
 from PIL import Image
 
 import numpy as np
+import ctypes
 
 import pyglet.gl as GL
+
+_GLTF_COMPONENT_TYPE_ = None
+_GLTF_TYPE_SIZE_ = None
 
 try:
     import pygltflib
     _HAS_GLTF_IMPORTER_ = True
+
+    _GLTF_COMPONENT_TYPE_ = {
+        5120: ctypes.sizeof(GL.GLbyte),  # byte
+        5121: ctypes.sizeof(GL.GLubyte),  # unsigned byte
+        5122: ctypes.sizeof(GL.GLshort),  # short
+        5123: ctypes.sizeof(GL.GLushort),  # unsigned short
+        5124: ctypes.sizeof(GL.GLuint),  # unsigned int
+        5126: ctypes.sizeof(GL.GLfloat)   # float
+    }
+
+    _GLTF_TYPE_SIZE_ = {
+        pygltflib.VEC2: 2,
+        pygltflib.VEC3: 3,
+        pygltflib.VEC4: 4,
+        pygltflib.SCALAR: 1,
+        pygltflib.MAT2: 4,
+        pygltflib.MAT3: 9,
+        pygltflib.MAT4: 16
+    }
+
 except ImportError:
     _HAS_GLTF_IMPORTER_ = False
 
@@ -813,13 +837,16 @@ class MetallicRoughnessMaterial(object):
                  win=None,
                  color=(0, 0, 0),
                  colorSpace='rgb',
-                 roughnessFactor=0.0,
-                 metallicFactor=0.0,
                  colorTexture=None,
                  metallicRoughnessTexture=None,
+                 roughnessFactor=0.0,
+                 metallicFactor=0.0,
                  normalTexture=None,
+                 normalFactor=1.0,
                  occulusionTexture=None,
+                 occulusionStrength=1.0,
                  emissiveTexture=None,
+                 emissiveFactor=(1., 1., 1.),
                  alphaMode=None,
                  alphaCutoff=1.0,
                  toneMap=None,
@@ -849,8 +876,9 @@ class MetallicRoughnessMaterial(object):
          # textures
         self._metallicRoughnessTexture = metallicRoughnessTexture
         self._normalTexture = normalTexture
-        self._occlusionTexture = None
+        self._occlusionTexture = occulusionTexture
         self._emissiveTexture = emissiveTexture
+        self._emissiveFactor = emissiveFactor
 
         # indirect lighting cubemap
         self._IBLMap = None
@@ -867,8 +895,15 @@ class MetallicRoughnessMaterial(object):
         self._shaderConfig = 0x00000
         self._cacheShader()
 
+        # Keep track of the presently active shader, these are not None only
+        # between `begin` and `end calls. If these values are None, you can
+        # assume that the material is not in use.
+        self._activeShader = None
+        self._activeUnifLoc = None
+
+        # Cache uniform locations for punctual lights so we dont need to splice
+        # byte strings during the rendering loop.
         self._shaderLightUnifs = {}
-        # cache uniform locations for punctual lights
         for i in range(8):
             structField = b'u_Lights[' + str(i).encode() + b'].'
             self._shaderLightUnifs[i] = (
@@ -881,12 +916,11 @@ class MetallicRoughnessMaterial(object):
                 structField + b'outerConeCos',
                 structField + b'type')
 
-        # number of active samplers
+        # Number of active samplers, this tells us how many samplers are active
+        # after `begin` is called. When `end` is called, we loop over the number
+        # of active samplers and disable them. This number is non-zero only
+        # after begin is called and textures are assigned.
         self._nActiveSamplers = 0
-
-        # keep track of the presently active shader
-        self._activeShader = None
-        self._activeUnifLoc = None
 
         # use lights
         self._useLights = False
@@ -982,6 +1016,10 @@ class MetallicRoughnessMaterial(object):
         if self._emissiveTexture is not None:
             self._shaderConfig |= SHADER_HAS_EMISSIVE_MAP
             shaderDefs[SHADER_DEFS[SHADER_HAS_EMISSIVE_MAP]] = 1
+
+        if self._occlusionTexture is not None:
+            self._shaderConfig |= SHADER_HAS_OCCLUSION_MAP
+            shaderDefs[SHADER_DEFS[SHADER_HAS_OCCLUSION_MAP]] = 1
 
         if self._useHDR:
             self._shaderConfig |= SHADER_USE_HDR
@@ -1110,6 +1148,7 @@ class MetallicRoughnessMaterial(object):
         self._setupCamera()
         self._setupNormalSampler()
         self._setupEmissiveSampler()
+        self._setupOcculusionSampler()
         self._setupBaseColorSampler()  # always enabled
         self._setupMetallicRoughnessSampler()
 
@@ -1263,6 +1302,19 @@ class MetallicRoughnessMaterial(object):
         GL.glBindTexture(GL.GL_TEXTURE_2D, self._metallicRoughnessTexture.name)
         GL.glUniform1i(self._unifLoc[b'u_MetallicRoughnessSampler'], sampler)
         GL.glUniform1i(self._unifLoc[b'u_MetallicRoughnessUVSet'], uvSet)
+
+        self._nActiveSamplers += 1
+
+    def _setupOcculusionSampler(self, uvSet=0):
+        if not self._useLights or self._occlusionTexture is None:
+            return
+
+        sampler = self._nActiveSamplers
+        GL.glActiveTexture(GL.GL_TEXTURE0 + sampler)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self._occlusionTexture.name)
+        GL.glUniform1i(self._unifLoc[b'u_OcclusionSampler'], sampler)
+        GL.glUniform1i(self._unifLoc[b'u_OcclusionUVSet'], uvSet)
+        GL.glUniform1f(self._unifLoc[b'u_OcclusionStrength'], 1.0)
 
         self._nActiveSamplers += 1
 
@@ -2899,8 +2951,8 @@ class GLTFMeshStim(BaseRigidBodyStim):
         for idx, buffer in enumerate(gltf.buffers):
             # read the glTF buffer associated with the mesh
             bufferPath = os.path.join(os.path.split(gltfFile)[0], buffer.uri)
-            with open(bufferPath, mode='rb') as f:
-                buffers[idx] = f.read()
+            with open(bufferPath, mode='rb') as bufferFile:
+                buffers[idx] = bufferFile.read()
 
         # get the node by index or name
         if isinstance(useNode, str):
@@ -2997,9 +3049,35 @@ class GLTFMeshStim(BaseRigidBodyStim):
             prim = nodePrimitives[idx]
 
             # buffers for vertex attribute data to be uploaded to GPU
-            posBufferData = b''
+            attribBuffers = {
+                pygltflib.POSITION: b'',
+                pygltflib.TEXCOORD_0: b'',
+                pygltflib.TEXCOORD_1: b'',
+                pygltflib.NORMAL: b'',
+                pygltflib.TANGENT: b''
+            }
+
+            for attrib, buffer in attribBuffers.items():
+
+                acc = gltf.accessors[attrib]
+                bv = gltf.bufferViews[acc.bufferView]
+
+                # attribute element size
+                attribSize = _GLTF_COMPONENT_TYPE_[acc.componentType] * _GLTF_TYPE_SIZE_[acc.type]
+
+                # compute buffer access offests and ranges
+                accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
+                accEnd = acc.count * attribSize  # VEC3 FLOAT32
+                start = bvOffset + accOffset
+                end = start + accEnd
+
+                buffer += buffers[bv.buffer][start:end]
+
+            posBufferData = attribBuffers[]
             normBufferData = b''
             texCoord0BufferData = b''
+            texCoord1BufferData = b''
             tangBufferData = b''
             indexBufferData = b''
 
@@ -3021,11 +3099,23 @@ class GLTFMeshStim(BaseRigidBodyStim):
                 bv = gltf.bufferViews[acc.bufferView]
                 accOffset = 0 if acc.byteOffset is None else acc.byteOffset
                 bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
+
                 accEnd = acc.count * 4 * 2  # VEC2 FLOAT32
                 start = bvOffset + accOffset
                 end = start + accEnd
 
                 texCoord0BufferData += buffers[bv.buffer][start:end]
+
+            if prim.attributes.TEXCOORD_1 is not None:
+                acc = gltf.accessors[prim.attributes.TEXCOORD_1]
+                bv = gltf.bufferViews[acc.bufferView]
+                accOffset = 0 if acc.byteOffset is None else acc.byteOffset
+                bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
+                accEnd = acc.count * 4 * 2  # VEC2 FLOAT32
+                start = bvOffset + accOffset
+                end = start + accEnd
+
+                texCoord1BufferData += buffers[bv.buffer][start:end]
 
             if prim.attributes.NORMAL is not None:
                 acc = gltf.accessors[prim.attributes.NORMAL]
@@ -3075,6 +3165,7 @@ class GLTFMeshStim(BaseRigidBodyStim):
             hasNormals = len(normBufferData) > 0
             hasTangents = len(tangBufferData) > 0
             hasTexCoord0 = len(texCoord0BufferData) > 0
+            hasTexCoord1 = len(texCoord1BufferData) > 0
 
             attribIdx = 1  # additional attributes must be incremented
 
@@ -3108,6 +3199,12 @@ class GLTFMeshStim(BaseRigidBodyStim):
                 attribVBOs[attribIdx] = gt.createVBO(tex0Arr)
                 attribIdx += 1
 
+            if hasTexCoord1:
+                tex1Arr = np.frombuffer(texCoord1BufferData, dtype=np.float32)
+                tex1Arr = np.reshape(tex1Arr, (-1, 2))
+                attribVBOs[attribIdx] = gt.createVBO(tex1Arr)
+                attribIdx += 1
+
             if len(indexBufferData) > 0:
                 indexArr = np.frombuffer(indexBufferData, dtype=np.uint16)
                 indexVBO = gt.createVBO(indexArr,
@@ -3128,6 +3225,7 @@ class GLTFMeshStim(BaseRigidBodyStim):
             normalTexture = nodeTextures[mat.normalTexture.index] if mat.normalTexture is not None else None
             rmTexture = nodeTextures[mat.pbrMetallicRoughness.metallicRoughnessTexture.index] if mat.pbrMetallicRoughness.metallicRoughnessTexture is not None else None
             emTexture = nodeTextures[mat.emissiveTexture.index] if mat.emissiveTexture is not None else None
+            occTexture = nodeTextures[mat.occlusionTexture.index] if mat.occlusionTexture is not None else None
 
             newMaterial = MetallicRoughnessMaterial(
                 self.win,
@@ -3140,7 +3238,9 @@ class GLTFMeshStim(BaseRigidBodyStim):
                 useTangents=True,
                 colorTexture=colorTexture,
                 normalTexture=normalTexture,
-                emissiveTexture=emTexture
+                emissiveFactor=(1, 1, 1),
+                emissiveTexture=emTexture,
+                occulusionTexture=occTexture
             )
 
             # if pbr.baseColorFactor:
