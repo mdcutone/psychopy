@@ -1861,13 +1861,93 @@ class Window(object):
                 GL.glDepthMask(GL.GL_FALSE)
 
     def viewLookAt(self, eyePos, centerPos, upDir=(0., 1., 0.)):
-        """Set the current view matrix to look at a point."""
+        """Set the current view matrix to look at a point in the scene."""
         self._eyePos[:] = eyePos
         viewtools.lookAt(self._eyePos, centerPos, upDir, out=self._viewMatrix)
 
-    def setProjectionMatrixFrustum(self, left, right, top, bottom):
-        """Set the projection matrix using frustum parameters."""
-        pass
+        # update the view projection matrix, use by shaders
+        self._viewProjectionMatrix[:, :] = numpy.matmul(
+            self._projectionMatrix, self._viewMatrix)
+
+    def viewFromMonitor(self):
+        """Set the view transformation matrix based on monitor configuration.
+
+        Requires a valid monitor configuration to be associated with the
+        window. Assumes that the screen in fronto-parallel and is vertically
+        centered with the eye.
+
+        The view distance is set so the origin of the scene is at the screen
+        plane. The view direction is along the Z-axis in the negative direction,
+        perpendicular with the screen plane. If `eyeOffset` is non-zero, a
+        horizontal offset will be applied along the X-axis.
+
+        """
+        # get the view distance in meters
+        if self.scrDistCM is not None:
+            scrDistM = self.scrDistCM / 100.0
+        else:
+            scrDistM = 0.5
+
+        # set the eye position variable, used by fragment shaders
+        self._eyePos[:] = (self._eyeOffset, 0.0, scrDistM)
+
+        # create a view matrix for use when rendering
+        self._viewMatrix = numpy.identity(4, dtype=numpy.float32)
+        self._viewMatrix[:3, 3] = -self._eyePos
+
+        # update the view projection matrix, use by shaders
+        self._viewProjectionMatrix[:, :] = numpy.matmul(
+            self._projectionMatrix, self._viewMatrix)
+
+    def perspectiveFromMonitor(self, offaxis=False):
+        """Get a perspective projection from monitor settings.
+
+        Parameters
+        ----------
+        offaxis : bool
+            Use `eyeOffset` to create off-axis frustums. The view transformation
+            matrix should be set accordingly.
+
+        """
+        # get the view distance in meters
+        if self.scrDistCM is not None:
+            scrDistM = self.scrDistCM / 100.0
+        else:
+            scrDistM = 0.5
+
+        # get screen width in meters
+        if self.scrWidthCM is not None:
+            scrWidthM = self.scrWidthCM / 100.0
+        else:
+            scrWidthM = 0.5
+
+        # Not in full screen mode? Need to compute the dimensions of the display
+        # area to ensure disparities are correct even when in windowed-mode.
+        if not self._isFullScr:
+            scrWidthM = (self.size[0] / self.scrWidthPIX) * scrWidthM
+
+        frustum = viewtools.computeFrustum(
+            scrWidthM,  # width of screen
+            self.aspect,  # aspect ratio
+            scrDistM,  # distance to screen
+            eyeOffset=-self.eyeOffset / 100.0 if offaxis else 0.0,
+            nearClip=self._nearClip,
+            farClip=self._farClip)
+
+        viewtools.perspectiveProjectionMatrix(*frustum,
+                                              out=self._projectionMatrix)
+
+        # update the view projection matrix, use by shaders
+        self._viewProjectionMatrix[:, :] = numpy.matmul(
+            self._projectionMatrix, self._viewMatrix)
+
+    def projectionFromFrustum(self, left, right, top, bottom, near, far):
+        """Set the projection from frustum parameters."""
+        self._nearClip = near
+        self._farClip = far
+
+        self._projectionMatrix[:, :] = viewtools.perspectiveProjectionMatrix(
+            left, right, top, bottom, self._nearClip, self._farClip)
 
     def resetEyeTransform(self, clearDepth=True):
         """Restore the default projection and view settings to PsychoPy
