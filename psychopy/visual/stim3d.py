@@ -138,6 +138,9 @@ with open(r'psychopy\visual\shaders\primitive.vert', 'r') as f:
 # the shader cache
 _SHADER_CACHE_ = {}
 
+# BRDF LUT that ships with the shader
+GLTF2_BRDF_LUT = gt.createTexImage2dFromFile(r'psychopy\visual\shaders\brdfLUT')
+
 
 class LightSource(object):
     """Class for representing a light source in a scene.
@@ -852,6 +855,7 @@ class MetallicRoughnessMaterial(object):
                  occulusionStrength=1.0,
                  emissiveTexture=None,
                  emissiveFactor=(1., 1., 1.),
+                 diffuseIBL=None,
                  alphaMode=None,
                  alphaCutoff=1.0,
                  toneMap=None,
@@ -874,6 +878,8 @@ class MetallicRoughnessMaterial(object):
 
         self.colorSpace = colorSpace
         self.color = color
+
+        self.diffuseIBL = diffuseIBL
 
         self._roughnessFactor = float(roughnessFactor)
         self._metallicFactor = float(metallicFactor)
@@ -1029,6 +1035,10 @@ class MetallicRoughnessMaterial(object):
         if self._useHDR:
             self._shaderConfig |= SHADER_USE_HDR
             shaderDefs[SHADER_DEFS[SHADER_USE_HDR]] = 1
+
+        if self.diffuseIBL:
+            self._shaderConfig |= SHADER_USE_IBL
+            shaderDefs[SHADER_DEFS[SHADER_USE_IBL]] = 1
 
         # tone mapping, optional
         if self._useToneMap is not None:
@@ -1207,6 +1217,18 @@ class MetallicRoughnessMaterial(object):
             if light._lightType == 2:  # spotlights
                 GL.glUniform1f(self._unifLoc[uInner], light._innerConeCos)
                 GL.glUniform1f(self._unifLoc[uOuter], light._outerConeCos)
+
+    def _setupIBL(self):
+        """Setup diffuse and specular IBL."""
+        if self.diffuseIBL is not None:
+            sampler = self._nActiveSamplers
+            GL.glActiveTexture(GL.GL_TEXTURE0 + sampler)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, self._normalTexture.name)
+            GL.glUniform1i(self._unifLoc[b'u_NormalSampler'], sampler)
+            GL.glUniform1i(self._unifLoc[b'u_NormalUVSet'], uvSet)
+            GL.glUniform1f(self._unifLoc[b'u_NormalScale'], 1.0)
+            self._nActiveSamplers += 1
+
 
     def _setupNormalSampler(self, uvSet=0):
         """Setup the shader to render surface normals.
@@ -2966,7 +2988,7 @@ class GLTFMeshStim(BaseRigidBodyStim):
                  colorSpace='rgb',
                  contrast=1.0,
                  opacity=1.0,
-                 useShaders=False,
+                 diffuseIBL=None,
                  name='',
                  autoLog=True):
 
@@ -2982,9 +3004,10 @@ class GLTFMeshStim(BaseRigidBodyStim):
             colorSpace=colorSpace,
             contrast=contrast,
             opacity=opacity,
-            useShaders=useShaders,
             name=name,
             autoLog=autoLog)
+
+        self.diffuseIBL = diffuseIBL
 
         # new handle to glTF object
         gltf = pygltflib.GLTF2().load(gltfFile)
@@ -3036,21 +3059,86 @@ class GLTFMeshStim(BaseRigidBodyStim):
         for i, prim in enumerate(nodePrimitives):
             nodeMaterials[i] = gltf.materials[prim.material]
 
-        # textures used by the materials in the node
-        nodeTextures = {}
+        nodeTextures = {}  # keep track of textures used by the node
+        # create material objects for loaded materials
+        self.material = {}
         for idx, mat in nodeMaterials.items():
             imgRefs = (mat.pbrMetallicRoughness.baseColorTexture,
                        mat.pbrMetallicRoughness.metallicRoughnessTexture,
                        mat.normalTexture,
                        mat.emissiveTexture,
                        mat.occlusionTexture)
+
             for img in imgRefs:
                 if img is not None:
-                    textureFile = os.path.join(
-                        os.path.split(gltfFile)[0],
-                        gltf.images[img.index].uri)
-                    nodeTextures[img.index] = gt.createTexImage2dFromFile(
-                        textureFile, transpose=False)
+                    if img.index not in nodeTextures.keys():
+                        textureFile = os.path.join(
+                            os.path.split(gltfFile)[0],
+                            gltf.images[img.index].uri)
+                        nodeTextures[img.index] = gt.createTexImage2dFromFile(
+                            textureFile, transpose=False)
+
+            # material properties
+            pbr = mat.pbrMetallicRoughness
+
+            if pbr.roughnessFactor is not None:
+                roughnessFactor = pbr.roughnessFactor
+            else:
+                roughnessFactor = 1e-5
+
+            if pbr.metallicFactor is not None:
+                metallicFactor = pbr.metallicFactor
+            else:
+                metallicFactor = 1e-5
+
+            if pbr.baseColorFactor:
+                baseColorFactor = pbr.baseColorFactor
+            else:
+                baseColorFactor = (1, 1, 1)
+
+            if mat.emissiveFactor:
+                emissiveFactor = mat.emissiveFactor
+            else:
+                emissiveFactor = (1, 1, 1)
+
+
+            colorTexture = pbr.baseColorTexture
+            if colorTexture is not None:
+                colorTexture = nodeTextures[colorTexture.index]
+
+            metallicRoughnessTexture = pbr.metallicRoughnessTexture
+            if metallicRoughnessTexture is not None:
+                metallicRoughnessTexture = \
+                    nodeTextures[metallicRoughnessTexture.index]
+
+            normalTexture = mat.normalTexture
+            if normalTexture is not None:
+                normalTexture = nodeTextures[normalTexture.index]
+
+            emissiveTexture = mat.emissiveTexture
+            if emissiveTexture is not None:
+                emissiveTexture = nodeTextures[emissiveTexture.index]
+
+            occlusionTexture = mat.occlusionTexture
+            if occlusionTexture is not None:
+                occlusionTexture = nodeTextures[occlusionTexture.index]
+
+            self.material[mat.name] = MetallicRoughnessMaterial(
+                self.win,
+                roughnessFactor=roughnessFactor,
+                metallicFactor=metallicFactor,
+                metallicRoughnessTexture=metallicRoughnessTexture,
+                color=baseColorFactor,
+                useNormals=True,
+                useTexCoord0=True,
+                useTangents=True,
+                colorTexture=colorTexture,
+                normalTexture=normalTexture,
+                emissiveTexture=emissiveTexture,
+                occulusionTexture=occlusionTexture,
+                emissiveFactor=emissiveFactor,
+                diffuseIBL=self.diffuseIBL
+            )
 
         # go over all materials and load the data into VBOs and create a
         # material VAO
