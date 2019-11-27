@@ -3059,7 +3059,7 @@ class GLTFMeshStim(BaseRigidBodyStim):
         if node.translation:
             nodePos[:] = node.translation
 
-        nodeOri = np.array((0, 0, 0, -1), np.float32)
+        nodeOri = np.array((0, 0, 0, 1), np.float32)
         if node.rotation:
             nodeOri[:] = node.rotation
 
@@ -3153,7 +3153,9 @@ class GLTFMeshStim(BaseRigidBodyStim):
                 emissiveTexture=emissiveTexture,
                 occulusionTexture=occlusionTexture,
                 emissiveFactor=emissiveFactor,
-                diffuseIBL=self.diffuseIBL
+                diffuseIBL=self.diffuseIBL,
+                hdr=True,
+                toneMap=None
             )
 
         # go over all materials and load the data into VBOs and create a
