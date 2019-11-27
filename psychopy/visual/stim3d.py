@@ -139,7 +139,7 @@ with open(r'psychopy\visual\shaders\primitive.vert', 'r') as f:
 _SHADER_CACHE_ = {}
 
 # BRDF LUT that ships with the shader
-GLTF2_BRDF_LUT = gt.createTexImage2dFromFile(r'psychopy\visual\shaders\brdfLUT')
+GLTF2_BRDF_LUT = gt.createTexImage2dFromFile(r'psychopy\visual\shaders\brdfLUT.png')
 
 
 class LightSource(object):
@@ -1217,18 +1217,6 @@ class MetallicRoughnessMaterial(object):
             if light._lightType == 2:  # spotlights
                 GL.glUniform1f(self._unifLoc[uInner], light._innerConeCos)
                 GL.glUniform1f(self._unifLoc[uOuter], light._outerConeCos)
-
-    def _setupIBL(self):
-        """Setup diffuse and specular IBL."""
-        if self.diffuseIBL is not None:
-            sampler = self._nActiveSamplers
-            GL.glActiveTexture(GL.GL_TEXTURE0 + sampler)
-            GL.glBindTexture(GL.GL_TEXTURE_2D, self._normalTexture.name)
-            GL.glUniform1i(self._unifLoc[b'u_NormalSampler'], sampler)
-            GL.glUniform1i(self._unifLoc[b'u_NormalUVSet'], uvSet)
-            GL.glUniform1f(self._unifLoc[b'u_NormalScale'], 1.0)
-            self._nActiveSamplers += 1
-
 
     def _setupNormalSampler(self, uvSet=0):
         """Setup the shader to render surface normals.
@@ -3259,37 +3247,6 @@ class GLTFMeshStim(BaseRigidBodyStim):
             materialVAOs[materialName] = gt.createVAO(
                 attribVBOs, indexBuffer=indexVBO, legacy=False)
 
-        # create Blinn-Phong materials for each object
-        # Get materials, these are usually PBR in the file but they need to be
-        # converted to Blinn-Phong for now.
-        foundMaterials = {}
-        for mat in gltf.materials:
-            pbr = mat.pbrMetallicRoughness
-            colorTexture = nodeTextures[mat.pbrMetallicRoughness.baseColorTexture.index] if mat.pbrMetallicRoughness.baseColorTexture is not None else None
-            normalTexture = nodeTextures[mat.normalTexture.index] if mat.normalTexture is not None else None
-            rmTexture = nodeTextures[mat.pbrMetallicRoughness.metallicRoughnessTexture.index] if mat.pbrMetallicRoughness.metallicRoughnessTexture is not None else None
-            emTexture = nodeTextures[mat.emissiveTexture.index] if mat.emissiveTexture is not None else None
-            occTexture = nodeTextures[mat.occlusionTexture.index] if mat.occlusionTexture is not None else None
-
-            newMaterial = MetallicRoughnessMaterial(
-                self.win,
-                roughnessFactor=pbr.roughnessFactor if pbr.roughnessFactor is not None else 0.001,
-                metallicFactor=pbr.metallicFactor if pbr.metallicFactor is not None else 0.001,
-                metallicRoughnessTexture=rmTexture,
-                color=(1, 1, 1),
-                useNormals=True,
-                useTexCoord0=True,
-                useTangents=True,
-                colorTexture=colorTexture,
-                normalTexture=normalTexture,
-                emissiveFactor=(1, 1, 1),
-                emissiveTexture=emTexture,
-                occulusionTexture=occTexture
-            )
-
-            foundMaterials[mat.name] = newMaterial
-
-        self.material = foundMaterials
         self._vao = materialVAOs
 
     def draw(self, win=None):
@@ -3308,6 +3265,8 @@ class GLTFMeshStim(BaseRigidBodyStim):
             self._selectWindow(win)
 
         win.draw3d = True
+
+        print(win.depthMask)
 
         #GL.glPushMatrix()
         #GL.glMultTransposeMatrixf(at.array2pointer(self.thePose.modelMatrix))
