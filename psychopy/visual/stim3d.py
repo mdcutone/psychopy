@@ -3039,46 +3039,18 @@ class GLTFMeshStim(BaseRigidBodyStim):
         # textures used by the materials in the node
         nodeTextures = {}
         for idx, mat in nodeMaterials.items():
-            colorTexId = mat.pbrMetallicRoughness.baseColorTexture
-            if colorTexId is not None:
-                textureFile = os.path.join(
-                    os.path.split(gltfFile)[0],
-                    gltf.images[colorTexId.index].uri)
-                # don't transpose since texture coords in glTF differ from *.OBJ
-                nodeTextures[colorTexId.index] = gt.createTexImage2dFromFile(
-                    textureFile, transpose=False)
-
-            mrTexId = mat.pbrMetallicRoughness.metallicRoughnessTexture
-            if mrTexId is not None:
-                textureFile = os.path.join(
-                    os.path.split(gltfFile)[0],
-                    gltf.images[mrTexId.index].uri)
-                nodeTextures[mrTexId.index] = gt.createTexImage2dFromFile(
-                    textureFile, transpose=False)
-
-            normalTexId = mat.normalTexture
-            if normalTexId is not None:
-                textureFile = os.path.join(
-                    os.path.split(gltfFile)[0],
-                    gltf.images[normalTexId.index].uri)
-                nodeTextures[normalTexId.index] = gt.createTexImage2dFromFile(
-                    textureFile, transpose=False)
-
-            emissiveTexId = mat.emissiveTexture
-            if emissiveTexId is not None:
-                textureFile = os.path.join(
-                    os.path.split(gltfFile)[0],
-                    gltf.images[emissiveTexId.index].uri)
-                nodeTextures[emissiveTexId.index] = gt.createTexImage2dFromFile(
-                    textureFile, transpose=False)
-
-            occulusionTexId = mat.occlusionTexture
-            if occulusionTexId is not None:
-                textureFile = os.path.join(
-                    os.path.split(gltfFile)[0],
-                    gltf.images[occulusionTexId.index].uri)
-                nodeTextures[occulusionTexId.index] = gt.createTexImage2dFromFile(
-                    textureFile, transpose=False)
+            imgRefs = (mat.pbrMetallicRoughness.baseColorTexture,
+                       mat.pbrMetallicRoughness.metallicRoughnessTexture,
+                       mat.normalTexture,
+                       mat.emissiveTexture,
+                       mat.occlusionTexture)
+            for img in imgRefs:
+                if img is not None:
+                    textureFile = os.path.join(
+                        os.path.split(gltfFile)[0],
+                        gltf.images[img.index].uri)
+                    nodeTextures[img.index] = gt.createTexImage2dFromFile(
+                        textureFile, transpose=False)
 
         # go over all materials and load the data into VBOs and create a
         # material VAO
@@ -3086,26 +3058,26 @@ class GLTFMeshStim(BaseRigidBodyStim):
         for idx, mat in nodeMaterials.items():
             materialName = mat.name
             attribVBOs = {}
-            indexVBO = None
 
             # get the primitive using the material
             prim = nodePrimitives[idx]
 
             # buffers for vertex attribute data to be uploaded to GPU
-            attribBuffers = {
-                pygltflib.POSITION: [prim.attributes.POSITION, b''],
-                pygltflib.TEXCOORD_0: [prim.attributes.TEXCOORD_0, b''],
-                pygltflib.TEXCOORD_1: [prim.attributes.TEXCOORD_1, b''],
-                pygltflib.NORMAL: [prim.attributes.NORMAL, b''],
-                pygltflib.TANGENT: [prim.attributes.TANGENT, b'']
-            }
-            indexBufferData = b''
+            attribs = ((pygltflib.POSITION, prim.attributes.POSITION),
+                       (pygltflib.NORMAL, prim.attributes.NORMAL),
+                       (pygltflib.TANGENT, prim.attributes.TANGENT),
+                       (pygltflib.TEXCOORD_0, prim.attributes.TEXCOORD_0),
+                       (pygltflib.TEXCOORD_1, prim.attributes.TEXCOORD_1))
 
-            for attrib, buffer in attribBuffers.items():
-                if buffer[0] is None:  # nop if there is no buffer
+            # attribute pointer for the buffer in the VAO
+            attribPointer = 0
+            # go over each primitive attribute and load the data to a VBO
+            for attrib, idx in attribs:
+                # don't load the buffer if the model doesn't use this attribute
+                if idx is None:
                     continue
 
-                acc = gltf.accessors[buffer[0]]
+                acc = gltf.accessors[idx]
                 bv = gltf.bufferViews[acc.bufferView]
 
                 # attribute element size
@@ -3115,89 +3087,85 @@ class GLTFMeshStim(BaseRigidBodyStim):
                 # compute buffer access offests and ranges
                 accOffset = 0 if acc.byteOffset is None else acc.byteOffset
                 bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
-                accEnd = acc.count * attribSize  # VEC3 FLOAT32
+                accEnd = acc.count * attribSize
                 start = bvOffset + accOffset
                 end = start + accEnd
 
-                buffer[1] += buffers[bv.buffer][start:end]
+                # always float, but that may change
+                if acc.componentType == pygltflib.FLOAT:
+                    dtype = np.float32
+                elif acc.componentType == pygltflib.UNSIGNED_INT:
+                    dtype = np.uint32
+                elif acc.componentType == pygltflib.UNSIGNED_SHORT:
+                    dtype = np.uint16
+                elif acc.componentType == pygltflib.UNSIGNED_BYTE:
+                    dtype = np.uint8
+                elif acc.componentType == pygltflib.SHORT:
+                    dtype = np.uint16
+                else:
+                    dtype = np.uint8
 
+                bufferData = np.frombuffer(buffers[bv.buffer][start:end],
+                                           dtype=dtype)
+
+                # reshape according to component size
+                bufferData = np.reshape(
+                    bufferData, (-1, _GLTF_TYPE_SIZE_[acc.type]))
+
+                # these are read out as VEC3, but needs to be VEC4
+                if attrib == pygltflib.POSITION or attrib == pygltflib.NORMAL:
+                    arr = np.zeros((bufferData.shape[0], 4), dtype=dtype)
+                    arr[:, :3] = bufferData
+                    arr[:, 3] = 1.0
+
+                    # apply node scaling to the primitives
+                    if attrib == pygltflib.POSITION:
+                        arr[:, :3] *= nodeScale
+
+                    attribVBOs[attribPointer] = gt.createVBO(arr)
+                else:
+                    attribVBOs[attribPointer] = gt.createVBO(bufferData)
+
+                attribPointer += 1
+
+            # load any index buffers if applicable
+            indexVBO = None
             if prim.indices is not None:
                 acc = gltf.accessors[prim.indices]
                 bv = gltf.bufferViews[acc.bufferView]
                 accOffset = 0 if acc.byteOffset is None else acc.byteOffset
                 bvOffset = 0 if bv.byteOffset is None else bv.byteOffset
-                accEnd = acc.count * 2  # SCALAR UINT16
+                attribSize = _GLTF_COMPONENT_TYPE_[acc.componentType] * \
+                             _GLTF_TYPE_SIZE_[acc.type]
+                accEnd = acc.count * attribSize
                 start = bvOffset + accOffset
                 end = start + accEnd
 
-                indexBufferData += buffers[bv.buffer][start:end]
+                if acc.componentType == pygltflib.FLOAT:
+                    dtype = np.float32
+                    glType = GL.GL_FLOAT
+                elif acc.componentType == pygltflib.UNSIGNED_INT:
+                    dtype = np.uint32
+                    glType = GL.GL_UNSIGNED_INT
+                elif acc.componentType == pygltflib.UNSIGNED_SHORT:
+                    dtype = np.uint16
+                    glType = GL.GL_UNSIGNED_SHORT
+                elif acc.componentType == pygltflib.UNSIGNED_BYTE:
+                    dtype = np.uint8
+                    glType = GL.GL_UNSIGNED_BYTE
+                elif acc.componentType == pygltflib.SHORT:
+                    dtype = np.uint16
+                    glType = GL.GL_SHORT
+                else:
+                    dtype = np.uint8
+                    glType = GL.GL_BYTE
 
-            posBufferData = attribBuffers[pygltflib.POSITION][1]
-            normBufferData = attribBuffers[pygltflib.TEXCOORD_0][1]
-            texCoord0BufferData = attribBuffers[pygltflib.TEXCOORD_1][1]
-            texCoord1BufferData = attribBuffers[pygltflib.NORMAL][1]
-            tangBufferData = attribBuffers[pygltflib.TANGENT][1]
-
-            # no position data, can't be drawn so don't create a VAO
-            if len(posBufferData) == 0:
-                raise BufferError("Buffer contains no vertex position data.")
-
-            # create buffers for data
-            posArr = np.frombuffer(posBufferData, dtype=np.float32)
-
-            posArr = np.reshape(posArr, (-1, 3)) * nodeScale  # apply scaling
-            posArr2 = np.ones((posArr.shape[0], 4), dtype=np.float32)
-            posArr2[:, :3] = posArr
-            attribVBOs[0] = gt.createVBO(posArr2)
-
-            hasNormals = len(normBufferData) > 0
-            hasTangents = len(tangBufferData) > 0
-            hasTexCoord0 = len(texCoord0BufferData) > 0
-            hasTexCoord1 = len(texCoord1BufferData) > 0
-
-            attribIdx = 1  # additional attributes must be incremented
-
-            if hasNormals:
-                normArr = np.frombuffer(normBufferData, dtype=np.float32)
-                normArr = np.reshape(normArr, (-1, 3))
-                normArr2 = np.ones((normArr.shape[0], 4), dtype=np.float32)
-                normArr2[:, :3] = normArr
-                attribVBOs[attribIdx] = gt.createVBO(normArr2)
-                attribIdx += 1
-            else:
-                normArr = np.zeros_like(posArr, np.float32)
-                normArr[:, 2] = -1
-                attribVBOs[attribIdx] = gt.createVBO(normArr)
-                attribIdx += 1
-
-            if hasTangents:
-                tangArr = np.frombuffer(tangBufferData, dtype=np.float32)
-                tangArr = np.reshape(tangArr, (-1, 4))
-                attribVBOs[attribIdx] = gt.createVBO(tangArr)
-                attribIdx += 1
-            else:
-                tangArr = np.zeros_like(posArr2, np.float32)
-                tangArr[:, 3] = 1.0
-                attribVBOs[attribIdx] = gt.createVBO(tangArr)
-                attribIdx += 1
-
-            if hasTexCoord0:
-                tex0Arr = np.frombuffer(texCoord0BufferData, dtype=np.float32)
-                tex0Arr = np.reshape(tex0Arr, (-1, 2))
-                attribVBOs[attribIdx] = gt.createVBO(tex0Arr)
-                attribIdx += 1
-
-            if hasTexCoord1:
-                tex1Arr = np.frombuffer(texCoord1BufferData, dtype=np.float32)
-                tex1Arr = np.reshape(tex1Arr, (-1, 2))
-                attribVBOs[attribIdx] = gt.createVBO(tex1Arr)
-                attribIdx += 1
-
-            if len(indexBufferData) > 0:
-                indexArr = np.frombuffer(indexBufferData, dtype=np.uint16)
-                indexVBO = gt.createVBO(indexArr,
+                bufferData = np.frombuffer(
+                    buffers[bv.buffer][start:end],
+                    dtype=dtype)
+                indexVBO = gt.createVBO(bufferData,
                                         target=GL.GL_ELEMENT_ARRAY_BUFFER,
-                                        dataType=GL.GL_UNSIGNED_INT)
+                                        dataType=glType)
 
             # create the VAO to render the material
             materialVAOs[materialName] = gt.createVAO(
@@ -3230,26 +3198,6 @@ class GLTFMeshStim(BaseRigidBodyStim):
                 emissiveTexture=emTexture,
                 occulusionTexture=occTexture
             )
-
-            # if pbr.baseColorFactor:
-            #     diffuseColor = 2.0 * np.asarray(pbr.baseColorFactor[:3]) - 1.0
-            #
-            # else:
-            #     diffuseColor = np.asarray((1., 1., 1.))
-            #
-            # specularColor = np.zeros((3,))
-            # specularColor[:] = 2.0 * pbr.roughnessFactor - 1.0
-            #
-            # diffuseTexture = None
-            # if pbr.baseColorTexture is not None:
-            #     diffuseTexture = nodeTextures[pbr.baseColorTexture.index]
-            #
-            # foundMaterials[mat.name] = BlinnPhongMaterial(
-            #     self.win,
-            #     diffuseColor=diffuseColor,
-            #     specularColor=specularColor,
-            #     shininess=pbr.roughnessFactor * 128.0,
-            #     diffuseTexture=diffuseTexture)
 
             foundMaterials[mat.name] = newMaterial
 
