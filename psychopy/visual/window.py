@@ -1793,7 +1793,7 @@ class Window(object):
             viewtools.perspectiveProjectionMatrix(*frustum, dtype=numpy.float32)
 
         # get the eye position
-        self._eyePos[:] = (-self._eyeOffset, 0.0, -scrDistM)
+        self._eyePos[:] = (-self._eyeOffset, 0.0, scrDistM)
 
         # translate away from screen
         self._viewMatrix = numpy.identity(4, dtype=numpy.float32)
@@ -1859,6 +1859,15 @@ class Window(object):
 
             if oldDepthMask is False:   # return to old state if needed
                 GL.glDepthMask(GL.GL_FALSE)
+
+    def viewLookAt(self, eyePos, centerPos, upDir=(0., 1., 0.)):
+        """Set the current view matrix to look at a point."""
+        self._eyePos[:] = eyePos
+        viewtools.lookAt(self._eyePos, centerPos, upDir, out=self._viewMatrix)
+
+    def setProjectionMatrixFrustum(self, left, right, top, bottom):
+        """Set the projection matrix using frustum parameters."""
+        pass
 
     def resetEyeTransform(self, clearDepth=True):
         """Restore the default projection and view settings to PsychoPy

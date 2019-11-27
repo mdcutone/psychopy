@@ -1166,6 +1166,7 @@ class MetallicRoughnessMaterial(object):
         self._setupOcculusionSampler()
         self._setupBaseColorSampler()
         self._setupMetallicRoughnessSampler()
+        self._setupIBL()
 
         if self._nActiveSamplers > 0:
             GL.glEnable(GL.GL_TEXTURE_2D)
@@ -1192,6 +1193,33 @@ class MetallicRoughnessMaterial(object):
             self._nActiveSamplers = 0
 
         self._activeShader = self._unifLoc = None
+
+    def _setupIBL(self):
+        """Setup indirect lighting."""
+        if not self._useLights:
+            return
+
+        if self.diffuseIBL is None:
+            return
+
+        sampler = self._nActiveSamplers
+        GL.glActiveTexture(GL.GL_TEXTURE0 + sampler)
+        GL.glBindTexture(GL.GL_TEXTURE_CUBE_MAP, self.diffuseIBL.name)
+        GL.glUniform1i(self._unifLoc[b'u_DiffuseEnvSampler'], sampler)
+        self._nActiveSamplers += 1
+
+        sampler = self._nActiveSamplers
+        GL.glActiveTexture(GL.GL_TEXTURE0 + sampler)
+        GL.glBindTexture(GL.GL_TEXTURE_CUBE_MAP, self.diffuseIBL.name)
+        GL.glUniform1i(self._unifLoc[b'u_SpecularEnvSampler'], sampler)
+        self._nActiveSamplers += 1
+
+        sampler = self._nActiveSamplers
+        GL.glActiveTexture(GL.GL_TEXTURE0 + sampler)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, GLTF2_BRDF_LUT.name)
+        GL.glUniform1i(self._unifLoc[b'u_brdfLUT'], sampler)
+        self._nActiveSamplers += 1
+
 
     def _setupLight(self, index, light):
         """Setup a light in the shader.
@@ -3263,64 +3291,23 @@ class GLTFMeshStim(BaseRigidBodyStim):
             win = self.win
         else:
             self._selectWindow(win)
-
-        win.draw3d = True
-
-        print(win.depthMask)
-
         #GL.glPushMatrix()
         #GL.glMultTransposeMatrixf(at.array2pointer(self.thePose.modelMatrix))
 
         # iterate over materials, draw associated VAOs
         if self.material is not None:
+
             # if material is a dictionary
             if isinstance(self.material, dict):
                 for materialName, materialDesc in self.material.items():
-                    materialDesc.begin(self.thePose.modelMatrix)
+                    materialDesc.begin(self.thePose.getModelMatrix())
                     gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
                     materialDesc.end()
             else:
                 # material is a single item
+
                 self.material.begin(self.thePose.modelMatrix)
                 for materialName, _ in self._vao.items():
                     gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
                 self.material.end()
-        else:
-            r, g, b = self._getDesiredRGB(
-                self.rgb, self.colorSpace, self.contrast)
-            color = np.ctypeslib.as_ctypes(
-                np.array((r, g, b, self.opacity), np.float32))
-
-            if self._useShaders:
-                nLights = len(self.win.lights)
-                shaderKey = (nLights, False)
-                gt.useProgram(self.win._shaders['stim3d_phong'][shaderKey])
-
-                # pass values to OpenGL as material
-                GL.glColor4f(r, g, b, self.opacity)
-                GL.glMaterialfv(GL.GL_FRONT, GL.GL_DIFFUSE, color)
-                GL.glMaterialfv(GL.GL_FRONT, GL.GL_AMBIENT, color)
-
-                for materialName, _ in self._vao.items():
-                    gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
-
-                gt.useProgram(0)
-            else:
-                # material tracks color
-                GL.glEnable(GL.GL_COLOR_MATERIAL)  # enable color tracking
-                GL.glDisable(GL.GL_TEXTURE_2D)
-                GL.glColorMaterial(GL.GL_FRONT, GL.GL_AMBIENT_AND_DIFFUSE)
-                GL.glMaterialfv(GL.GL_FRONT, GL.GL_DIFFUSE, color)
-                GL.glMaterialfv(GL.GL_FRONT, GL.GL_AMBIENT, color)
-                # 'rgb' is created and set when color is set
-                GL.glColor4f(r, g, b, self.opacity)
-
-                # draw the shape
-                for materialName, _ in self._vao.items():
-                    gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
-
-                GL.glDisable(GL.GL_COLOR_MATERIAL)  # enable color tracking
-
         #GL.glPopMatrix()
-
-        win.draw3d = False
