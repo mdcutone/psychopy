@@ -138,8 +138,113 @@ with open(r'psychopy\visual\shaders\primitive.vert', 'r') as f:
 # the shader cache
 _SHADER_CACHE_ = {}
 
+# cache light uniform strings
+_SHADER_LIGHT_UNIFORMS_ = {}
+for i in range(8):
+    structField = b'u_Lights[' + str(i).encode() + b'].'
+    _SHADER_LIGHT_UNIFORMS_[i] = (
+        structField + b'direction',
+        structField + b'range',
+        structField + b'color',
+        structField + b'intensity',
+        structField + b'position',
+        structField + b'innerConeCos',
+        structField + b'outerConeCos',
+        structField + b'type')
+
+
+def cacheShaderPBR(flags, nLights=8):
+    """Create an appropriate PBR shader for the provided material configuration
+    flags and cache it.
+
+    A shader is generated for the specified configuration and a given number of
+    lights. This prevents needing to cache a new shader if the number of lights
+    changes. This also includes a shader if no lights are being used.
+
+    Parameters
+    ----------
+    flags : int
+        Shader configuration flags.
+    nLights : int
+        Number of punctual lights to cache for the given configuration. This
+        also includes the `unlit` configuration if no lights are available.
+
+    """
+    # shader #DEFINE statements to embed, punctual lighting is ALWAYS used
+    shaderDefs = {}
+    for key, val in SHADER_DEFS.items():
+        if (flags & key) == key:
+            shaderDefs[val] = 1
+
+    global _SHADER_CACHE_
+    # compile a shader for each number of lights
+    for lightIdx in range(0, nLights):  # max lights allowed are 8
+        # generate a hashable key for the shader cache
+        shaderKey = (flags, lightIdx)
+
+        # check if a shader of this configuration has been cached already
+        if _SHADER_CACHE_.get(shaderKey, False):
+            continue
+
+        # the shader is not in cache, build it ...
+        shaderProg = gt.createProgram()
+
+        # no lights, unlit condition just shows base color only
+        if lightIdx == 0:
+            fragShaderSrc = gt.embedShaderSourceDefs(
+                GLSL_KHRONOS_PBR_FRAG, {'MATERIAL_UNLIT': 1})
+            fragShaderSrc = gt.embedShaderSourceDefs(
+                fragShaderSrc, shaderDefs)
+        else:
+            shaderDefs[SHADER_DEFS[SHADER_USE_PUNCTUAL]] = 1
+            fragShaderSrc = gt.embedShaderSourceDefs(
+                GLSL_KHRONOS_PBR_FRAG, {'LIGHT_COUNT': lightIdx})
+
+        vertShaderSrc = gt.embedShaderSourceDefs(
+            GLSL_KHRONOS_PBR_VERT, shaderDefs)
+        fragShaderSrc = gt.embedShaderSourceDefs(fragShaderSrc, shaderDefs)
+
+        # compile them
+        vertShader = gt.compileShader(vertShaderSrc, GL.GL_VERTEX_SHADER)
+        fragShader = gt.compileShader(fragShaderSrc, GL.GL_FRAGMENT_SHADER)
+
+        # attach shaders to program
+        gt.attachShader(shaderProg, vertShader)
+        gt.attachShader(shaderProg, fragShader)
+
+        # link the shader
+        gt.linkProgram(shaderProg)
+
+        # optional, validate the program
+        # gt.validateProgram(shaderProg)
+
+        # optional, detach and discard shader objects
+        gt.detachShader(shaderProg, vertShader)
+        gt.detachShader(shaderProg, fragShader)
+        gt.deleteObject(vertShader)
+        gt.deleteObject(fragShader)
+
+        # get and cache uniform locations within the shader
+        unifLoc = gt.getUniformLocations(shaderProg)
+
+        # add to shader cache
+        _SHADER_CACHE_[shaderKey] = (shaderProg, unifLoc)
+
+
 # BRDF LUT that ships with the shader
 GLTF2_BRDF_LUT = gt.createTexImage2dFromFile(r'psychopy\visual\shaders\brdfLUT.png')
+
+# ------------------------------------------------------------------------------
+# Mesh configuration
+
+# These flags are used to determine what buffers are in use by a given mesh
+# stimulus.
+MESH_HAS_POSITION = 1 << 0
+MESH_HAS_NORMALS = 1 << 1
+MESH_HAS_TANGENTS = 1 << 2
+MESH_HAS_UV_SET1 = 1 << 3
+MESH_HAS_UV_SET2 = 1 << 4
+MESH_HAS_INDICES = 1 << 5
 
 
 class LightSource(object):
@@ -839,7 +944,6 @@ class MetallicRoughnessMaterial(object):
     The appearance of a material will be determined by `roughness` or scattering
     of incident light due to micro-facets on the surface and `metallic` which
     represents the dielectric property of the material.
-
     """
     def __init__(self,
                  win=None,
@@ -861,12 +965,73 @@ class MetallicRoughnessMaterial(object):
                  toneMap=None,
                  hdr=False,
                  unlit=False,
-                 useNormals=False,
-                 useTangents=False,
-                 useTexCoord0=False,
-                 useTexCoord1=False):
+                 meshFlags=MESH_HAS_POSITION | MESH_HAS_NORMALS):
+        """
+        Parameters
+        ----------
+        win : `~psychopy.visual.Window`
+            Window associated with this material.
+        color : array_like
+            Base color for the material.
+        colorSpace : str
+            Colorspace of `color`.
+        colorTexture : `~psychopy.tools.gltools.TexImage2D`
+            Color texture to use for diffuse reflectance.
+        roughnessFactor : float
+            Roughness gain factor between 0.0 and 1.0.
+        metallicFactor : float
+            Metallic gain factor between 0.0 and 1.0.
+        metallicRoughnessTexture : `~psychopy.tools.gltools.TexImage2D`
+            Texture for metallic and roughness. Metallic information is stored
+            on the red and roughness on the green color channel of this texture.
+        normalTexture : `~psychopy.tools.gltools.TexImage2D`
+            Normal map for the material in tangent space.
+        normalFactor : float
+            Gain factor for normal map, can range between -1.0 and 1.0. Only
+            applicable if the target object has tangents.
+        normalUVSet : int
+            UV texture coordinate set to use when sampling the normal map. Can
+            be 0 or 1.
+        occlusionTexture : `~psychopy.tools.gltools.TexImage2D`
+            Ambient occlusion texture map.
+        occlusionStrength : float
+            Gain factor for the ambient occlusion map, can range between 0.0
+            and 1.0.
+        occlusionUVSet : int
+            UV texture coordinate set to use when sampling the occusion map. Can
+            be 0 or 1.
+        emissiveTexture : `~psychopy.tools.gltools.TexImage2D`
+            Texture map for emmision.
+        emissiveFactor : array_like
+            Emmission strength for each color channel of the emmision map.
+        diffuseIBL : `~psychopy.tools.gltools.TexCumeMap`
+            Cubemap for the diffuse component of Image Based Lighting (IBL) or
+            diffuse irradiance from the environment.
+        alphaMode : str
+            Alpha mode to use, possible values are 'opaque', 'mask' and 'blend'.
+        alphaCutoff : float
+            Cut-off alpha value from the color texture to reject a fragment if
+            `alphaMode` is 'mask'. All fragments with an alpha value less than
+            this will be rejected.
+        toneMap : str or None
+            Tonemapping function to use. If `None`, no tonemapping will be
+            applied.
+        hdr : bool
+            Enable HDR mode. If `True`, the resulting color values will be
+            output as-is in linear RGB without gamma correction. If `False`,
+            the material will be rendered with sRGB gamma correction applied
+            to it's colors.
+        unlit : bool
+            If `False` shading of this object is disabled.
+        meshFlags : int
+            Flags indicating the available attributes associated with the mesh.
+            By default, it is assumed the mesh has attribute buffers for
+            position and normals. Values for this field are created by combining
+            multiple values using an OR operation.
 
+        """
         self.win = win
+        self._meshFlags = meshFlags
 
         # set colors
         self._color = np.zeros((3,), np.float32)
@@ -895,16 +1060,12 @@ class MetallicRoughnessMaterial(object):
         self._IBLMap = None
 
         self._exposure = 1.0
-        self._useNormals = useNormals
-        self._useTangents = useTangents
-        self._useTexCoord0 = useTexCoord0
-        self._useTexCoord1 = useTexCoord1
         self._useToneMap = toneMap
         self._useHDR = hdr
 
         # setup the shader
-        self._shaderConfig = 0x00000
-        self._cacheShader()
+        self._shaderConfig = self._generateConfigFlags()
+        cacheShaderPBR(self._shaderConfig)
 
         # Keep track of the presently active shader, these are not None only
         # between `begin` and `end calls. If these values are None, you can
@@ -989,56 +1150,47 @@ class MetallicRoughnessMaterial(object):
     def roughnessFactor(self, value):
         self._roughnessFactor = float(value)
 
-    def _cacheShader(self):
-        """Create an appropriate shader for this material configuration and
-        cache it.
-
-        Upon creating the shader, `_shaderConfig` is set to generate the key
-        to access it from the cache later.
-
+    def _generateConfigFlags(self):
+        """Generate shader flags from the current material settings.
         """
-        # shader #DEFINE statements to embed, punctual lighting is ALWAYS used
-        shaderDefs = {SHADER_DEFS[SHADER_METALLICROUGHNESS]: 1}
+        if (self._meshFlags & MESH_HAS_POSITION) != MESH_HAS_POSITION:
+            raise ValueError("Mesh flags must have position.")
 
-        if self._useNormals:
-            self._shaderConfig |= SHADER_HAS_NORMALS
-            shaderDefs[SHADER_DEFS[SHADER_HAS_NORMALS]] = 1
+        flags = SHADER_METALLICROUGHNESS
 
-        if self._useTangents:
-            self._shaderConfig |= SHADER_HAS_TANGENTS
-            shaderDefs[SHADER_DEFS[SHADER_HAS_TANGENTS]] = 1
+        if (self._meshFlags & MESH_HAS_UV_SET1) == MESH_HAS_UV_SET1:
+            flags |= SHADER_HAS_UV_SET1
 
+        if (self._meshFlags & MESH_HAS_UV_SET2) == MESH_HAS_UV_SET2:
+            flags |= SHADER_HAS_UV_SET2
+
+        if (self._meshFlags & MESH_HAS_NORMALS) == MESH_HAS_NORMALS:
+            flags |= SHADER_HAS_NORMALS
+
+        if (self._meshFlags & MESH_HAS_TANGENTS) == MESH_HAS_TANGENTS:
+            flags |= SHADER_HAS_TANGENTS
+
+            # can't use these with our shader unless you have tangents
             if self._normalTexture is not None:
-                self._shaderConfig |= SHADER_HAS_NORMAL_MAP
-                shaderDefs[SHADER_DEFS[SHADER_HAS_NORMAL_MAP]] = 1
-
-        if self._useTexCoord0:
-            self._shaderConfig |= SHADER_HAS_UV_SET1
-            shaderDefs[SHADER_DEFS[SHADER_HAS_UV_SET1]] = 1
+                flags |= SHADER_HAS_NORMAL_MAP
 
         if self._metallicRoughnessTexture is not None:
-            self._shaderConfig |= SHADER_HAS_METALLIC_ROUGHNESS_MAP
-            shaderDefs[SHADER_DEFS[SHADER_HAS_METALLIC_ROUGHNESS_MAP]] = 1
+            flags |= SHADER_HAS_METALLIC_ROUGHNESS_MAP
 
         if self._colorTexture is not None:
-            self._shaderConfig |= SHADER_HAS_BASE_COLOR_MAP
-            shaderDefs[SHADER_DEFS[SHADER_HAS_BASE_COLOR_MAP]] = 1
+            flags |= SHADER_HAS_BASE_COLOR_MAP
 
         if self._emissiveTexture is not None:
-            self._shaderConfig |= SHADER_HAS_EMISSIVE_MAP
-            shaderDefs[SHADER_DEFS[SHADER_HAS_EMISSIVE_MAP]] = 1
+            flags |= SHADER_HAS_EMISSIVE_MAP
 
         if self._occlusionTexture is not None:
-            self._shaderConfig |= SHADER_HAS_OCCLUSION_MAP
-            shaderDefs[SHADER_DEFS[SHADER_HAS_OCCLUSION_MAP]] = 1
+            flags |= SHADER_HAS_OCCLUSION_MAP
 
         if self._useHDR:
-            self._shaderConfig |= SHADER_USE_HDR
-            shaderDefs[SHADER_DEFS[SHADER_USE_HDR]] = 1
+            flags |= SHADER_USE_HDR
 
         if self.diffuseIBL:
-            self._shaderConfig |= SHADER_USE_IBL
-            shaderDefs[SHADER_DEFS[SHADER_USE_IBL]] = 1
+            flags |= SHADER_USE_IBL
 
         # tone mapping, optional
         if self._useToneMap is not None:
@@ -1052,61 +1204,13 @@ class MetallicRoughnessMaterial(object):
                 raise ValueError(
                     'Invalid tone map `{}` specified.'.format(self._useToneMap))
 
-            self._shaderConfig |= toneMap
-            shaderDefs[SHADER_DEFS[toneMap]] = 1
+            flags |= toneMap
 
-        global _SHADER_CACHE_
-        # compile a shader for each number of lights
-        for lightIdx in range(0, 8):  # max lights allowed are 8
-            # generate a hashable key for the shader cache
-            shaderKey = (self._shaderConfig, lightIdx)
+        return flags
 
-            # check if a shader of this configuration has been cached already
-            if _SHADER_CACHE_.get(shaderKey, False):
-                continue
-
-            # the shader is not in cache, build it ...
-            shaderProg = gt.createProgram()
-
-            # no lights, unlit condition just shows base color only
-            if lightIdx == 0:
-                fragShaderSrc = gt.embedShaderSourceDefs(
-                    GLSL_KHRONOS_PBR_FRAG, {'MATERIAL_UNLIT': 1})
-                fragShaderSrc = gt.embedShaderSourceDefs(fragShaderSrc, shaderDefs)
-            else:
-                shaderDefs[SHADER_DEFS[SHADER_USE_PUNCTUAL]] = 1
-                fragShaderSrc = gt.embedShaderSourceDefs(
-                    GLSL_KHRONOS_PBR_FRAG, {'LIGHT_COUNT': lightIdx})
-
-            vertShaderSrc = gt.embedShaderSourceDefs(
-                GLSL_KHRONOS_PBR_VERT, shaderDefs)
-            fragShaderSrc = gt.embedShaderSourceDefs(fragShaderSrc, shaderDefs)
-
-            # compile them
-            vertShader = gt.compileShader(vertShaderSrc, GL.GL_VERTEX_SHADER)
-            fragShader = gt.compileShader(fragShaderSrc, GL.GL_FRAGMENT_SHADER)
-
-            # attach shaders to program
-            gt.attachShader(shaderProg, vertShader)
-            gt.attachShader(shaderProg, fragShader)
-
-            # link the shader
-            gt.linkProgram(shaderProg)
-
-            # optional, validate the program
-            #gt.validateProgram(shaderProg)
-
-            # optional, detach and discard shader objects
-            gt.detachShader(shaderProg, vertShader)
-            gt.detachShader(shaderProg, fragShader)
-            gt.deleteObject(vertShader)
-            gt.deleteObject(fragShader)
-
-            # get and cache uniform locations within the shader
-            unifLoc = gt.getUniformLocations(shaderProg)
-
-            # add to shader cache
-            _SHADER_CACHE_[shaderKey] = (shaderProg, unifLoc)
+    def use(self, mesh):
+        """Use this material to render a stimulus."""
+        pass
 
     def begin(self, modelMatrix):
         """Use this material for successive rendering calls.
@@ -1220,7 +1324,6 @@ class MetallicRoughnessMaterial(object):
         GL.glUniform1i(self._unifLoc[b'u_brdfLUT'], sampler)
         self._nActiveSamplers += 1
 
-
     def _setupLight(self, index, light):
         """Setup a light in the shader.
 
@@ -1230,8 +1333,9 @@ class MetallicRoughnessMaterial(object):
         defined.
 
         """
+        global _SHADER_LIGHT_UNIFORMS_
         uDir, uRange, uColor, uInt, uPos, uInner, uOuter, uType = \
-            self._shaderLightUnifs[index]
+            _SHADER_LIGHT_UNIFORMS_[index]
 
         GL.glUniform1i(self._unifLoc[uType], light._lightType)
         GL.glUniform1f(self._unifLoc[uInt], light._intensity)
@@ -1265,7 +1369,8 @@ class MetallicRoughnessMaterial(object):
         if not self._useLights:
             return
 
-        if self._normalTexture is None or self._useTangents is False:
+        if self._normalTexture is None or \
+                (self._meshFlags & MESH_HAS_TANGENTS) != MESH_HAS_TANGENTS:
             return
 
         sampler = self._nActiveSamplers
@@ -1295,7 +1400,7 @@ class MetallicRoughnessMaterial(object):
             return
 
         if self._emissiveTexture is None:
-            return  # nop if model has no normal texture of tangents
+            return
 
         sampler = self._nActiveSamplers
         GL.glActiveTexture(GL.GL_TEXTURE0 + sampler)
@@ -3023,6 +3128,7 @@ class GLTFMeshStim(BaseRigidBodyStim):
             name=name,
             autoLog=autoLog)
 
+        self._meshAttribFlags = 0x0
         self.diffuseIBL = diffuseIBL
 
         # new handle to glTF object
@@ -3075,88 +3181,12 @@ class GLTFMeshStim(BaseRigidBodyStim):
         for i, prim in enumerate(nodePrimitives):
             nodeMaterials[i] = gltf.materials[prim.material]
 
-        nodeTextures = {}  # keep track of textures used by the node
-        # create material objects for loaded materials
-        self.material = {}
-        for idx, mat in nodeMaterials.items():
-            imgRefs = (mat.pbrMetallicRoughness.baseColorTexture,
-                       mat.pbrMetallicRoughness.metallicRoughnessTexture,
-                       mat.normalTexture,
-                       mat.emissiveTexture,
-                       mat.occlusionTexture)
-
-            for img in imgRefs:
-                if img is not None:
-                    if img.index not in nodeTextures.keys():
-                        textureFile = os.path.join(
-                            os.path.split(gltfFile)[0],
-                            gltf.images[img.index].uri)
-                        nodeTextures[img.index] = gt.createTexImage2dFromFile(
-                            textureFile, transpose=False)
-
-            # material properties
-            pbr = mat.pbrMetallicRoughness
-
-            if pbr.roughnessFactor is not None:
-                roughnessFactor = pbr.roughnessFactor
-            else:
-                roughnessFactor = 1e-5
-
-            if pbr.metallicFactor is not None:
-                metallicFactor = pbr.metallicFactor
-            else:
-                metallicFactor = 1e-5
-
-            if pbr.baseColorFactor:
-                baseColorFactor = pbr.baseColorFactor
-            else:
-                baseColorFactor = (1, 1, 1)
-
-            if mat.emissiveFactor:
-                emissiveFactor = mat.emissiveFactor
-            else:
-                emissiveFactor = (1, 1, 1)
-
-
-            colorTexture = pbr.baseColorTexture
-            if colorTexture is not None:
-                colorTexture = nodeTextures[colorTexture.index]
-
-            metallicRoughnessTexture = pbr.metallicRoughnessTexture
-            if metallicRoughnessTexture is not None:
-                metallicRoughnessTexture = \
-                    nodeTextures[metallicRoughnessTexture.index]
-
-            normalTexture = mat.normalTexture
-            if normalTexture is not None:
-                normalTexture = nodeTextures[normalTexture.index]
-
-            emissiveTexture = mat.emissiveTexture
-            if emissiveTexture is not None:
-                emissiveTexture = nodeTextures[emissiveTexture.index]
-
-            occlusionTexture = mat.occlusionTexture
-            if occlusionTexture is not None:
-                occlusionTexture = nodeTextures[occlusionTexture.index]
-
-            self.material[mat.name] = MetallicRoughnessMaterial(
-                self.win,
-                roughnessFactor=roughnessFactor,
-                metallicFactor=metallicFactor,
-                metallicRoughnessTexture=metallicRoughnessTexture,
-                color=baseColorFactor,
-                useNormals=True,
-                useTexCoord0=True,
-                useTangents=True,
-                colorTexture=colorTexture,
-                normalTexture=normalTexture,
-                emissiveTexture=emissiveTexture,
-                occulusionTexture=occlusionTexture,
-                emissiveFactor=emissiveFactor,
-                diffuseIBL=self.diffuseIBL,
-                hdr=True,
-                toneMap=None
-            )
+        # attribute flags
+        attribFlags = {pygltflib.POSITION: MESH_HAS_POSITION,
+                       pygltflib.NORMAL: MESH_HAS_NORMALS,
+                       pygltflib.TANGENT: MESH_HAS_TANGENTS,
+                       pygltflib.TEXCOORD_0: MESH_HAS_UV_SET1,
+                       pygltflib.TEXCOORD_1: MESH_HAS_UV_SET2}
 
         # go over all materials and load the data into VBOs and create a
         # material VAO
@@ -3233,6 +3263,7 @@ class GLTFMeshStim(BaseRigidBodyStim):
                     attribVBOs[attribPointer] = gt.createVBO(bufferData)
 
                 attribPointer += 1
+                self._meshAttribFlags |= attribFlags[attrib]
 
             # load any index buffers if applicable
             indexVBO = None
@@ -3273,9 +3304,92 @@ class GLTFMeshStim(BaseRigidBodyStim):
                                         target=GL.GL_ELEMENT_ARRAY_BUFFER,
                                         dataType=glType)
 
+                self._meshAttribFlags |= MESH_HAS_INDICES
+
             # create the VAO to render the material
             materialVAOs[materialName] = gt.createVAO(
                 attribVBOs, indexBuffer=indexVBO, legacy=False)
+
+        nodeTextures = {}  # keep track of textures used by the node
+        # create material objects for loaded materials
+        self.material = {}
+        for idx, mat in nodeMaterials.items():
+            imgRefs = (mat.pbrMetallicRoughness.baseColorTexture,
+                       mat.pbrMetallicRoughness.metallicRoughnessTexture,
+                       mat.normalTexture,
+                       mat.emissiveTexture,
+                       mat.occlusionTexture)
+
+            for img in imgRefs:
+                if img is not None:
+                    if img.index not in nodeTextures.keys():
+                        textureFile = os.path.join(
+                            os.path.split(gltfFile)[0],
+                            gltf.images[img.index].uri)
+                        nodeTextures[img.index] = gt.createTexImage2dFromFile(
+                            textureFile, transpose=False)
+
+            # material properties
+            pbr = mat.pbrMetallicRoughness
+
+            if pbr.roughnessFactor is not None:
+                roughnessFactor = pbr.roughnessFactor
+            else:
+                roughnessFactor = 1e-5
+
+            if pbr.metallicFactor is not None:
+                metallicFactor = pbr.metallicFactor
+            else:
+                metallicFactor = 1e-5
+
+            if pbr.baseColorFactor:
+                baseColorFactor = pbr.baseColorFactor
+            else:
+                baseColorFactor = (1, 1, 1)
+
+            if mat.emissiveFactor:
+                emissiveFactor = mat.emissiveFactor
+            else:
+                emissiveFactor = (1, 1, 1)
+
+            colorTexture = pbr.baseColorTexture
+            if colorTexture is not None:
+                colorTexture = nodeTextures[colorTexture.index]
+
+            metallicRoughnessTexture = pbr.metallicRoughnessTexture
+            if metallicRoughnessTexture is not None:
+                metallicRoughnessTexture = \
+                    nodeTextures[metallicRoughnessTexture.index]
+
+            normalTexture = mat.normalTexture
+            if normalTexture is not None:
+                normalTexture = nodeTextures[normalTexture.index]
+
+            emissiveTexture = mat.emissiveTexture
+            if emissiveTexture is not None:
+                emissiveTexture = nodeTextures[emissiveTexture.index]
+
+            occlusionTexture = mat.occlusionTexture
+            if occlusionTexture is not None:
+                occlusionTexture = nodeTextures[occlusionTexture.index]
+
+            self.material[mat.name] = MetallicRoughnessMaterial(
+                self.win,
+                roughnessFactor=roughnessFactor,
+                metallicFactor=metallicFactor,
+                metallicRoughnessTexture=metallicRoughnessTexture,
+                color=baseColorFactor,
+                colorTexture=colorTexture,
+                normalTexture=normalTexture,
+                emissiveTexture=emissiveTexture,
+                occulusionTexture=occlusionTexture,
+                emissiveFactor=emissiveFactor,
+                diffuseIBL=self.diffuseIBL,
+                hdr=True,
+                toneMap=None,
+                meshFlags=self._meshAttribFlags
+            )
+
 
         self._vao = materialVAOs
 
