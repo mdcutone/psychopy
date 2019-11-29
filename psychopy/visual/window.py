@@ -1869,7 +1869,7 @@ class Window(object):
         self._viewProjectionMatrix[:, :] = numpy.matmul(
             self._projectionMatrix, self._viewMatrix)
 
-    def viewFromMonitor(self):
+    def viewFromMonitorConfig(self):
         """Set the view transformation matrix based on monitor configuration.
 
         Requires a valid monitor configuration to be associated with the
@@ -1899,14 +1899,14 @@ class Window(object):
         self._viewProjectionMatrix[:, :] = numpy.matmul(
             self._projectionMatrix, self._viewMatrix)
 
-    def perspectiveFromMonitor(self, offaxis=False):
+    def perspectiveFromMonitorConfig(self, offaxis=False):
         """Get a perspective projection from monitor settings.
 
         Parameters
         ----------
         offaxis : bool
-            Use `eyeOffset` to create off-axis frustums. The view transformation
-            matrix should be set accordingly.
+            Use `eyeOffset` to create off-axis frustums. If `False`, the
+            result will result in a 'parallel' stereo projection.
 
         """
         # get the view distance in meters
