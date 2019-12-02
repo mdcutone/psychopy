@@ -1212,7 +1212,7 @@ class MetallicRoughnessMaterial(object):
         """Use this material to render a stimulus."""
         pass
 
-    def begin(self, modelMatrix):
+    def begin(self, pose):
         """Use this material for successive rendering calls.
 
         The material shader is installed and configured upon calling this
@@ -1231,10 +1231,8 @@ class MetallicRoughnessMaterial(object):
 
         """
         # create pointers to model and normal matrix
-        modelMatrix = np.asarray(modelMatrix, dtype=np.float32)
-        normalMatrix = at.array2pointer(
-            np.transpose(np.linalg.inv(modelMatrix)))
-        modelMatrix = at.array2pointer(modelMatrix)
+        normalMatrix = at.array2pointer(pose.normalMatrix)
+        modelMatrix = at.array2pointer(pose.modelMatrix)
         viewProjectionMatrix = at.array2pointer(self.win._viewProjectionMatrix)
 
         # get the key to access the shader in cache
@@ -3421,13 +3419,13 @@ class GLTFMeshStim(BaseRigidBodyStim):
             # if material is a dictionary
             if isinstance(self.material, dict):
                 for materialName, materialDesc in self.material.items():
-                    materialDesc.begin(self.thePose.getModelMatrix())
+                    materialDesc.begin(self.thePose)
                     gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
                     materialDesc.end()
             else:
                 # material is a single item
 
-                self.material.begin(self.thePose.modelMatrix)
+                self.material.begin(self.thePose)
                 for materialName, _ in self._vao.items():
                     gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
                 self.material.end()
