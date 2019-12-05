@@ -1212,7 +1212,7 @@ class MetallicRoughnessMaterial(object):
         """Use this material to render a stimulus."""
         pass
 
-    def begin(self, pose):
+    def begin(self, modelMatrix):
         """Use this material for successive rendering calls.
 
         The material shader is installed and configured upon calling this
@@ -1231,8 +1231,10 @@ class MetallicRoughnessMaterial(object):
 
         """
         # create pointers to model and normal matrix
-        normalMatrix = at.array2pointer(pose.normalMatrix)
-        modelMatrix = at.array2pointer(pose.modelMatrix)
+        modelMatrix = np.asarray(modelMatrix, dtype=np.float32)
+        normalMatrix = at.array2pointer(
+            np.transpose(np.linalg.inv(modelMatrix)))
+        modelMatrix = at.array2pointer(modelMatrix)
         viewProjectionMatrix = at.array2pointer(self.win._viewProjectionMatrix)
 
         # get the key to access the shader in cache
@@ -1532,7 +1534,6 @@ class RigidBodyPose(object):
             self._pos, self._ori, dtype=np.float32)
 
         # computed only if needed
-        self._normalMatrix = np.zeros((4, 4), dtype=np.float32, order='C')
         self._invModelMatrix = np.zeros((4, 4), dtype=np.float32, order='C')
 
         # additional useful vectors
@@ -1541,16 +1542,12 @@ class RigidBodyPose(object):
 
         # compute matrices only if `pos` and `ori` attributes have been updated
         self._matrixNeedsUpdate = False
-        self._invMatrixNeedsUpdate = True
-        self._normalMatrixNeedsUpdate = True
+        self._invMatrixNeedsUpdate = False
 
         self.pos = pos
         self.ori = ori
 
         self._bounds = None
-
-    def __repr__(self):
-        return 'RigidBodyPose({}, {}), %s)'.format(self.pos, self.ori)
 
     @property
     def bounds(self):
@@ -1569,8 +1566,7 @@ class RigidBodyPose(object):
     @pos.setter
     def pos(self, value):
         self._pos = np.ascontiguousarray(value, dtype=np.float32)
-        self._normalMatrixNeedsUpdate = self._matrixNeedsUpdate = \
-            self._invMatrixNeedsUpdate = True
+        self._matrixNeedsUpdate = self._invMatrixNeedsUpdate = True
 
     @property
     def ori(self):
@@ -1580,8 +1576,7 @@ class RigidBodyPose(object):
     @ori.setter
     def ori(self, value):
         self._ori = np.ascontiguousarray(value, dtype=np.float32)
-        self._normalMatrixNeedsUpdate = self._matrixNeedsUpdate = \
-            self._invMatrixNeedsUpdate = True
+        self._matrixNeedsUpdate = self._invMatrixNeedsUpdate = True
 
     @property
     def posOri(self):
@@ -1592,8 +1587,7 @@ class RigidBodyPose(object):
     def posOri(self, value):
         self._pos = np.ascontiguousarray(value[0], dtype=np.float32)
         self._ori = np.ascontiguousarray(value[1], dtype=np.float32)
-        self._matrixNeedsUpdate = self._invMatrixNeedsUpdate = \
-            self._normalMatrixNeedsUpdate = True
+        self._matrixNeedsUpdate = self._invMatrixNeedsUpdate = True
 
     @property
     def at(self):
@@ -1659,8 +1653,7 @@ class RigidBodyPose(object):
         self._pos.fill(0.0)
         self._ori[:3] = 0.0
         self._ori[3] = 1.0
-        self._matrixNeedsUpdate = self._normalMatrixNeedsUpdate = \
-            self._invMatrixNeedsUpdate = True
+        self._matrixNeedsUpdate = self._invMatrixNeedsUpdate = True
 
     def getOriAxisAngle(self, degrees=True):
         """Get the axis and angle of rotation for the rigid body. Converts the
@@ -1722,45 +1715,10 @@ class RigidBodyPose(object):
     @property
     def inverseModelMatrix(self):
         """Inverse of the pose as a 4x4 model matrix (read-only)."""
-        if not self._invMatrixNeedsUpdate:
+        if not self._invModelMatrix:
             return self._invModelMatrix
         else:
             return self.getModelMatrix(inverse=True)
-
-    @property
-    def normalMatrix(self):
-        """The normal transformation matrix."""
-        if not self._normalMatrixNeedsUpdate:
-            return self._normalMatrix
-        else:
-            return self.getNormalMatrix()
-
-    def getNormalMatrix(self, out=None):
-        """Get the present normal matrix.
-
-        Parameters
-        ----------
-        out : ndarray or None
-            Optional 4x4 array to write values to. Values written are computed
-            using 32-bit float precision regardless of the data type of `out`.
-
-        Returns
-        -------
-        ndarray
-            4x4 normal transformation matrix.
-
-        """
-        if not self._normalMatrixNeedsUpdate:
-            return self._normalMatrix
-
-        self._normalMatrix[:, :] = np.linalg.inv(self.modelMatrix).T
-
-        if out is not None:
-            out[:, :] = self._normalMatrix[:, :]
-
-        self._normalMatrixNeedsUpdate = False
-
-        return self._normalMatrix
 
     def getModelMatrix(self, inverse=False, out=None):
         """Get the present rigid body transformation as a 4x4 matrix.
@@ -1808,7 +1766,6 @@ class RigidBodyPose(object):
                 self._pos, self._ori, out=self._modelMatrix)
 
             self._matrixNeedsUpdate = False
-            self._normalMatrixNeedsUpdate = self._invMatrixNeedsUpdate = True
 
         # only update and return the inverse matrix if requested
         if inverse:
@@ -3420,13 +3377,13 @@ class GLTFMeshStim(BaseRigidBodyStim):
             # if material is a dictionary
             if isinstance(self.material, dict):
                 for materialName, materialDesc in self.material.items():
-                    materialDesc.begin(self.thePose)
+                    materialDesc.begin(self.thePose.getModelMatrix())
                     gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
                     materialDesc.end()
             else:
                 # material is a single item
 
-                self.material.begin(self.thePose)
+                self.material.begin(self.thePose.modelMatrix)
                 for materialName, _ in self._vao.items():
                     gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES)
                 self.material.end()
