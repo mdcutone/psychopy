@@ -1747,6 +1747,11 @@ class Window(object):
         if applyTransform:
             self.applyEyeTransform(clearDepth=clearDepth)
 
+    @property
+    def eyePos(self):
+        """Eye position in the scene."""
+        return self._eyePos
+
     def setPerspectiveView(self, applyTransform=True, clearDepth=True):
         """Set the projection and view matrix to render with perspective.
 

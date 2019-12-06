@@ -1193,6 +1193,17 @@ class Rift(window.Window):
             return self._headPose
 
     @property
+    def eyePos(self):
+        """Eye position in the scene."""
+        if not self._monoscopic:
+            if self.buffer == 'left':
+                return libovr.getEyeRenderPose(libovr.EYE_LEFT).pos
+            elif self.buffer == 'right':
+                return libovr.getEyeRenderPose(libovr.EYE_RIGHT).pos
+        else:
+            return self._headPose.pos
+
+    @property
     def shouldQuit(self):
         """`True` if the user requested the application should quit through the
         headset's interface.
@@ -2010,17 +2021,62 @@ class Rift(window.Window):
             Clear the depth buffer prior after configuring the view parameters.
 
         """
-        if self._legacyOpenGL:
+        # apply the projection and view transformations
+        if hasattr(self, '_projectionMatrix'):
             GL.glMatrixMode(GL.GL_PROJECTION)
             GL.glLoadIdentity()
-            self.multiplyProjectionMatrixGL()
 
+            if not self._monoscopic:
+                if self.buffer == 'left':
+                    GL.glMultTransposeMatrixf(
+                        self._projectionMatrix[0].flatten().ctypes.data_as(
+                            ctypes.POINTER(ctypes.c_float)))
+                elif self.buffer == 'right':
+                    GL.glMultTransposeMatrixf(
+                        self._projectionMatrix[1].flatten().ctypes.data_as(
+                            ctypes.POINTER(ctypes.c_float)))
+            else:
+                GL.glMultTransposeMatrixf(self._viewMatrix.ctypes.data_as(
+                            ctypes.POINTER(ctypes.c_float)))
+
+        if hasattr(self, '_viewMatrix'):
             GL.glMatrixMode(GL.GL_MODELVIEW)
             GL.glLoadIdentity()
-            self.multiplyViewMatrixGL()
 
+            if not self._monoscopic:
+                if self.buffer == 'left':
+                    GL.glMultTransposeMatrixf(
+                        self._viewMatrix[0].flatten().ctypes.data_as(
+                            ctypes.POINTER(ctypes.c_float)))
+                elif self.buffer == 'right':
+                    GL.glMultTransposeMatrixf(
+                        self._viewMatrix[1].flatten().ctypes.data_as(
+                            ctypes.POINTER(ctypes.c_float)))
+            else:
+                GL.glMultTransposeMatrixf(self._viewMatrix.ctypes.data_as(
+                            ctypes.POINTER(ctypes.c_float)))
+
+        # cache the combined view and projection matrix
+        if hasattr(self, '_viewProjectionMatrix'):
+
+            if not self._monoscopic:
+                if self.buffer == 'left':
+                    self._viewProjectionMatrix[:, :] = np.matmul(
+                        self._projectionMatrix[0], self._viewMatrix[0])
+                elif self.buffer == 'right':
+                    self._viewProjectionMatrix[:, :] = np.matmul(
+                        self._projectionMatrix[1], self._viewMatrix[1])
+            else:
+                self._viewProjectionMatrix[:, :] = np.matmul(
+                    self._projectionMatrix, self._viewMatrix)
+
+        oldDepthMask = self.depthMask
         if clearDepth:
+            GL.glDepthMask(GL.GL_TRUE)
             GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
+
+            if oldDepthMask is False:   # return to old state if needed
+                GL.glDepthMask(GL.GL_FALSE)
 
     def setDefaultView(self, clearDepth=True):
         """Return to default projection. Call this before drawing PsychoPy's

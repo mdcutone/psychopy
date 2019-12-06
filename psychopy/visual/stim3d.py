@@ -1476,7 +1476,7 @@ class MetallicRoughnessMaterial(object):
         if not self._useLights:
             return
 
-        GL.glUniform3f(self._unifLoc[b'u_Camera'], *self.win._eyePos)
+        GL.glUniform3f(self._unifLoc[b'u_Camera'], *self.win.eyePos)
         GL.glUniform1f(self._unifLoc[b'u_Exposure'], self.win._exposure)
 
 
