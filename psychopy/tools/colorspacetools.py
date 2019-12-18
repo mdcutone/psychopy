@@ -10,12 +10,44 @@
 from __future__ import absolute_import, division, print_function
 
 __all__ = ['srgbTF', 'rec709TF', 'cielab2rgb', 'cielch2rgb', 'dkl2rgb',
-           'dklCart2rgb', 'rgb2dklCart', 'hsv2rgb', 'rgb2lms', 'lms2rgb']
+           'dklCart2rgb', 'rgb2dklCart', 'hsv2rgb', 'rgb2lms', 'lms2rgb',
+           'cielab2xyz', 'xyz2srgb', 'chromaTransform']
 
 from past.utils import old_div
 import numpy
 from psychopy import logging
 from psychopy.tools.coordinatetools import sph2cart
+from psychopy.tools.mathtools import applyMatrix
+
+
+# standard illuminants
+ILLUMINANT_A = numpy.array((1.09850, 1.00000, 0.35585))
+ILLUMINANT_B = numpy.array((0.99072, 1.00000, 0.85223))
+ILLUMINANT_C = numpy.array((0.98074, 1.00000, 1.18232))
+ILLUMINANT_D50 = numpy.array((0.96422, 1.00000, 0.82521))
+ILLUMINANT_D55 = numpy.array((0.95682, 1.00000, 0.92149))
+ILLUMINANT_D65 = numpy.array((0.95047, 1.00000, 1.08883))
+ILLUMINANT_D75 = numpy.array((0.94972, 1.00000, 1.22638))
+ILLUMINANT_E = numpy.array((1.00000, 1.00000, 1.00000))
+ILLUMINANT_F2 = numpy.array((0.99186, 1.00000, 0.67393))
+ILLUMINANT_F7 = numpy.array((0.95041, 1.00000, 1.08747))
+ILLUMINANT_F11 = numpy.array((1.00962, 1.00000, 0.64350))
+
+
+# bradford cone-response matrices for chromatic adaptation transforms
+_BRADFORD_CRM = numpy.ascontiguousarray([
+    [0.8951, 0.2664, -0.1614],
+    [-0.7502, 1.7135, 0.0367],
+    [0.0389, -0.0685, 1.0296]
+])
+_BRADFORD_CRM_INV = numpy.linalg.inv(_BRADFORD_CRM)
+
+_VONKRIES_CRM = numpy.ascontiguousarray([
+    [0.40024, 0.7076, -0.08081],
+    [-0.2263, 1.16532, 0.0457],
+    [0.0,  0.0,  0.91822]
+])
+_VONKRIES_CRM_INV = numpy.linalg.inv(_VONKRIES_CRM)
 
 
 def unpackColors(colors):  # used internally, not exported by __all__
@@ -323,6 +355,171 @@ def cielch2rgb(lch,
     return rgb_out  # don't do signed RGB conversion, done by cielab2rgb
 
 
+def xyz2srgb(xyz, clip=False):
+    """Convert CIE-XYZ to linear sRGB colors.
+
+    Parameters
+    ----------
+    xyz : array_like
+        1-, 2-, 3-D vector of CIE-XYZ coordinates to convert. The last
+        dimension should be length-3 in all cases specifying a single
+        coordinate.
+    clip : boolean
+        Make all output values representable by the display. However, colors
+        outside of the display's gamut may not be valid!
+
+    Returns
+    -------
+    ndarray
+        Array RGB color values with similar shape to `xyz` input.
+
+    """
+    xyz, orig_shape, orig_dim = unpackColors(xyz)
+
+    # XYZ -> sRGB conversion matrix, assumes D65 white point
+    conversionMatrix = numpy.asmatrix([
+        [3.24096994, -1.53738318, -0.49861076],
+        [-0.96924364, 1.8759675, 0.04155506],
+        [0.05563008, -0.20397696, 1.05697151]])
+
+    rgb_out = xyz.dot(conversionMatrix.T)
+
+    # clip unrepresentable colors if requested
+    if clip:
+        rgb_out = numpy.clip(rgb_out, 0.0, 1.0)
+
+    if orig_dim == 1:
+        rgb_out = rgb_out[0]
+    elif orig_dim == 3:
+        rgb_out = numpy.reshape(rgb_out, orig_shape)
+
+    return rgb_out * 2.0 - 1.0
+
+
+def cielab2xyz(lab, whiteXYZ=ILLUMINANT_D65):
+    """Transform CIE L*a*b* (1976) color space coordinates to CIE-XYZ color
+    space.
+
+    Parameters
+    ----------
+    lab : tuple, list or ndarray
+        1-, 2-, 3-D vector of CIE L*a*b* coordinates to convert. The last
+        dimension should be length-3 in all cases specifying a single
+        coordinate.
+    whiteXYZ : tuple, list or ndarray
+        1-D vector coordinate of the white point in CIE-XYZ color space. By
+        default `ILLUMINANT_D65` is used. If `None` is specified, th white point
+        will not be applied to the output values, you must apply it later on
+        for coordinates to be valid.
+
+    Returns
+    -------
+    ndarray
+        Array of CIE-XYZ colors coordinates with similar shape to `lab`.
+
+    """
+    lab, orig_shape, orig_dim = unpackColors(lab)
+
+    L = lab[:, 0]  # lightness
+    a = lab[:, 1]  # green (-)  <-> red (+)
+    b = lab[:, 2]  # blue (-) <-> yellow (+)
+
+    # convert Lab to CIE-XYZ color space
+    # uses reverse transformation found here:
+    #   https://en.wikipedia.org/wiki/Lab_color_space
+    xyz_array = numpy.zeros(lab.shape)
+    s = (L + 16.0) / 116.0
+    xyz_array[:, 0] = s + (a / 500.0)
+    xyz_array[:, 1] = s
+    xyz_array[:, 2] = s - (b / 200.0)
+
+    # evaluate the inverse f-function
+    delta = 6.0 / 29.0
+    xyz_array = numpy.where(xyz_array > delta,
+                            xyz_array ** 3.0,
+                            (xyz_array - (4.0 / 29.0)) * (3.0 * delta ** 2.0))
+
+    # multiply in white values
+    if whiteXYZ is not None:
+        wht_x, wht_y, wht_z = whiteXYZ  # white point in CIE-XYZ color space
+        xyz_array[:, 0] *= wht_x
+        xyz_array[:, 1] *= wht_y
+        xyz_array[:, 2] *= wht_z
+
+    if orig_dim == 1:
+        xyz_array = xyz_array[0]
+    elif orig_dim == 3:
+        xyz_array = numpy.reshape(xyz_array, orig_shape)
+
+    return xyz_array
+
+
+def chromaTransform(xyz, srcWhiteXYZ, dstWhiteXYZ, method='bfd'):
+    """Change the illuminant (white point) of a CIE-XYZ color using a chromatic
+    adaptation transform.
+
+    This offers a faster method of changing the white-point of extant color
+    coordinates than recomputing them, however the results are sometimes less
+    accurate.
+
+    Parameters
+    ----------
+    xyz : tuple, list or ndarray
+        1-, 2-, 3-D vector of CIE-XYZ [X, Y, Z] coordinates to convert. The last
+        dimension should be length-3 in all cases specifying a single
+        coordinate.
+    srcWhiteXYZ : array_like
+        CIE-XYZ color coordinates [X, Y, Z] of the white point used by `xyz`
+        colors. If `None`, a standard D65 illuminant is used.
+    dstWhiteXYZ : array_like
+        CIE-XYZ color coordinates [X, Y, Z] of the white point to transform
+        colors to.
+    method : str
+        Adaptation method to use. Options are 'scale', 'bfd' (Bradford), and
+        'vk' (Von Kries). The default is 'bfd'.
+
+    Returns
+    -------
+    ndarray
+        Transformed colors in CIE-XYZ color space.
+
+    """
+    xyz, orig_shape, orig_dim = unpackColors(xyz)
+
+    srcXYZ = numpy.asarray(srcWhiteXYZ)
+    dstXYZ = numpy.asarray(dstWhiteXYZ)
+
+    if method == 'bfd':
+        srcRGB = srcXYZ.dot(_BRADFORD_CRM.T)
+        dstRGB = dstXYZ.dot(_BRADFORD_CRM.T)
+        mCAT = numpy.matmul(
+            _BRADFORD_CRM_INV,
+            numpy.matmul(numpy.diagflat(dstRGB / srcRGB),
+                         _BRADFORD_CRM))
+    elif method == 'vk':
+        srcRGB = srcXYZ.dot(_VONKRIES_CRM.T)
+        dstRGB = dstXYZ.dot(_VONKRIES_CRM.T)
+        mCAT = numpy.matmul(
+            _VONKRIES_CRM_INV,
+            numpy.matmul(numpy.diagflat(dstRGB / srcRGB),
+                         _VONKRIES_CRM))
+    elif method == 'scale':
+        mCAT = numpy.diagflat(dstXYZ / srcXYZ)
+    else:
+        raise ValueError("Invalid value for `method`.")
+
+    # apply the transformation
+    xyz_array = xyz.dot(mCAT.T)
+
+    # restore color array to original shape
+    if orig_dim == 1:
+        xyz_array = xyz_array[0]
+    elif orig_dim == 3:
+        xyz_array = numpy.reshape(xyz_array, orig_shape)
+
+    return xyz_array
+
+
 def dkl2rgb(dkl, conversionMatrix=None):
     """Convert from DKL color space (Derrington, Krauskopf & Lennie) to RGB.
 
@@ -551,3 +748,4 @@ def rgb2lms(rgb_Nx3, conversionMatrix=None):
 
     lms = numpy.dot(rgb_to_cones, rgb_3xN)
     return numpy.transpose(lms)  # return in the shape we received it
+
