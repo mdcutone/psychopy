@@ -1623,6 +1623,22 @@ class Rift(window.Window):
             return self._projectionMatrix
 
     @property
+    def eyePos(self):
+        """The coordinates for the position of the eye [x, y, z].
+        """
+        if not self._monoscopic:
+            if self.buffer == 'left':
+                return libovr.getEyeRenderPose(libovr.EYE_LEFT).pos
+            elif self.buffer == 'right':
+                return libovr.getEyeRenderPose(libovr.EYE_RIGHT).pos
+        else:
+            return libovr.getEyeRenderPose(libovr.EYE_LEFT).pos
+
+    @eyePos.setter
+    def eyePos(self, value):
+        raise NotImplemented("Cannot set eye position for HMD.")
+
+    @property
     def isBoundaryVisible(self):
         """True if the VR boundary is visible.
         """

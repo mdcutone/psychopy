@@ -497,6 +497,9 @@ class Window(object):
         self._eyeOffset = 0.0
         self._convergeOffset = 0.0
 
+        # eye position
+        self._eyePos = numpy.zeros((3,), dtype=numpy.float32)
+
         # gamma
         self.bits = None  # this may change in a few lines time!
         self.__dict__['gamma'] = gamma
@@ -1734,9 +1737,9 @@ class Window(object):
         self._projectionMatrix = viewtools.perspectiveProjectionMatrix(*frustum)
 
         # translate away from screen
-        eyePos = (self._eyeOffset, 0.0, scrDistM)
+        self._eyePos = (self._eyeOffset, 0.0, scrDistM)
         convergePoint = (0.0, 0.0, self.convergeOffset)
-        self._viewMatrix = viewtools.lookAt(eyePos, convergePoint)
+        self._viewMatrix = viewtools.lookAt(self._eyePos, convergePoint)
 
         if applyTransform:
             self.applyEyeTransform(clearDepth=clearDepth)
