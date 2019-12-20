@@ -1,5 +1,3 @@
-
-
 :mod:`psychopy.tools.colorspacetools`
 ----------------------------------------
 
