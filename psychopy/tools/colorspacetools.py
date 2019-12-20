@@ -38,7 +38,8 @@ __all__ = [
     'ILLUMINANT_F7',
     'ILLUMINANT_F11',
     'xyz2xyY',
-    'xyz2cielab'
+    'xyz2cielab',
+    'cielch2xyz'
 ]
 
 from past.utils import old_div
@@ -529,27 +530,6 @@ def cielab2xyz(lab, whiteXYZ=ILLUMINANT_D65, exact=True):
     xyz[:, 1] = numpy.where(L > eta * kappa, f[:, 1] ** 3, L / kappa)
     xyz *= numpy.asarray(whiteXYZ)
 
-    # old method from wikipedia
-    # # convert Lab to CIE-XYZ color space
-    # # uses reverse transformation found here:
-    # #   https://en.wikipedia.org/wiki/Lab_color_space
-    # xyz_array = numpy.zeros(lab.shape)
-    # s = (L + 16.0) / 116.0
-    # xyz_array[:, 0] = s + (a / 500.0)
-    # xyz_array[:, 1] = s
-    # xyz_array[:, 2] = s - (b / 200.0)
-    #
-    # # evaluate the inverse f-function
-    # delta = 6.0 / 29.0
-    # u = 4.0 / 29.0
-    # v = 3.0 * delta ** 2.0
-    # xyz_array = numpy.where(xyz_array > delta,
-    #                         xyz_array ** 3.0,
-    #                         (xyz_array - u) * v)
-    #
-    # # multiply in white values
-    # xyz_array *= numpy.asarray(whiteXYZ)
-
     if orig_dim == 1:
         xyz = xyz[0]
     elif orig_dim == 3:
@@ -608,7 +588,7 @@ def xyz2cielab(xyz, whiteXYZ=ILLUMINANT_D65, exact=True):
     return lab
 
 
-def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65):
+def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65, exact=True):
     """Transform CIE L*C*h* coordinates to CIE-XYZ color space.
 
     Parameters
@@ -620,6 +600,10 @@ def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65):
     whiteXYZ : tuple, list or ndarray
         1-D vector coordinate of the white point in CIE-XYZ color space. By
         default `ILLUMINANT_D65` is used.
+    exact : bool
+        Use exact values (or as close as possible) for some values defined
+        with low-precision in the CIE standard. If `False`, the values specified
+        by the CIE standard are used.
 
     Returns
     -------
@@ -636,7 +620,7 @@ def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65):
     lab[:, 2] = lch[:, 1] * numpy.math.sin(numpy.math.radians(lch[:, 2]))
 
     # convert to RGB using the CIE L*a*b* function
-    xyz_out = cielab2xyz(lab, whiteXYZ=whiteXYZ)
+    xyz_out = cielab2xyz(lab, whiteXYZ=whiteXYZ, exact=exact)
 
     # make the output match the dimensions/shape of input
     if orig_dim == 1:
@@ -645,6 +629,68 @@ def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65):
         xyz_out = numpy.reshape(xyz_out, orig_shape)
 
     return xyz_out
+
+
+def cielch2xyz(lch, whiteXYZ=None, clip=False):
+    """Transform CIE L*C*h* coordinates to RGB tristimulus values.
+
+    Parameters
+    ----------
+    lch : tuple, list or ndarray
+        1-, 2-, 3-D vector of CIE L*C*h* coordinates to convert. The last
+        dimension should be length-3 in all cases specifying a single
+        coordinate. The hue angle *h is expected in degrees.
+    whiteXYZ : tuple, list or ndarray
+        1-D vector coordinate of the white point in CIE-XYZ color space. Must be
+        the same white point needed by the conversion matrix. The default
+        white point is D65 if None is specified, defined as X, Y, Z = 0.9505,
+        1.0000, 1.0890
+    conversionMatrix : tuple, list or ndarray
+        3x3 conversion matrix to transform CIE-XYZ to RGB values. The default
+        matrix is sRGB with a D65 white point if None is specified. Note that
+        values must be gamma corrected to appear correctly according to the sRGB
+        standard.
+    transferFunc : pyfunc or None
+        Signature of the transfer function to use. If None, values are kept as
+        linear RGB (it's assumed your display is gamma corrected via the
+        hardware CLUT). The TF must be appropriate for the conversion matrix
+        supplied. Additional arguments to 'transferFunc' can be passed by
+        specifying them as keyword arguments. Gamma functions that come with
+        PsychoPy are 'srgbTF' and 'rec709TF', see their docs for more
+        information.
+    clip : boolean
+        Make all output values representable by the display. However, colors
+        outside of the display's gamut may not be valid!
+
+    Returns
+    -------
+    ndarray
+        array of RGB tristimulus values
+
+    """
+    lch, orig_shape, orig_dim = unpackColors(lch)
+
+    # convert values to L*a*b*
+    lab = numpy.empty(lch.shape, dtype=lch.dtype)
+    lab[:, 0] = lch[:, 0]
+    lab[:, 1] = lch[:, 1] * numpy.math.cos(numpy.math.radians(lch[:, 2]))
+    lab[:, 2] = lch[:, 1] * numpy.math.sin(numpy.math.radians(lch[:, 2]))
+
+    # convert to RGB using the CIE L*a*b* function
+    rgb_out = cielab2rgb(lab,
+                         whiteXYZ=whiteXYZ,
+                         conversionMatrix=conversionMatrix,
+                         transferFunc=transferFunc,
+                         clip=clip,
+                         **kwargs)
+
+    # make the output match the dimensions/shape of input
+    if orig_dim == 1:
+        rgb_out = rgb_out[0]
+    elif orig_dim == 3:
+        rgb_out = numpy.reshape(rgb_out, orig_shape)
+
+    return rgb_out  # don't do signed RGB conversion, done by cielab2rgb
 
 
 def xyz2xyY(xyz, discardY=False):
@@ -715,14 +761,7 @@ def xyY2xyz(xyY):
     Returns
     -------
     ndarray
-        Converted chromaticity coordinates with the same shape as `xyz`. If
-        `discardY=True`, the last dimension will be truncated to 2.
-
-    Examples
-    --------
-    Convert a standard illuminant (D65) to CIE-xyY::
-
-        x, y, Y = cst.xyz2xyY(cst.ILLUMINANT_D65)
+        Converted chromaticity coordinates with the same shape as `xyY`.
 
     """
     xyY, orig_shape, orig_dim = unpackColors(xyY)
