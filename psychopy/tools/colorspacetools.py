@@ -39,7 +39,9 @@ __all__ = [
     'ILLUMINANT_F11',
     'xyz2xyY',
     'xyz2cielab',
-    'cielch2xyz'
+    'cielch2xyz',
+    'xyY2xyz',
+    'srgbTransform'
 ]
 
 from past.utils import old_div
@@ -588,7 +590,7 @@ def xyz2cielab(xyz, whiteXYZ=ILLUMINANT_D65, exact=True):
     return lab
 
 
-def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65, exact=True):
+def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65):
     """Transform CIE L*C*h* coordinates to CIE-XYZ color space.
 
     Parameters
@@ -600,10 +602,6 @@ def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65, exact=True):
     whiteXYZ : tuple, list or ndarray
         1-D vector coordinate of the white point in CIE-XYZ color space. By
         default `ILLUMINANT_D65` is used.
-    exact : bool
-        Use exact values (or as close as possible) for some values defined
-        with low-precision in the CIE standard. If `False`, the values specified
-        by the CIE standard are used.
 
     Returns
     -------
@@ -620,7 +618,7 @@ def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65, exact=True):
     lab[:, 2] = lch[:, 1] * numpy.math.sin(numpy.math.radians(lch[:, 2]))
 
     # convert to RGB using the CIE L*a*b* function
-    xyz_out = cielab2xyz(lab, whiteXYZ=whiteXYZ, exact=exact)
+    xyz_out = cielab2xyz(lab, whiteXYZ=whiteXYZ)
 
     # make the output match the dimensions/shape of input
     if orig_dim == 1:
@@ -631,7 +629,12 @@ def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65, exact=True):
     return xyz_out
 
 
-def cielch2xyz(lch, whiteXYZ=None, clip=False):
+def cielch2rgb(lch,
+               whiteXYZ=None,
+               conversionMatrix=None,
+               transferFunc=None,
+               clip=False,
+               **kwargs):
     """Transform CIE L*C*h* coordinates to RGB tristimulus values.
 
     Parameters
@@ -691,6 +694,49 @@ def cielch2xyz(lch, whiteXYZ=None, clip=False):
         rgb_out = numpy.reshape(rgb_out, orig_shape)
 
     return rgb_out  # don't do signed RGB conversion, done by cielab2rgb
+
+
+def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65, exact=True):
+    """Transform CIE L*C*h* coordinates to CIE-XYZ color space.
+
+    Parameters
+    ----------
+    lch : tuple, list or ndarray
+        1-, 2-, 3-D vector of CIE L*C*h* coordinates to convert. The last
+        dimension should be length-3 in all cases specifying a single
+        coordinate. The hue angle *h is expected in degrees.
+    whiteXYZ : tuple, list or ndarray
+        1-D vector coordinate of the white point in CIE-XYZ color space. By
+        default `ILLUMINANT_D65` is used.
+    exact : bool
+        Use exact values (or as close as possible) for some values defined
+        with low-precision in the CIE standard. If `False`, the values specified
+        by the CIE standard are used.
+
+    Returns
+    -------
+    ndarray
+        Array of CIE-XYZ colors coordinates with similar shape to `lch`.
+
+    """
+    lch, orig_shape, orig_dim = unpackColors(lch)
+
+    # convert values to L*a*b*
+    lab = numpy.empty(lch.shape, dtype=lch.dtype)
+    lab[:, 0] = lch[:, 0]
+    lab[:, 1] = lch[:, 1] * numpy.math.cos(numpy.math.radians(lch[:, 2]))
+    lab[:, 2] = lch[:, 1] * numpy.math.sin(numpy.math.radians(lch[:, 2]))
+
+    # convert to RGB using the CIE L*a*b* function
+    xyz_out = cielab2xyz(lab, whiteXYZ=whiteXYZ, exact=exact)
+
+    # make the output match the dimensions/shape of input
+    if orig_dim == 1:
+        xyz_out = xyz_out[0]
+    elif orig_dim == 3:
+        xyz_out = numpy.reshape(xyz_out, orig_shape)
+
+    return xyz_out
 
 
 def xyz2xyY(xyz, discardY=False):
