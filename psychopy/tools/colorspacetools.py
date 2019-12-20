@@ -700,16 +700,38 @@ def xyz2xyY(xyz, discardY=False):
     return to_return
 
 
-def xyY2xyz(xyz):
-    """Convert CIE-xyY to CIE-XYZ chromaticity coordinates."""
-    xyz, orig_shape, orig_dim = unpackColors(xyz)
+def xyY2xyz(xyY):
+    """Convert CIE-xyY (1931) to CIE-XYZ chromaticity coordinates.
 
-    to_return = numpy.empty_like(xyz)
-    sum_xyz = xyz[:, 0] + xyz[:, 1] + xyz[:, 2]
+    Parameters
+    ----------
+    xyY : tuple, list or ndarray
+        1-, 2-, 3-D vector of CIE-xyY (1931) [x, y, Y] coordinates to convert.
+        The last dimension should be length-3 in all cases specifying a single
+        coordinate.
+    discardY : bool
+        Remove the `Y` component of the converted coordinates.
 
-    to_return[:, 0] = xyz[:, 0] / sum_xyz
-    to_return[:, 1] = xyz[:, 1] / sum_xyz
-    to_return[:, 2] = xyz[:, 1]
+    Returns
+    -------
+    ndarray
+        Converted chromaticity coordinates with the same shape as `xyz`. If
+        `discardY=True`, the last dimension will be truncated to 2.
+
+    Examples
+    --------
+    Convert a standard illuminant (D65) to CIE-xyY::
+
+        x, y, Y = cst.xyz2xyY(cst.ILLUMINANT_D65)
+
+    """
+    xyY, orig_shape, orig_dim = unpackColors(xyY)
+
+    to_return = numpy.empty_like(xyY)
+
+    to_return[:, 0] = (xyY[:, 0] * xyY[:, 2]) / xyY[:, 1]
+    to_return[:, 1] = xyY[:, 2]
+    to_return[:, 2] = ((1 - xyY[:, 0] - xyY[:, 1]) * xyY[:, 2]) / xyY[:, 1]
 
     # make the output match the dimensions/shape of input
     if orig_dim == 1:
