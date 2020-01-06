@@ -20,7 +20,7 @@ __all__ = [
     'hsv2rgb',
     'rgb2lms',
     'lms2rgb',
-    'cielab2xyz',
+    'lab2xyz',
     'xyz2rgb',
     'chromaTransform',
     'gammaTransform',
@@ -38,10 +38,11 @@ __all__ = [
     'ILLUMINANT_F7',
     'ILLUMINANT_F11',
     'xyz2xyY',
-    'xyz2cielab',
-    'cielch2xyz',
+    'xyz2lab',
+    'lch2xyz',
     'xyY2xyz',
-    'srgbTransform'
+    'srgbTransform',
+    'blackbody'
 ]
 
 from past.utils import old_div
@@ -481,7 +482,7 @@ def rgb2xyz(rgb, conversionMatrix=None, signed=False):
     return rgb_out
 
 
-def cielab2xyz(lab, whiteXYZ=ILLUMINANT_D65, exact=True):
+def lab2xyz(lab, whiteXYZ=ILLUMINANT_D65, exact=True):
     """Transform CIE L*a*b* (1976) color space coordinates to CIE-XYZ color
     space.
 
@@ -540,7 +541,7 @@ def cielab2xyz(lab, whiteXYZ=ILLUMINANT_D65, exact=True):
     return xyz
 
 
-def xyz2cielab(xyz, whiteXYZ=ILLUMINANT_D65, exact=True):
+def xyz2lab(xyz, whiteXYZ=ILLUMINANT_D65, exact=True):
     """Convert CIE-XYZ coordinates to CIE L*a*b* (1976).
 
     Parameters
@@ -552,8 +553,9 @@ def xyz2cielab(xyz, whiteXYZ=ILLUMINANT_D65, exact=True):
         1-D vector coordinate of the white point in CIE-XYZ color space. By
         default `ILLUMINANT_D65` is used.
     exact : bool
-        Use exact values (or as close as possible) for `kappa` and `eta`. If
-        `False`, the values specified by the CIE standard are used.
+        Use exact values (or as close as possible) for some values defined
+        with low-precision in the CIE standard. If `False`, the values specified
+        by the CIE standard are used.
 
     Returns
     -------
@@ -590,113 +592,7 @@ def xyz2cielab(xyz, whiteXYZ=ILLUMINANT_D65, exact=True):
     return lab
 
 
-def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65):
-    """Transform CIE L*C*h* coordinates to CIE-XYZ color space.
-
-    Parameters
-    ----------
-    lch : tuple, list or ndarray
-        1-, 2-, 3-D vector of CIE L*C*h* coordinates to convert. The last
-        dimension should be length-3 in all cases specifying a single
-        coordinate. The hue angle *h is expected in degrees.
-    whiteXYZ : tuple, list or ndarray
-        1-D vector coordinate of the white point in CIE-XYZ color space. By
-        default `ILLUMINANT_D65` is used.
-
-    Returns
-    -------
-    ndarray
-        Array of CIE-XYZ colors coordinates with similar shape to `lch`.
-
-    """
-    lch, orig_shape, orig_dim = unpackColors(lch)
-
-    # convert values to L*a*b*
-    lab = numpy.empty(lch.shape, dtype=lch.dtype)
-    lab[:, 0] = lch[:, 0]
-    lab[:, 1] = lch[:, 1] * numpy.math.cos(numpy.math.radians(lch[:, 2]))
-    lab[:, 2] = lch[:, 1] * numpy.math.sin(numpy.math.radians(lch[:, 2]))
-
-    # convert to RGB using the CIE L*a*b* function
-    xyz_out = cielab2xyz(lab, whiteXYZ=whiteXYZ)
-
-    # make the output match the dimensions/shape of input
-    if orig_dim == 1:
-        xyz_out = xyz_out[0]
-    elif orig_dim == 3:
-        xyz_out = numpy.reshape(xyz_out, orig_shape)
-
-    return xyz_out
-
-
-def cielch2rgb(lch,
-               whiteXYZ=None,
-               conversionMatrix=None,
-               transferFunc=None,
-               clip=False,
-               **kwargs):
-    """Transform CIE L*C*h* coordinates to RGB tristimulus values.
-
-    Parameters
-    ----------
-    lch : tuple, list or ndarray
-        1-, 2-, 3-D vector of CIE L*C*h* coordinates to convert. The last
-        dimension should be length-3 in all cases specifying a single
-        coordinate. The hue angle *h is expected in degrees.
-    whiteXYZ : tuple, list or ndarray
-        1-D vector coordinate of the white point in CIE-XYZ color space. Must be
-        the same white point needed by the conversion matrix. The default
-        white point is D65 if None is specified, defined as X, Y, Z = 0.9505,
-        1.0000, 1.0890
-    conversionMatrix : tuple, list or ndarray
-        3x3 conversion matrix to transform CIE-XYZ to RGB values. The default
-        matrix is sRGB with a D65 white point if None is specified. Note that
-        values must be gamma corrected to appear correctly according to the sRGB
-        standard.
-    transferFunc : pyfunc or None
-        Signature of the transfer function to use. If None, values are kept as
-        linear RGB (it's assumed your display is gamma corrected via the
-        hardware CLUT). The TF must be appropriate for the conversion matrix
-        supplied. Additional arguments to 'transferFunc' can be passed by
-        specifying them as keyword arguments. Gamma functions that come with
-        PsychoPy are 'srgbTF' and 'rec709TF', see their docs for more
-        information.
-    clip : boolean
-        Make all output values representable by the display. However, colors
-        outside of the display's gamut may not be valid!
-
-    Returns
-    -------
-    ndarray
-        array of RGB tristimulus values
-
-    """
-    lch, orig_shape, orig_dim = unpackColors(lch)
-
-    # convert values to L*a*b*
-    lab = numpy.empty(lch.shape, dtype=lch.dtype)
-    lab[:, 0] = lch[:, 0]
-    lab[:, 1] = lch[:, 1] * numpy.math.cos(numpy.math.radians(lch[:, 2]))
-    lab[:, 2] = lch[:, 1] * numpy.math.sin(numpy.math.radians(lch[:, 2]))
-
-    # convert to RGB using the CIE L*a*b* function
-    rgb_out = cielab2rgb(lab,
-                         whiteXYZ=whiteXYZ,
-                         conversionMatrix=conversionMatrix,
-                         transferFunc=transferFunc,
-                         clip=clip,
-                         **kwargs)
-
-    # make the output match the dimensions/shape of input
-    if orig_dim == 1:
-        rgb_out = rgb_out[0]
-    elif orig_dim == 3:
-        rgb_out = numpy.reshape(rgb_out, orig_shape)
-
-    return rgb_out  # don't do signed RGB conversion, done by cielab2rgb
-
-
-def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65, exact=True):
+def lch2xyz(lch, whiteXYZ=ILLUMINANT_D65, exact=True):
     """Transform CIE L*C*h* coordinates to CIE-XYZ color space.
 
     Parameters
@@ -728,7 +624,7 @@ def cielch2xyz(lch, whiteXYZ=ILLUMINANT_D65, exact=True):
     lab[:, 2] = lch[:, 1] * numpy.math.sin(numpy.math.radians(lch[:, 2]))
 
     # convert to RGB using the CIE L*a*b* function
-    xyz_out = cielab2xyz(lab, whiteXYZ=whiteXYZ, exact=exact)
+    xyz_out = lab2xyz(lab, whiteXYZ=whiteXYZ, exact=exact)
 
     # make the output match the dimensions/shape of input
     if orig_dim == 1:
@@ -1004,55 +900,162 @@ def srgbTransform(rgb, inverse=False, signed=False):
     return to_return * 2.0 - 1.0 if signed else to_return
 
 
-def createConversionMatrix(rxy, gxy, bxy, wxy, inverse=False):
-    """Construct a conversion matrix to convert CIE-XYZ coordinates to RGB
-    primaries or vice versa.
+def createConversionMatrix(r, g, b, whitePoint, inverse=False, colorspace='xy'):
+    """Construct a conversion matrix to convert CIE-XYZ coordinates to linear
+    RGB primaries or vice versa.
 
-    Returns a matrix to convert CIE-XYZ (1931) tristimulus values to linear RGB
-    given CIE-xy (1931) primaries and white point. By default, the returned
-    matrix transforms CIE-XYZ to linear RGB coordinates. Use `inverse=True` to
-    get the inverse transformation.
+    Returns a matrix to convert CIE-XYZ tristimulus values to linear RGB given
+    primaries and white point. By default, the returned matrix transforms
+    CIE-XYZ to linear RGB coordinates. Use `inverse=True` to get the inverse
+    transformation which transforms linear RGB to CIE-XYZ.
 
     You can obtain the appropriate chromaticity coordinates of the display's
-    phosphor 'guns' by measuring them with a spectrophotometer.
+    phosphor 'guns' by measuring them with a spectrophotometer. For convenience,
+    this function has a `colorspace` parameter which allows primaries to be
+    specified in a variety of formats which are commonly output by instruments
+    such as CIE-xy (1931), CIE-xyY (1931) or CIE-XYZ.
 
-    The routines here are based on methods found at:
-        http://www.ryanjuckett.com/programming/rgb-color-space-conversion/
+    The routines based on methods found on this web page
+    http://www.brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
 
     Parameters
     ----------
-    rxy : tuple, list or ndarray
-        Chromaticity coordinate (CIE-xy 1931) of the 'red' gun.
-    gxy : tuple, list or ndarray
-        Chromaticity coordinate (CIE-xy 1931) of the 'green' gun.
-    bxy : tuple, list or ndarray
-        Chromaticity coordinate (CIE-xy 1931) of the 'blue' gun.
-    wxy : tuple, list or ndarray
-        Chromaticity coordinate (CIE-xy 1931) of the white point.
+    r, g, b : tuple, list or ndarray
+        Chromaticity coordinates of the 'red', 'green', and 'blue' gun.
+    whitePoint : tuple, list or ndarray
+        CIE-XYZ coordinate of the illuminant (X, Y, Z).
     inverse : bool
-        Return the inverse transform RGB to XYZ.
+        Return the inverse transform for linear RGB to XYZ.
+    colorspace : str
+        Color space of specified primaries `r`, `g`, and `b`. Valid values are
+        'xy' for CIE-xy (1931), 'xyY' for CIE-xyY (1931), and 'xyz' for CIE-XYZ.
 
     Returns
     -------
     ndarray
-        3x3 conversion matrix.
+        3x3 conversion matrix (row major).
 
     """
+    # empty matrix
     mat_xy = numpy.zeros((3, 3,))
-    mat_xy[:2, 0] = rxy
-    mat_xy[:2, 1] = gxy
-    mat_xy[:2, 2] = bxy
-    mat_xy[2, :] = 1.0 - (mat_xy[0, :] + mat_xy[1, :])
 
-    wp = 1.0 / wxy[1] * numpy.array(
-        [wxy[0], wxy[1], 1.0 - (wxy[0] + wxy[1])], dtype=float)
+    if colorspace == 'xy':
+        mat_xy[:, 0] = [r[0] / r[1], 1., (1. - r[0] - r[1]) / r[1]]
+        mat_xy[:, 1] = [g[0] / g[1], 1., (1. - g[0] - g[1]) / g[1]]
+        mat_xy[:, 2] = [b[0] / b[1], 1., (1. - b[0] - b[1]) / b[1]]
+    elif colorspace == 'xyY':
+        mat_xy[:, 0] = [(r[0] * r[2]) / r[1],
+                        r[2],
+                        ((1 - r[0] - r[1]) * r[2]) / r[1]]
+        mat_xy[:, 1] = [(g[0] * g[2]) / g[1],
+                        g[2],
+                        ((1 - g[0] - g[1]) * g[2]) / g[1]]
+        mat_xy[:, 2] = [(b[0] * b[2]) / b[1],
+                        b[2],
+                        ((1 - b[0] - b[1]) * b[2]) / b[1]]
+    elif colorspace == 'xyz':
+        mat_xy[:, 0] = r
+        mat_xy[:, 1] = g
+        mat_xy[:, 2] = b
 
-    m = numpy.matmul(mat_xy, numpy.diagflat(wp.dot(numpy.linalg.inv(mat_xy).T)))
+    to_return = mat_xy * numpy.asarray(whitePoint).dot(numpy.linalg.inv(mat_xy).T)
 
     if not inverse:
-        m = numpy.linalg.inv(m)
+        to_return = numpy.linalg.inv(to_return)
 
-    return m
+    return to_return
+
+
+def blackbody(temp, method='kang'):
+    """Approximate the chromaticity coordinate for light emitted by an
+    incandescent blackbody for a given correlated color temperature.
+
+    There are multiple approximation methods available which can be specified
+    using the `method` parameter. All methods are valid between 4000K and
+    25000K.
+
+    Parameters
+    ----------
+    temp : float
+        Temperature in Kelvin (K).
+    method : str
+        Approximation method to use. Options are 'kang'[1]_ and 'ptb'. The range
+        of valid temperatures for each method is 1667K to 25000K for 'kang' and
+        4000K to 25000K for 'ptb'.
+
+    Returns
+    -------
+    ndarray
+        Chromaticity coordinate (x, y).
+
+    References
+    ----------
+    .. [1] B. Kang, O. Moon, C. Hong, H. Lee, B. Cho, Y. Kim, "Design of
+       Advanced Color Temperature Control System for HDTV Applications". Journal
+       of the Korean Physical Society. 41(6) pp. 865–871, 2002.
+
+    Examples
+    --------
+    Convert a correlated color temperature to an RGB color::
+
+        x, y = blackbody(6500)
+        rgb = xyz2rgb(xyY2xyz(x, y, 1.0), signed=True)
+        rgb = srgbTransform(rgb)
+
+    """
+    # NB - vectorize this function !!!
+    temp_t = numpy.array((1e9, 1e6, 1e3, 1.)) / \
+             numpy.array((temp ** 3, temp ** 2, temp, 1.))
+
+    if method == 'kang':
+        # based off "Design of Advanced Color - Temperature Control System for
+        # HDTV Applications" (Kang et al. 2002)
+        if 4000. <= temp <= 25000.:
+            coeff_pix = numpy.array(
+                (-3.0258469, 2.1070379, 0.2226347, 0.24039))
+            xd = numpy.sum(coeff_pix * temp_t)
+        elif 1677. <= temp < 4000.:
+            coeff_pix = numpy.array(
+                (-0.2661239, -0.2343589, 0.8776956, 0.179910))
+            xd = numpy.sum(coeff_pix * temp_t)
+        else:
+            raise ValueError("Invalid temperature value specified.")
+
+        xd2 = numpy.array((xd ** 3, xd ** 2, xd, 1.))
+
+        if 4000. <= temp <= 25000.:
+            coeff_ydd = numpy.array(
+                (3.0817580, -5.8733867, 3.75112997, -0.37001483))
+            yd = numpy.sum(coeff_ydd * xd2)
+        elif 2222. <= temp < 4000.:
+            coeff_ydd = numpy.array(
+                (-0.9549476, -1.37418593, 2.09137015, -0.16748867))
+            yd = numpy.sum(coeff_ydd * xd2)
+        elif 1667. <= temp < 2222.:
+            coeff_ydd = numpy.array(
+                (-1.1063814, -1.34811020, 2.18555832, -0.20219683))
+            yd = numpy.sum(coeff_ydd * xd2)
+        else:
+            raise ValueError("Invalid temperature value specified.")
+
+        return xd, yd
+
+    elif method == 'ptb':
+        # method used by PsychToolBox's 'GenerateCIEDay' function
+        if 4000 <= temp < 7000.:
+            coefs = numpy.array((-4.6070, 2.9678, 0.09911, 0.244063))
+        elif 7000 <= temp <= 25000:
+            coefs = numpy.array((-2.0064, 1.9018, 0.24748, 0.237040))
+        else:
+            raise ValueError("Invalid temperature value specified.")
+
+        xd = numpy.sum(coefs * temp_t)
+        yd = -3. * (xd ** 2) + 2.870 * xd - 0.275
+
+        return xd, yd
+
+    else:
+        raise ValueError("Invalid approximation method specified.")
 
 
 def dkl2rgb(dkl, conversionMatrix=None):
