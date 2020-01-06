@@ -1003,42 +1003,57 @@ def blackbody(temp, method='kang'):
         rgb = srgbTransform(rgb)
 
     """
-    # NB - vectorize this function !!!
-    temp_t = numpy.array((1e9, 1e6, 1e3, 1.)) / \
-             numpy.array((temp ** 3, temp ** 2, temp, 1.))
+    # make sure we have an array
+    temp = numpy.atleast_1d(
+        [float(temp)] if isinstance(temp, (float, int,)) else temp)
+
+    # compute some common terms
+    temp_t = numpy.tile((1e9, 1e6, 1e3, 1.), (temp.shape[-1], 1))
+    print(temp ** 3)
+    temp_t[:, 0] /= temp ** 3
+    temp_t[:, 1] /= temp ** 2
+    temp_t[:, 2] /= temp
 
     if method == 'kang':
         # based off "Design of Advanced Color - Temperature Control System for
         # HDTV Applications" (Kang et al. 2002)
-        if 4000. <= temp <= 25000.:
+
+        to_return = numpy.zeros((temp.shape[-1], 2))
+
+        # valid conditions for `xd`
+        upper = numpy.where(numpy.logical_and(temp >= 4000., temp <= 25000.))
+        lower = numpy.where(numpy.logical_and(temp >= 1677., temp < 4000.))
+
+        if numpy.any(upper):
             coeff_pix = numpy.array(
                 (-3.0258469, 2.1070379, 0.2226347, 0.24039))
-            xd = numpy.sum(coeff_pix * temp_t)
-        elif 1677. <= temp < 4000.:
+            to_return[upper, 0] = numpy.sum(temp_t[upper] * coeff_pix, axis=1)
+
+        if numpy.any(lower):
             coeff_pix = numpy.array(
                 (-0.2661239, -0.2343589, 0.8776956, 0.179910))
-            xd = numpy.sum(coeff_pix * temp_t)
-        else:
-            raise ValueError("Invalid temperature value specified.")
+            to_return[lower, 0] = numpy.sum(temp_t[lower] * coeff_pix, axis=1)
 
-        xd2 = numpy.array((xd ** 3, xd ** 2, xd, 1.))
-
-        if 4000. <= temp <= 25000.:
+        # valid conditions for `yd`
+        cond = numpy.where(numpy.logical_and(temp >= 4000., temp <= 25000.))
+        if numpy.any(cond):
             coeff_ydd = numpy.array(
                 (3.0817580, -5.8733867, 3.75112997, -0.37001483))
-            yd = numpy.sum(coeff_ydd * xd2)
-        elif 2222. <= temp < 4000.:
+            to_return[cond, 1] = numpy.sum(temp_t[cond] * coeff_ydd, axis=1)
+
+        cond = numpy.where(numpy.logical_and(temp >= 2222., temp < 4000.))
+        if numpy.any(cond):
             coeff_ydd = numpy.array(
                 (-0.9549476, -1.37418593, 2.09137015, -0.16748867))
-            yd = numpy.sum(coeff_ydd * xd2)
-        elif 1667. <= temp < 2222.:
+            to_return[cond, 1] = numpy.sum(temp_t[cond] * coeff_ydd, axis=1)
+
+        cond = numpy.where(numpy.logical_and(temp >= 1677., temp < 2222.))
+        if numpy.any(cond):
             coeff_ydd = numpy.array(
                 (-1.1063814, -1.34811020, 2.18555832, -0.20219683))
-            yd = numpy.sum(coeff_ydd * xd2)
-        else:
-            raise ValueError("Invalid temperature value specified.")
+            to_return[cond, 1] = numpy.sum(temp_t[cond] * coeff_ydd, axis=1)
 
-        return xd, yd
+        return to_return
 
     elif method == 'ptb':
         # method used by PsychToolBox's 'GenerateCIEDay' function
