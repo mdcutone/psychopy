@@ -976,8 +976,9 @@ def blackbody(temp, method='kang'):
 
     Parameters
     ----------
-    temp : float
-        Temperature in Kelvin (K).
+    temp : array_like or float
+        Temperature in Kelvin (K). Values can be passed as a list, tuple or
+        ndarray.
     method : str
         Approximation method to use. Options are 'kang'[1]_ and 'ptb'. The range
         of valid temperatures for each method is 1667K to 25000K for 'kang' and
@@ -986,7 +987,9 @@ def blackbody(temp, method='kang'):
     Returns
     -------
     ndarray
-        Chromaticity coordinate (x, y).
+        Chromaticity coordinate (x, y). If `temp` was an array, a Nx2 array will
+        be returned where each row corresponds to an element in `temp` sharing
+        the same index.
 
     References
     ----------
