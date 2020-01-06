@@ -1013,8 +1013,6 @@ def blackbody(temp, method='kang'):
     temp_t[:, 1] /= temp ** 2
     temp_t[:, 2] /= temp
 
-    print(temp_t)
-
     if method == 'kang':
         # based off "Design of Advanced Color - Temperature Control System for
         # HDTV Applications" (Kang et al. 2002)
@@ -1031,7 +1029,7 @@ def blackbody(temp, method='kang'):
 
         # iterate over conditions and apply coefficients
         for i in range(2):
-            if numpy.any(conds[i]):
+            if conds[i]:
                 to_return[conds[i], 0] = numpy.sum(
                     temp_t[conds[i]] * coeffs[i], axis=1)
 
@@ -1041,8 +1039,6 @@ def blackbody(temp, method='kang'):
         xd2[:, 1] = to_return[:, 0] ** 2
         xd2[:, 2] = to_return[:, 0]
         xd2[:, 3] = 1.0
-
-        print('here', xd2)
 
         # same as before
         coeffs = numpy.array([
@@ -1056,11 +1052,11 @@ def blackbody(temp, method='kang'):
                  numpy.where(numpy.logical_and(temp >= 1677., temp < 2222.))]
 
         for i in range(3):
-            if numpy.any(conds[i]):
+            if conds[i]:
                 to_return[conds[i], 1] = numpy.sum(
                     xd2[conds[i]] * coeffs[i], axis=1)
 
-        return to_return
+        return numpy.squeeze(to_return)  # get rid of empty dims
 
     elif method == 'ptb':
         # method used by PsychToolBox's 'GenerateCIEDay' function
