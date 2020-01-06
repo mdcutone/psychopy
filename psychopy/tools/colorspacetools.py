@@ -1007,51 +1007,58 @@ def blackbody(temp, method='kang'):
     temp = numpy.atleast_1d(
         [float(temp)] if isinstance(temp, (float, int,)) else temp)
 
-    # compute some common terms
+    # compute some common terms used by both approximations
     temp_t = numpy.tile((1e9, 1e6, 1e3, 1.), (temp.shape[-1], 1))
-    print(temp ** 3)
     temp_t[:, 0] /= temp ** 3
     temp_t[:, 1] /= temp ** 2
     temp_t[:, 2] /= temp
+
+    print(temp_t)
 
     if method == 'kang':
         # based off "Design of Advanced Color - Temperature Control System for
         # HDTV Applications" (Kang et al. 2002)
 
+        # allocate output array
         to_return = numpy.zeros((temp.shape[-1], 2))
 
+        coeffs = numpy.array([(-3.0258469, 2.1070379, 0.2226347, 0.24039),
+                              (-0.2661239, -0.2343589, 0.8776956, 0.179910)])
+
         # valid conditions for `xd`
-        upper = numpy.where(numpy.logical_and(temp >= 4000., temp <= 25000.))
-        lower = numpy.where(numpy.logical_and(temp >= 1677., temp < 4000.))
+        conds = [numpy.where(numpy.logical_and(temp >= 4000., temp <= 25000.)),
+                 numpy.where(numpy.logical_and(temp >= 1677., temp < 4000.))]
 
-        if numpy.any(upper):
-            coeff_pix = numpy.array(
-                (-3.0258469, 2.1070379, 0.2226347, 0.24039))
-            to_return[upper, 0] = numpy.sum(temp_t[upper] * coeff_pix, axis=1)
+        # iterate over conditions and apply coefficients
+        for i in range(2):
+            if numpy.any(conds[i]):
+                to_return[conds[i], 0] = numpy.sum(
+                    temp_t[conds[i]] * coeffs[i], axis=1)
 
-        if numpy.any(lower):
-            coeff_pix = numpy.array(
-                (-0.2661239, -0.2343589, 0.8776956, 0.179910))
-            to_return[lower, 0] = numpy.sum(temp_t[lower] * coeff_pix, axis=1)
+        # allocate array for intermediates
+        xd2 = numpy.zeros_like(temp_t)
+        xd2[:, 0] = to_return[:, 0] ** 3
+        xd2[:, 1] = to_return[:, 0] ** 2
+        xd2[:, 2] = to_return[:, 0]
+        xd2[:, 3] = 1.0
+
+        print('here', xd2)
+
+        # same as before
+        coeffs = numpy.array([
+            (3.0817580, -5.8733867, 3.75112997, -0.37001483),
+            (-0.9549476, -1.37418593, 2.09137015, -0.16748867),
+            (-1.1063814, -1.34811020, 2.18555832, -0.20219683)])
 
         # valid conditions for `yd`
-        cond = numpy.where(numpy.logical_and(temp >= 4000., temp <= 25000.))
-        if numpy.any(cond):
-            coeff_ydd = numpy.array(
-                (3.0817580, -5.8733867, 3.75112997, -0.37001483))
-            to_return[cond, 1] = numpy.sum(temp_t[cond] * coeff_ydd, axis=1)
+        conds = [numpy.where(numpy.logical_and(temp >= 4000., temp <= 25000.)),
+                 numpy.where(numpy.logical_and(temp >= 2222., temp < 4000.)),
+                 numpy.where(numpy.logical_and(temp >= 1677., temp < 2222.))]
 
-        cond = numpy.where(numpy.logical_and(temp >= 2222., temp < 4000.))
-        if numpy.any(cond):
-            coeff_ydd = numpy.array(
-                (-0.9549476, -1.37418593, 2.09137015, -0.16748867))
-            to_return[cond, 1] = numpy.sum(temp_t[cond] * coeff_ydd, axis=1)
-
-        cond = numpy.where(numpy.logical_and(temp >= 1677., temp < 2222.))
-        if numpy.any(cond):
-            coeff_ydd = numpy.array(
-                (-1.1063814, -1.34811020, 2.18555832, -0.20219683))
-            to_return[cond, 1] = numpy.sum(temp_t[cond] * coeff_ydd, axis=1)
+        for i in range(3):
+            if numpy.any(conds[i]):
+                to_return[conds[i], 1] = numpy.sum(
+                    xd2[conds[i]] * coeffs[i], axis=1)
 
         return to_return
 
