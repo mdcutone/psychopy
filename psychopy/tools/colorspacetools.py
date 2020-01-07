@@ -22,9 +22,9 @@ __all__ = [
     'lms2rgb',
     'lab2xyz',
     'xyz2rgb',
-    'chromaTransform',
+    'applyCAT',
     'gammaTransform',
-    'createConversionMatrix',
+    'rgbMatrix',
     'rgb2xyz',
     'ILLUMINANT_A',
     'ILLUMINANT_B',
@@ -42,9 +42,10 @@ __all__ = [
     'lch2xyz',
     'xyY2xyz',
     'srgbTransform',
-    'blackbody',
+    'temperature2xyz',
     'xyz2luv',
-    'luv2xyz'
+    'luv2xyz',
+    'wavelength2xyz'
 ]
 
 from past.utils import old_div
@@ -73,13 +74,21 @@ _BRADFORD_CRM = numpy.ascontiguousarray([
 ])
 _BRADFORD_CRM_INV = numpy.linalg.inv(_BRADFORD_CRM)
 
-# vob Kries cone-response matrices
+# von Kries cone-response matrices
 _VONKRIES_CRM = numpy.ascontiguousarray([
     [0.40024, 0.7076, -0.08081],
     [-0.2263, 1.16532, 0.0457],
     [0.0,  0.0,  0.91822]
 ])
 _VONKRIES_CRM_INV = numpy.linalg.inv(_VONKRIES_CRM)
+
+# HPE (Hunt-Pointer-Esteves) transform
+_HUNT_CRM = numpy.ascontiguousarray([
+    [0.3897, 0.6890, -0.0787],
+    [-0.2298, 1.1834, 0.0464],
+    [0.0000, 0.0000, 1.0000]
+])
+_HUNT_CRM_INV = numpy.linalg.inv(_HUNT_CRM)
 
 
 def unpackColors(colors):  # used internally, not exported by __all__
@@ -856,9 +865,28 @@ def xyz2luv(xyz, whitePoint=ILLUMINANT_D65, exact=True):
     return luv
 
 
-def chromaTransform(xyz, srcWhiteXYZ, dstWhiteXYZ, method='bfd'):
+def xyz2lms(xyz, whitePoint, method='bfd'):
+    """Convert CIE-XYZ to LMS cone space."""
+    xyz, orig_shape, orig_dim = unpackColors(xyz)
+
+    # select the LMS matrix to use
+    if method == 'bfd':  # default
+        # convert white points to LMS cone space
+        lms = xyz.dot(_BRADFORD_CRM.T)
+    elif method == 'vk':
+        lms = xyz.dot(_VONKRIES_CRM.T)
+    elif method == 'hpe':
+        lms = xyz.dot(_HUNT_CRM.T)
+    else:
+        raise ValueError("Invalid value for `method`. Valid methods are 'bfd' "
+                         "'hpe' or 'vk'.")
+
+    return lms
+
+
+def applyCAT(xyz, srcWhiteXYZ, dstWhiteXYZ, method='bfd'):
     """Change the illuminant (white point) of a CIE-XYZ color using a chromatic
-    adaptation transform.
+    adaptation transform (CAT).
 
     This offers a faster method for changing the white-point of extant color
     coordinates than recomputing them, however the results are somewhat less
@@ -890,6 +918,15 @@ def chromaTransform(xyz, srcWhiteXYZ, dstWhiteXYZ, method='bfd'):
     * When converting to RGB after chromatic adaptation, you may want to clip
       the values to ensure they are representable on the display.
 
+    References
+    ----------
+    .. [1] Reinhard, E., Heidrich, W., Debevec, P., Pattanaik, S., Ward, G., &
+       Myszkowski, K. (2010). High dynamic range imaging: acquisition, display,
+       and image-based lighting. Morgan Kaufmann.
+    .. [2] Specification, I. C. C. (2004). 1: 2004-10 (Profile version 4.2. 0.0)
+       Image technology colour management-Architecture, profile format, and data
+       structure.
+
     Examples
     --------
     Apply chromatic adaptation to an image loaded from a file::
@@ -905,7 +942,7 @@ def chromaTransform(xyz, srcWhiteXYZ, dstWhiteXYZ, method='bfd'):
 
         # Specify the illuminant present in the image and the one you want to
         # adapt to.
-        im = cst.chromaTransform(im, cst.ILLUMINANT_D50, cst.ILLUMINANT_D65)
+        im = cst.applyCAT(im, cst.ILLUMINANT_D50, cst.ILLUMINANT_D65)
 
         # convert back to RGB, apply gamma if needed
         im = cst.xyz2rgb(im)
@@ -918,21 +955,21 @@ def chromaTransform(xyz, srcWhiteXYZ, dstWhiteXYZ, method='bfd'):
     """
     xyz, orig_shape, orig_dim = unpackColors(xyz)
 
-    srcXYZ = numpy.asarray(srcWhiteXYZ)
-    dstXYZ = numpy.asarray(dstWhiteXYZ)
+    srcXYZ = numpy.asarray(srcWhiteXYZ, dtype=float)
+    dstXYZ = numpy.asarray(dstWhiteXYZ, dtype=float)
 
-    if method == 'bfd':
-        srcRGB = srcXYZ.dot(_BRADFORD_CRM.T)
-        dstRGB = dstXYZ.dot(_BRADFORD_CRM.T)
-        mCAT = numpy.matmul(
-            _BRADFORD_CRM_INV,
-            numpy.matmul(numpy.diagflat(dstRGB / srcRGB), _BRADFORD_CRM))
+    # select the LMS matrix to use
+    if method == 'bfd':  # default
+        # convert white points to LMS cone space
+        srcLMS = srcXYZ.dot(_BRADFORD_CRM.T)
+        dstLMS = dstXYZ.dot(_BRADFORD_CRM.T)
+        mWP = numpy.diagflat(dstLMS / srcLMS)
+        mCAT = numpy.matmul(_BRADFORD_CRM_INV, numpy.matmul(mWP, _BRADFORD_CRM))
     elif method == 'vk':
-        srcRGB = srcXYZ.dot(_VONKRIES_CRM.T)
-        dstRGB = dstXYZ.dot(_VONKRIES_CRM.T)
-        mCAT = numpy.matmul(
-            _VONKRIES_CRM_INV,
-            numpy.matmul(numpy.diagflat(dstRGB / srcRGB), _VONKRIES_CRM))
+        srcLMS = srcXYZ.dot(_VONKRIES_CRM.T)
+        dstLMS = dstXYZ.dot(_VONKRIES_CRM.T)
+        mWP = numpy.diagflat(dstLMS / srcLMS)
+        mCAT = numpy.matmul(_VONKRIES_CRM_INV, numpy.matmul(mWP, _VONKRIES_CRM))
     elif method == 'scale':
         mCAT = numpy.diagflat(dstXYZ / srcXYZ)
     else:
@@ -1033,7 +1070,7 @@ def srgbTransform(rgb, inverse=False, signed=False):
     return to_return * 2.0 - 1.0 if signed else to_return
 
 
-def createConversionMatrix(r, g, b, whitePoint, inverse=False, colorspace='xy'):
+def rgbMatrix(r, g, b, whitePoint=ILLUMINANT_D65, inverse=False, colorspace='xy'):
     """Construct a conversion matrix to convert CIE-XYZ coordinates to linear
     RGB primaries or vice versa.
 
@@ -1056,7 +1093,7 @@ def createConversionMatrix(r, g, b, whitePoint, inverse=False, colorspace='xy'):
     r, g, b : tuple, list or ndarray
         Chromaticity coordinates of the 'red', 'green', and 'blue' gun.
     whitePoint : tuple, list or ndarray
-        CIE-XYZ coordinate of the illuminant (X, Y, Z).
+        CIE-XYZ coordinate of the illuminant (X, Y, Z). Default is D65.
     inverse : bool
         Return the inverse transform for linear RGB to XYZ.
     colorspace : str
@@ -1099,12 +1136,54 @@ def createConversionMatrix(r, g, b, whitePoint, inverse=False, colorspace='xy'):
     return to_return
 
 
-def blackbody(temp, method='kang'):
+def wavelength2xyz(wl):
+    """Approximate the CIE-XYZ chromaticity coordinate of a wavelength.
+
+    The method used here is described in "Simple Analytic Approximations to the
+    CIE XYZ Color Matching Functions" (Wyman, Sloan & Shirley, 2013).
+
+    Parameters
+    ----------
+    wl : float
+        Wavelength in nanometers (nm).
+
+    Returns
+    -------
+    array_like
+        The chromaticity coordinate of a wavelength.
+
+    """
+    # based on Simple Analytic Approximations to the CIE XYZ Color Matching
+    # Functions
+    t1 = (wl - 442.0) * (0.0624 if wl < 442.0 else 0.0374)
+    t2 = (wl - 599.8) * (0.0264 if wl < 599.8 else 0.0323)
+    t3 = (wl - 501.1) * (0.0490 if wl < 501.1 else 0.0382)
+
+    x = 0.362 * numpy.exp(-0.5 * t1 * t1) + \
+        1.056 * numpy.exp(-0.5 * t2 * t2) - \
+        0.065 * numpy.exp(-0.5 * t3 * t3)
+
+    t1 = (wl - 568.8) * (0.0213 if wl < 568.8 else 0.0247)
+    t2 = (wl - 530.9) * (0.0613 if wl < 530.9 else 0.0322)
+
+    y = 0.821 * numpy.exp(-0.5 * t1 * t1) + \
+        0.286 * numpy.exp(-0.5 * t2 * t2)
+
+    t1 = (wl - 437.0) * (0.0845 if wl < 437.0 else 0.0278)
+    t2 = (wl - 459.0) * (0.0385 if wl < 459.0 else 0.0725)
+
+    z = 1.217 * numpy.exp(-0.5 * t1 * t1) + \
+        0.681 * numpy.exp(-0.5 * t2 * t2)
+
+    return x, y, z
+
+
+def temperature2xyz(temp, method='kang'):
     """Approximate the chromaticity coordinate for a given correlated color
     temperature.
 
     Values are generated by approximating the black body (Plankian) locus in
-    CIE-xy color space using some model. There are multiple approximation
+    CIE-xy (1931) color space using some model. There are multiple approximation
     methods available which can be specified using the `method` parameter. All
     of them are valid between 4000K and 25000K and are fairly concordant across
     that range.
@@ -1138,13 +1217,13 @@ def blackbody(temp, method='kang'):
     --------
     Convert a correlated color temperature to an RGB color::
 
-        x, y = blackbody(6504)  # about D65
+        x, y = temperature2xyz(6504)  # about D65
         rgb = xyz2rgb(xyY2xyz((x, y, 1.0)))
         rgb = srgbTransform(rgb, signed=True)  # very close to white
 
     You can also specify an array of temperatures like this::
 
-        xys = blackbody([6500, 5000, 4500, 4000])
+        xys = temperature2xyz([6500, 5000, 4500, 4000])
         #
         # [[0.31349411 0.32366254]
         #  [0.34499168 0.35158667]
@@ -1154,8 +1233,8 @@ def blackbody(temp, method='kang'):
     Check the error between both approximation methods by finding the largest
     difference between them in `x` and `y`::
 
-        kang = blackbody(np.linspace(4000., 25000., 21000), method='kang')
-        ptb = blackbody(np.linspace(4000., 25000., 21000), method='ptb')
+        kang = temperature2xyz(np.linspace(4000., 25000., 21000), method='kang')
+        ptb = temperature2xyz(np.linspace(4000., 25000., 21000), method='ptb')
         print(np.abs(kang - ptb).max())  # 0.00938
 
     """
