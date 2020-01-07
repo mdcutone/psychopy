@@ -726,7 +726,32 @@ def xyY2xyz(xyY):
 
 
 def luv2xyz(luv, whitePoint=ILLUMINANT_D65, exact=True):
-    """Convert CIE-L*u*v* (1976) color coordinates to CIE-XYZ color space."""
+    """Convert CIE-L*u*v* (1976) color coordinates to CIE-XYZ color space.
+
+    Parameters
+    ----------
+    luv : tuple, list or ndarray
+        1-, 2-, 3-D vector of CIE L*u*v* coordinates to convert. The last
+        dimension should be length-3 in all cases specifying a single
+        coordinate.
+    whiteXYZ : tuple, list or ndarray
+        1-D vector coordinate of the white point in CIE-XYZ color space. By
+        default `ILLUMINANT_D65` is used.
+    exact : bool
+        Use exact values (or as close as possible) for some values defined
+        with low-precision in the CIE standard. If `False`, the values specified
+        by the CIE standard are used.
+
+    Returns
+    -------
+    ndarray
+        Array of CIE-XYZ colors coordinates with similar shape to `luv`.
+
+    See Also
+    --------
+    xyz2luv : Inverse transformation of this function.
+
+    """
     luv, orig_shape, orig_dim = unpackColors(luv)
     whitePoint = numpy.asarray(whitePoint)
 
@@ -751,13 +776,13 @@ def luv2xyz(luv, whitePoint=ILLUMINANT_D65, exact=True):
     denom = whitePoint[0] + 15 * whitePoint[1] + 3 * whitePoint[2]
     ls = 13 * luv[:, 0]
     r = luv[:, 1] + ls * ((4 * whitePoint[0]) / denom)
-    a = (((52 * luv[:, 0]) / r) - 1) * frac
     s = luv[:, 2] + ls * ((9 * whitePoint[1]) / denom)
-    c = xyz[:, 1] * (((39 * luv[:, 0]) / s) - 5)
+    a = (((52 * luv[:, 0]) / r) - 1) * frac
     b = -5 * xyz[:, 1]
+    c = xyz[:, 1] * (((39 * luv[:, 0]) / s) - 5) - b
 
     # compute X and Z
-    xyz[:, 0] = (c - b) / (a + frac)
+    xyz[:, 0] = c / (a + frac)
     xyz[:, 2] = xyz[:, 0] * a + b
 
     # make the output match the dimensions/shape of input
