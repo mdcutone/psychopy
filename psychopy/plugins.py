@@ -6,14 +6,11 @@
 # Distributed under the terms of the GNU General Public License (GPL).
 """Utilities for loading plugins into PsychoPy."""
 
-__all__ = ['loadPlugin', 'computeChecksum', 'listPlugins', 'PLUGIN_PATH']
+__all__ = ['loadPlugin', 'computeChecksum', 'listPlugins']
 
 import sys
-import os
 import inspect
 import collections
-import shutil
-from platform import python_version
 import hashlib
 import pkg_resources
 import importlib
@@ -96,17 +93,19 @@ def computeChecksum(fpath, method='sha256'):
 def listPlugins(onlyLoaded=False):
     """Get a list of installed or loaded PsychoPy plugins.
 
-    This function searches for potential plugin packages installed or loaded and
-    returns the names of those which define entry points specifically for
-    PsychoPy and the version of Python its currently running on.
+    This function searches for potential plugin packages installed or loaded.
+    When searching for installed plugin packages, only those the names of those
+    which define entry points specifically for PsychoPy, the version of Python
+    its currently running on, and operating system are returned.
 
     Parameters
     ----------
     onlyLoaded : bool
         If `False`, this function will return all packages which can be
         potentially loaded as plugins. If `True`, the returned values will be
-        names of plugins that have been successfully loaded by `loadPlugins`.
-        They will appear in the order of which they were loaded.
+        names of plugins that have been successfully loaded previously in this
+        session by `loadPlugins`. They will appear in the order of which they
+        were loaded.
 
     Returns
     -------
@@ -128,30 +127,23 @@ def listPlugins(onlyLoaded=False):
     dists, _ = pkg_resources.working_set.find_plugins(
         pkg_resources.Environment())
 
-    ver = python_version()  # Python version we're running
-
     installed = []
     for dist in dists:
         if any([i.startswith('psychopy') for i in dist.get_entry_map().keys()]):
-            if not python_version().startswith(dist.py_version):
-                logging.warning('Installed package `{}` defines entry points '
-                                'but is incompatible with the version of '
-                                'Python being used. Skipping.'.format(
-                    dist.project_name, ver))
-
             installed.append(dist.project_name)
 
     return installed
 
 
 def loadPlugin(plugin, *args, **kwargs):
-    """Load a plugin to extend PsychoPy's coder API.
+    """Load a plugin to extend PsychoPy.
 
     Plugins are packages which extend upon PsychoPy's existing functionality by
-    dynamically importing code at runtime. Plugins create or redefine objects
-    into the namespaces of a modules (eg. `psychopy.visual`) allowing them to be
-    used as if they were part of PsychoPy. Plugins are simply Python packages,
-    `loadPlugins` will search for them in directories specified in `sys.path`.
+    dynamically importing code at runtime, without modifying the existing
+    installation file. Plugins create or redefine objects into the namespaces of
+    modules (eg. `psychopy.visual`) allowing them to be used as if they were
+    part of PsychoPy. Plugins are simply Python packages, `loadPlugin` will
+    search for them in directories specified in `sys.path`.
 
     Parameters
     ----------
@@ -210,11 +202,6 @@ def loadPlugin(plugin, *args, **kwargs):
     pluginDist = None
     for dist in distributions:
         if dist.project_name == plugin:
-            # check if compatible with the current version of Python
-            if not python_version().startswith(dist.py_version):
-                raise RuntimeError(
-                    "Cannot load plugin. Not compatible with Python "
-                    "version {} running PsychoPy.".format(python_version()))
             pluginDist = dist
             break
 
@@ -273,8 +260,8 @@ def loadPlugin(plugin, *args, **kwargs):
                 # handle what to do if an attribute exists already here ...
                 if inspect.ismodule(getattr(targObj, attr)):
                     raise NameError(
-                        "Plugin `{}` attempted to override a builtin PsychoPy "
-                        "module `{}`.".format(plugin, fqn + '.' + attr))
+                        "Plugin `{}` attempted to override module `{}`.".format(
+                            plugin, fqn + '.' + attr))
 
             # add the object to the module or unbound class
             setattr(targObj, attr, ep.load())
