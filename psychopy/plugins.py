@@ -4,16 +4,16 @@
 # Part of the PsychoPy library
 # Copyright (C) 2002-2018 Jonathan Peirce (C) 2019 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
-"""Utilities for loading plugins into PsychoPy."""
+"""Utilities for extending PsychoPy with plugins."""
 
-__all__ = ['loadPlugin', 'computeChecksum', 'listPlugins']
+__all__ = ['loadPlugin', 'listPlugins', 'computeChecksum']
 
 import sys
 import inspect
 import collections
 import hashlib
-import pkg_resources
 import importlib
+import pkg_resources
 
 from psychopy import logging
 
@@ -104,20 +104,21 @@ def listPlugins(onlyLoaded=False):
         If `False`, this function will return all packages which can be
         potentially loaded as plugins. If `True`, the returned values will be
         names of plugins that have been successfully loaded previously in this
-        session by `loadPlugins`. They will appear in the order of which they
+        session by `loadPlugin`. They will appear in the order of which they
         were loaded.
 
     Returns
     -------
     list
         Names of PsychoPy related plugins as strings. You can load all installed
-        plugins by passing this value to `loadPlugins`.
+        plugins by passing this value to `loadPlugin`.
 
     Examples
     --------
     Load all plugins installed on the system into the current session::
 
-        plugins.loadPlugins(plugins.listPlugins())
+        for plugin in plugins.listPlugins():
+            plugins.loadPlugin(plugin)
 
     """
     if onlyLoaded:  # only list plugins we have already loaded
@@ -164,8 +165,6 @@ def loadPlugin(plugin, *args, **kwargs):
 
     Raises
     ------
-    RuntimeError
-        The specified plugin is built for an incompatible Python version.
     NameError
         The plugin attempted to overwrite an entire extant module or modify
         `psychopy.plugins`.
@@ -270,6 +269,3 @@ def loadPlugin(plugin, *args, **kwargs):
     _plugins_[pluginDist.project_name] = entryPoints
 
     return True
-
-
-
