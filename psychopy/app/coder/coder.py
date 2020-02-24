@@ -44,6 +44,7 @@ from psychopy.projects import pavlovia
 import psychopy.app.pavlovia_ui.menu
 from psychopy.app.coder.codeEditorBase import BaseCodeEditor
 from psychopy.app.icons import combineImageEmblem
+from psychopy.app.colorpicker import PsychoColorPicker
 
 # advanced prefs (not set in prefs files)
 prefTestSubset = ""
@@ -1870,7 +1871,7 @@ class CoderFrame(wx.Frame):
                 colorpickerBmp,
                 _translate("Color Picker -> clipboard"),
                 _translate("Color Picker -> clipboard"))
-        tb.Bind(wx.EVT_TOOL, self.app.colorPicker, id=item.GetId())
+        tb.Bind(wx.EVT_TOOL, self.colorPicker, id=item.GetId())
 
         self.toolbar.AddSeparator()
 
@@ -1896,6 +1897,17 @@ class CoderFrame(wx.Frame):
         self.btnHandles.update(pavButtons.btnHandles)
 
         tb.Realize()
+
+    def colorPicker(self, event=None):
+        """Open color-picker, sets clip-board to string [r,g,b].
+
+        Note: units are psychopy -1..+1 rgb units to three decimal places,
+        preserving 24-bit color.
+        """
+        dlg = PsychoColorPicker(self)
+        dlg.ShowModal()
+        dlg.Destroy()
+        event.Skip()
 
     def onIdle(self, event):
         # check the script outputs to see if anything has been written to
