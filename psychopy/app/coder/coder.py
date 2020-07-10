@@ -520,6 +520,8 @@ class CodeEditor(BaseCodeEditor, CodeEditorFoldingMixin, ThemeMixin):
                  style=wx.BORDER_NONE, readonly=False):
         BaseCodeEditor.__init__(self, parent, ID, pos, size, style)
 
+        self.parent = parent  # page in the auiNotebook
+        self.pageIdx = ID
         self.coder = frame
         self.prefs = self.coder.prefs
         self.paths = self.coder.paths
@@ -531,6 +533,7 @@ class CodeEditor(BaseCodeEditor, CodeEditorFoldingMixin, ThemeMixin):
         self.Bind(wx.stc.EVT_STC_UPDATEUI, self.OnUpdateUI)
         self.Bind(wx.EVT_KEY_DOWN, self.OnKeyPressed)
         self.Bind(wx.EVT_KEY_UP, self.OnKeyReleased)
+        self.Bind(wx.EVT_SET_FOCUS, self.OnSetFocus)
 
         if hasattr(self, 'OnMarginClick'):
             self.Bind(wx.stc.EVT_STC_MARGINCLICK, self.OnMarginClick)
@@ -598,6 +601,39 @@ class CodeEditor(BaseCodeEditor, CodeEditorFoldingMixin, ThemeMixin):
         self.SetDoubleBuffered(self.coder.IsDoubleBuffered())
 
         self.theme = self.prefs['theme']
+
+    def OnSetFocus(self, event):
+        """Called when the editor window gets focus."""
+        self.coder.currentDoc = self
+        self.coder.SetLabel('%s - PsychoPy Coder' % self.filename)
+
+        if hasattr(self.coder, 'structureWindow'):
+            self.analyseScript()
+
+        self.coder.statusBar.SetStatusText(self.getFileType(), 2)
+
+        docId = self.coder.findDocID(self.filename)
+        self.parent.SetSelection(docId)
+
+        # todo: reduce redundancy w.r.t OnIdle()
+        if not self.coder.expectedModTime(self):
+            filename = os.path.basename(self.filename)
+            msg = _translate("'%s' was modified outside of PsychoPy:\n\n"
+                             "Reload (without saving)?") % filename
+            dlg = dialogs.MessageDialog(self, message=msg, type='Warning')
+            if dlg.ShowModal() == wx.ID_YES:
+                self.coder.statusBar.SetStatusText(_translate('Reloading file'))
+                self.coder.fileReload(event,
+                                      filename=self.filename,
+                                      checkSave=False)
+                self.coder.setFileModified(False)
+            self.coder.statusBar.SetStatusText('')
+            try:
+                dlg.Destroy()
+            except Exception:
+                pass
+
+        event.Skip()
 
     def setFonts(self):
         """Make some styles,  The lexer defines what each style is used for,
@@ -1870,34 +1906,35 @@ class CoderFrame(wx.Frame, ThemeMixin):
                 self.fileStatusLastChecked = time.time()
 
     def pageChanged(self, event):
-        old = event.GetOldSelection()
-        new = event.GetSelection()
-        self.currentDoc = self.notebook.GetPage(new)
-        self.setFileModified(self.currentDoc.UNSAVED)
-        self.SetLabel('%s - PsychoPy Coder' % self.currentDoc.filename)
-
-        if hasattr(self, 'structureWindow'):
-            self.currentDoc.analyseScript()
-
-        self.statusBar.SetStatusText(self.currentDoc.getFileType(), 2)
-
-        # todo: reduce redundancy w.r.t OnIdle()
-        if not self.expectedModTime(self.currentDoc):
-            filename = os.path.basename(self.currentDoc.filename)
-            msg = _translate("'%s' was modified outside of PsychoPy:\n\n"
-                             "Reload (without saving)?") % filename
-            dlg = dialogs.MessageDialog(self, message=msg, type='Warning')
-            if dlg.ShowModal() == wx.ID_YES:
-                self.statusBar.SetStatusText(_translate('Reloading file'))
-                self.fileReload(event,
-                                filename=self.currentDoc.filename,
-                                checkSave=False)
-                self.setFileModified(False)
-            self.statusBar.SetStatusText('')
-            try:
-                dlg.destroy()
-            except Exception:
-                pass
+        event.Skip()
+        # old = event.GetOldSelection()
+        # new = event.GetSelection()
+        # self.currentDoc = self.notebook.GetPage(new)
+        # self.setFileModified(self.currentDoc.UNSAVED)
+        # self.SetLabel('%s - PsychoPy Coder' % self.currentDoc.filename)
+        #
+        # if hasattr(self, 'structureWindow'):
+        #     self.currentDoc.analyseScript()
+        #
+        # self.statusBar.SetStatusText(self.currentDoc.getFileType(), 2)
+        #
+        # # todo: reduce redundancy w.r.t OnIdle()
+        # if not self.expectedModTime(self.currentDoc):
+        #     filename = os.path.basename(self.currentDoc.filename)
+        #     msg = _translate("'%s' was modified outside of PsychoPy:\n\n"
+        #                      "Reload (without saving)?") % filename
+        #     dlg = dialogs.MessageDialog(self, message=msg, type='Warning')
+        #     if dlg.ShowModal() == wx.ID_YES:
+        #         self.statusBar.SetStatusText(_translate('Reloading file'))
+        #         self.fileReload(event,
+        #                         filename=self.currentDoc.filename,
+        #                         checkSave=False)
+        #         self.setFileModified(False)
+        #     self.statusBar.SetStatusText('')
+        #     try:
+        #         dlg.destroy()
+        #     except Exception:
+        #         pass
 
     def filesDropped(self, event):
         fileList = event.GetFiles()
