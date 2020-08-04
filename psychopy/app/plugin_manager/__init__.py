@@ -36,7 +36,7 @@ else:
 _startUpPluginsUpdated = False  # flag if plugins have been changed
 
 
-class PluginBrowserListCtrl(wx.ListCtrl, ListCtrlAutoWidthMixin, CheckListCtrlMixin):
+class PluginBrowserListCtrl(wx.ListCtrl, ListCtrlAutoWidthMixin):
     """Custom ListCtrl that allows for automatic resizing of columns and
     checkboxes."""
     def __init__(self, parent, id):
@@ -45,7 +45,7 @@ class PluginBrowserListCtrl(wx.ListCtrl, ListCtrlAutoWidthMixin, CheckListCtrlMi
                              id,
                              style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         ListCtrlAutoWidthMixin.__init__(self)
-        CheckListCtrlMixin.__init__(self)
+        #CheckListCtrlMixin.__init__(self)
 
         # colors for rows
         colordb = wx.ColourDatabase()
@@ -56,6 +56,10 @@ class PluginBrowserListCtrl(wx.ListCtrl, ListCtrlAutoWidthMixin, CheckListCtrlMi
         self.pluginRemovedFlag = False
 
         self.createColumns()
+        self.EnableCheckBoxes(True)
+
+        self.Bind(wx.EVT_LIST_ITEM_CHECKED, self.onCheckedItem)
+        self.Bind(wx.EVT_LIST_ITEM_UNCHECKED, self.onUncheckedItem)
 
     @property
     def selectedItem(self):
@@ -162,20 +166,26 @@ class PluginBrowserListCtrl(wx.ListCtrl, ListCtrlAutoWidthMixin, CheckListCtrlMi
 
         self.updatePluginStatus()
 
-    def OnCheckItem(self, index, flag):
-        """Do something when an item is checked."""
-        item = self.GetItem(index, col=0)
-        pluginName = item.GetText()
+    def onCheckedItem(self, event=None):
+        """Event for when an item is checked."""
+        #item = event.GetItem(index, col=0)
+        pluginName = event.GetText()
+
         global _startup_plugins_
-        # check if in startup
-        if not flag:
-            try:
-                _startup_plugins_.remove(pluginName)
-            except ValueError:
-                pass
-        else:
-            if pluginName not in _startup_plugins_:
-                _startup_plugins_.append(pluginName)
+        if pluginName not in _startup_plugins_:
+            _startup_plugins_.append(pluginName)
+
+        self.updatePluginStatus()
+
+    def onUncheckedItem(self, event=None):
+        #item = event.GetItem(index, col=0)
+        pluginName = event.GetText()
+
+        global _startup_plugins_
+        try:
+            _startup_plugins_.remove(pluginName)
+        except ValueError:
+            pass
 
         self.updatePluginStatus()
 
@@ -202,8 +212,9 @@ class PluginBrowserListCtrl(wx.ListCtrl, ListCtrlAutoWidthMixin, CheckListCtrlMi
         _startup_plugins_ = []
 
         for itemIdx in range(0, self.GetItemCount()):
-            if self.IsChecked(itemIdx):
-                pluginName = self.GetItem(itemIdx, col=0).GetText()
+            item = self.GetItem(itemIdx, col=0)
+            if self.IsItemChecked(itemIdx):
+                pluginName = item.GetText()
                 _startup_plugins_.append(pluginName)
 
 
