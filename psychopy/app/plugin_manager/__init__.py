@@ -18,7 +18,7 @@ if parse_version(wx.__version__) < parse_version('4.0.3'):
     wx.NewIdRef = wx.NewId
 
 from psychopy import plugins
-from wx.lib.mixins.listctrl import ListCtrlAutoWidthMixin, CheckListCtrlMixin
+from wx.lib.mixins.listctrl import ListCtrlAutoWidthMixin
 
 from psychopy.preferences import prefs
 
@@ -105,7 +105,6 @@ class PluginBrowserListCtrl(wx.ListCtrl, ListCtrlAutoWidthMixin):
                     status = ''
 
             self.SetItem(itemIdx, 1, status)
-
 
     def createColumns(self):
         """Create columns for this widget."""
@@ -330,7 +329,7 @@ class PluginManagerFrame(wx.Dialog):
         pos = wx.Point(parent.Position[0] + 80, parent.Position[1] + 80)
         _style = wx.DEFAULT_DIALOG_STYLE | wx.FRAME_FLOAT_ON_PARENT | wx.RESIZE_BORDER
         wx.Dialog.__init__(self, parent, title=title,
-                           size=(1024, 480), pos=pos, style=_style)
+                           size=(1024, 480), pos=wx.DefaultPosition, style=_style)
         self.Bind(wx.EVT_CLOSE, self.onClose)
 
         self.initCtrls()
@@ -414,21 +413,30 @@ class PluginManagerFrame(wx.Dialog):
 
         # panel for dialog buttons
         pnlDialogCtrls = wx.Panel(framePanel)
-        pnlDialogCtrlsSizer = wx.FlexGridSizer(1, 2, 10, 10)
+        pnlDialogCtrlsSizer = wx.FlexGridSizer(1, 3, 5, 5)
         pnlDialogCtrls.SetSizer(pnlDialogCtrlsSizer)
 
         # disable all startup plugins button
-        self.cmdDisableAll = wx.Button(
-            pnlDialogCtrls,
-            id=wx.ID_ANY,
-            label='Clear startup plugins')
-        self.cmdDisableAll.Bind(wx.EVT_BUTTON, self.onClearStartupPlugins)
-        self.cmdDisableAll.SetToolTip(wx.ToolTip(
-            "Clear all plugins registered to load on startup."))
-        pnlDialogCtrlsSizer.Add(self.cmdDisableAll, 0, 0)
+        # self.cmdDisableAll = wx.Button(
+        #     pnlDialogCtrls,
+        #     id=wx.ID_ANY,
+        #     label='Clear startup plugins')
+        # self.cmdDisableAll.Bind(wx.EVT_BUTTON, self.onClearStartupPlugins)
+        # self.cmdDisableAll.SetToolTip(wx.ToolTip(
+        #     "Clear all plugins registered to load on startup."))
+        # pnlDialogCtrlsSizer.Add(self.cmdDisableAll, 0, 0)
+
+        # load plugins without closing the dialog
+        self.cmdApply = wx.Button(pnlDialogCtrls, id=wx.ID_ANY, label='&Apply')
+        #self.cmdApply.Bind(wx.EVT_BUTTON, self.onClose)
+        pnlDialogCtrlsSizer.Add(self.cmdApply, 0, 0)
+
+        self.cmdOkay = wx.Button(pnlDialogCtrls, id=wx.ID_ANY, label='&OK')
+        #self.cmdOkay.Bind(wx.EVT_BUTTON, self.onClose)
+        pnlDialogCtrlsSizer.Add(self.cmdOkay, 0, 0)
 
         # load selected plugin button
-        self.cmdClose = wx.Button(pnlDialogCtrls, id=wx.ID_ANY, label='Close')
+        self.cmdClose = wx.Button(pnlDialogCtrls, id=wx.ID_ANY, label='&Cancel')
         self.cmdClose.Bind(wx.EVT_BUTTON, self.onClose)
         pnlDialogCtrlsSizer.Add(self.cmdClose, 0, 0)
 

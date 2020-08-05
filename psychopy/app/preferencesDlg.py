@@ -16,6 +16,7 @@ from . import dialogs
 from psychopy import localization, prefs
 from psychopy.localization import _translate
 from pkg_resources import parse_version
+from psychopy import visual
 from psychopy import sound
 from psychopy.app.utils import getSystemFonts
 import collections
@@ -612,6 +613,22 @@ class PreferencesDlg(wx.Dialog):
                             prefName,
                             labels=[_localized[i] for i in locales],
                             values=[i for i in range(len(locales))],
+                            value=default, helpText=helpText)
+                elif prefName == 'winType':
+                    # Values come from installed backends, not from prefs. This
+                    # is to allow for backends implemented using plugins to
+                    # show up in the list of options.
+                    winTypes = list(visual.backends.winTypes.keys())
+                    try:
+                        default = winTypes.index(thisPref)
+                    except ValueError:
+                        default = winTypes.index("pyglet")
+                    self.proPrefs.addEnumItem(
+                            sectionName,
+                            pLabel,
+                            prefName,
+                            labels=winTypes,
+                            values=[i for i in range(len(winTypes))],
                             value=default, helpText=helpText)
                 # # single directory
                 elif prefName in ('unpackedDemosDir',):
