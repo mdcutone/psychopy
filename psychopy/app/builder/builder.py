@@ -47,6 +47,7 @@ from .dialogs import (DlgComponentProperties, DlgExperimentProperties,
                       DlgCodeComponentProperties, DlgLoopProperties)
 from ..utils import (PsychopyToolbar, PsychopyPlateBtn, WindowFrozen,
                      FileDropTarget, FrameSwitcher)
+from ..plugin_manager import PluginManagerFrame
 
 from psychopy.experiment import components
 from builtins import str
