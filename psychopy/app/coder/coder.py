@@ -31,7 +31,6 @@ import pickle
 import time
 import textwrap
 
-from . import psychoParser
 from .. import stdOutRich, dialogs
 from .. import pavlovia_ui
 from psychopy import logging, prefs
@@ -45,7 +44,7 @@ from psychopy.app.coder.sourceTree import SourceTreePanel
 from psychopy.app.themes import ThemeMixin
 from psychopy.app.coder.folding import CodeEditorFoldingMixin
 from ..plugin_manager import PluginManagerFrame
-from psychopy.app.errorDlg import ErrorMsgDialog
+
 
 try:
     import jedi
