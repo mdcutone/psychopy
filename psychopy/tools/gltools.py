@@ -72,6 +72,7 @@ __all__ = [
     'loadMtlFile',
     'createUVSphere',
     'createPlane',
+    'createDisc',
     'createMeshGridFromArrays',
     'createMeshGrid',
     'createBox',
@@ -3534,8 +3535,8 @@ def createMaterial(params=(), textures=(), face=GL.GL_FRONT_AND_BACK):
         component. The value of GL_SHININESS should be a single float. If no
         values are specified, an empty material will be created.
     textures :obj:`list` of :obj:`tuple`, optional
-        List of texture units and TexImage2DInfo descriptors. These will be written
-        to the 'textures' field of the returned descriptor. For example,
+        List of texture units and TexImage2DInfo descriptors. These will be
+        written to the `textures` field of the returned descriptor. For example,
         [(GL.GL_TEXTURE0, texDesc0), (GL.GL_TEXTURE1, texDesc1)]. The number of
         texture units per-material is GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS.
     face : :obj:`int`, optional
@@ -4568,6 +4569,75 @@ def createPlane(size=(1., 1.)):
 
     # generate face index
     faces = np.ascontiguousarray([[0, 2, 1], [1, 2, 3]], dtype=np.uint32)
+
+    return vertices, texCoords, normals, faces
+
+
+def createDisc(radius=1.0, edges=16):
+    """Create a disc (filled circle) mesh.
+
+    Generates a flat disc mesh with the specified radius and number of `edges`.
+    The origin of the disc is located at the center. Textures coordinates will
+    be mapped to a square which bounds the circle. Normals are perpendicular to
+    the face of the circle.
+
+    Parameters
+    ----------
+    radius : float
+        Radius of the disc in scene units.
+    edges : int
+        Number of segments to use to define the outer rim of the disc. Higher
+        numbers will result in a smoother circle but will use more triangles.
+
+    Returns
+    -------
+    tuple
+        Vertex attribute arrays (position, texture coordinates, and normals) and
+        triangle indices.
+
+    Examples
+    --------
+    Create a vertex array object to draw a disc::
+
+        vertices, textureCoords, normals, faces = gltools.createDisc(edges=128)
+        vertexVBO = gltools.createVBO(vertices)
+        texCoordVBO = gltools.createVBO(textureCoords)
+        normalsVBO = gltools.createVBO(normals)
+        indexBuffer = gltools.createVBO(
+            faces.flatten(),
+            target=GL.GL_ELEMENT_ARRAY_BUFFER,
+            dataType=GL.GL_UNSIGNED_INT)
+
+        vao = gltools.createVAO({0: vertexVBO, 8: texCoordVBO, 2: normalsVBO},
+                                indexBuffer=indexBuffer)
+
+    """
+    # get number of steps for vertices
+    nVerts = edges + 1
+    steps = np.linspace(0, 2 * np.pi, num=nVerts, dtype=np.float32)
+
+    # offset by 1 since the first vertex needs to be at centre
+    vertices = np.zeros((nVerts + 2, 3), dtype=np.float32)
+    vertices[1:-1, 0] = np.sin(steps)
+    vertices[1:-1, 1] = np.cos(steps)
+
+    # compute the face indices
+    nFaces = vertices.shape[0] - 1  # number of rows minus the centre
+    faces = np.zeros((nFaces, 3), dtype=np.uint32)
+    faces[:, 1] = np.arange(0, nFaces, dtype=np.uint32)
+    faces[:, 2] = faces[:, 1] + 1
+
+    # compute the texture coordinates for each vertex
+    normals = np.zeros_like(vertices, dtype=np.float32)
+    normals[:, 2] = -1
+
+    # compute texture coordinates
+    texCoords = vertices.copy()
+    texCoords[:, :] += 1.0
+    texCoords[:, :] *= 0.5
+
+    # scale to specified radius
+    vertices *= radius
 
     return vertices, texCoords, normals, faces
 

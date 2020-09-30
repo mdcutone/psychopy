@@ -112,7 +112,7 @@ class BaseBufferFilter(object):
             raise ValueError("Read buffer does not have attachment for the "
                              "current buffer mode.")
 
-        if not isinstance(colorTex, gltools.TexImage2D):
+        if not isinstance(colorTex, gltools.TexImage2DInfo):
             raise TypeError(
                 "Input buffer must have a `TexImage2D` as a color buffer. Got "
                 "type `{}` instead".format(type(colorTex)))
