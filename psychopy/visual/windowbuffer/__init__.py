@@ -65,7 +65,7 @@ class WindowBuffer(object):
     A render context describes how stimuli are drawn to a framebuffer. When
     `setBuffer` is called, the render context is made current and successive
     draw/read operations to the associated framebuffer will be mediated by the
-    context.
+    context established by the active `WindowBuffer`.
 
     OpenGL capability states and other information such as clear color,
     viewport, model/view matrix, etc. are saved and restored when switching
@@ -202,6 +202,10 @@ class WindowBuffer(object):
 
         # depth clear value
         self._clearDepthValue = 1.0
+
+        # Environment map, used to draw the background and reflections (e.g.
+        # a skybox)
+        self._envMap = None
 
         # configure the default view
         self.setDefaultView(clearDepth=False)
