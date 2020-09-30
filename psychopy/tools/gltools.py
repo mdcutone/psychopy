@@ -50,6 +50,7 @@ __all__ = [
     'deleteTexture',
     'VertexArrayInfo',
     'createVAO',
+    'createVAOSimple',
     'drawVAO',
     'deleteVAO',
     'VertexBufferInfo',
@@ -2788,6 +2789,71 @@ def createVAO(attribBuffers, indexBuffer=None, attribDivisors=None, legacy=False
                            legacy)
 
 
+def createVAOSimple(vertices, textureCoords, normals, faces, legacy=False):
+    """Create a VAO using defaults attribute pointers.
+
+    This function can be used to quickly (in terms of code) create a VAO using
+    default values for vertex attribute pointers. You can pass values returned
+    directly from the various shapes creation functions without needing to
+    create the VBOs for each first.
+
+    Parameters
+    ----------
+    vertices : ndarray
+        Nx3 array of vertex positions.
+    textureCoords : ndarray
+        Nx3 array of texture coordinates.
+    normals : ndarray
+        Nx3 array of vertex normals.
+    faces : ndarray
+        Nx3 array of face indices where each row contains the indices of the
+        faces.
+    legacy : bool, optional
+        Use legacy attribute pointer functions when setting the VAO state. This
+        is for compatibility with older GL implementations. Key specified to
+        `attribBuffers` must be `GLenum` types such as `GL_VERTEX_ARRAY` to
+        indicate the capability to use.
+
+    Returns
+    -------
+    VertexArrayInfo
+        Vertex array object.
+
+    Notes
+    -----
+    * This function is less flexible than `createVAO` and may not be supported
+      on some platforms.
+    * Assigned vertex pointers assume default shaders or fixed-pipeline are
+      being used.
+
+    Examples
+    --------
+    Create a VAO to draw a disc::
+
+        vao = gltools.createVAOSimple(*gltools.createDisc(edges=64))
+
+    """
+    faces = np.ascontiguousarray(faces, dtype=np.float32).flatten()
+    vertexVBO = createVBO(
+        np.ascontiguousarray(vertices, dtype=np.float32))
+    texCoordVBO = createVBO(
+        np.ascontiguousarray(textureCoords, dtype=np.float32))
+    normalsVBO = createVBO(
+        np.ascontiguousarray(normals, dtype=np.float32))
+    indexBuffer = createVBO(
+        faces, target=GL.GL_ELEMENT_ARRAY_BUFFER, dataType=GL.GL_UNSIGNED_INT)
+
+    # pick the appropriate vertex pointers
+    if not legacy:
+        attribs = {0: vertexVBO, 8: texCoordVBO, 2: normalsVBO}
+    else:
+        attribs = {GL.GL_VERTEX_ARRAY: vertexVBO,
+                   GL.GL_NORMAL_ARRAY: normalsVBO,
+                   GL.GL_TEXTURE_COORD_ARRAY: texCoordVBO}
+
+    return createVAO(attribs, indexBuffer=indexBuffer)
+
+
 def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, instanceCount=None,
             flush=False):
     """Draw a vertex array object. Uses `glDrawArrays` or `glDrawElements` if
@@ -4612,14 +4678,14 @@ def createDisc(radius=1.0, edges=16):
                                 indexBuffer=indexBuffer)
 
     """
-    # get number of steps for vertices
+    # get number of steps for vertices to get the number of edges we want
     nVerts = edges + 1
     steps = np.linspace(0, 2 * np.pi, num=nVerts, dtype=np.float32)
 
-    # offset by 1 since the first vertex needs to be at centre
-    vertices = np.zeros((nVerts + 2, 3), dtype=np.float32)
-    vertices[1:-1, 0] = np.sin(steps)
-    vertices[1:-1, 1] = np.cos(steps)
+    # offset since the first vertex is the centre
+    vertices = np.zeros((nVerts + 1, 3), dtype=np.float32)
+    vertices[1:, 0] = np.sin(steps)
+    vertices[1:, 1] = np.cos(steps)
 
     # compute the face indices
     nFaces = vertices.shape[0] - 1  # number of rows minus the centre
