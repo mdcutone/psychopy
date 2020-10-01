@@ -9,6 +9,19 @@
 # Distributed under the terms of the GNU General Public License (GPL).
 
 __all__ = [
+    'gl_Vertex',
+    'gl_Normal',
+    'gl_Color',
+    'gl_SecondaryColor',
+    'gl_FogCoord',
+    'gl_MultiTexCoord0',
+    'gl_MultiTexCoord1',
+    'gl_MultiTexCoord2',
+    'gl_MultiTexCoord3',
+    'gl_MultiTexCoord4',
+    'gl_MultiTexCoord5',
+    'gl_MultiTexCoord6',
+    'gl_MultiTexCoord7',
     'createProgram',
     'createProgramObjectARB',
     'compileShader',
@@ -134,6 +147,21 @@ GL_COMPAT_TYPES = {
     np.uint8: (GL.GL_UNSIGNED_BYTE, GL.GLubyte),
     np.int8: (GL.GL_BYTE, GL.GLbyte)
 }
+
+# OpenGL vertex attributes for shaders using GLSL 1.1 spec
+gl_Vertex = 0
+gl_Normal = 2
+gl_Color = 3
+gl_SecondaryColor = 4
+gl_FogCoord = 5
+gl_MultiTexCoord0 = 8
+gl_MultiTexCoord1 = 9
+gl_MultiTexCoord2 = 10
+gl_MultiTexCoord3 = 11
+gl_MultiTexCoord4 = 12
+gl_MultiTexCoord5 = 13
+gl_MultiTexCoord6 = 14
+gl_MultiTexCoord7 = 15
 
 
 # -------------------------------
@@ -2644,13 +2672,13 @@ def createVAO(attribBuffers, indexBuffer=None, attribDivisors=None, legacy=False
     ----------
     attribBuffers : dict
         Attributes and associated VBOs to add to the VAO state. Keys are
-        vertex attribute pointer indices, values are VBO descriptors to define.
-        Values can be `tuples` where the first value is the buffer descriptor,
-        the second is the number of attribute components (`int`, either 2, 3 or
-        4), the third is the offset (`int`), and the last is whether to
-        normalize the array (`bool`).
+        vertex attribute pointer indices, values are VBO descriptors to
+        associate with them. Values can be `tuples` where the first value is the
+        buffer descriptor, the second is the number of attribute components
+        (`int`, either 2, 3 or 4), the third is the offset (`int`), and the last
+        is whether to normalize the array (`bool`).
     indexBuffer : VertexBufferInfo
-        Optional index buffer.
+        Optional index buffer for faces.
     attribDivisors : dict
         Attribute divisors to set. Keys are vertex attribute pointer indices,
         values are the number of instances that will pass between updates of an
@@ -2664,9 +2692,40 @@ def createVAO(attribBuffers, indexBuffer=None, attribDivisors=None, legacy=False
 
     Examples
     --------
-    Create a vertex array object and enable buffer states within it::
+    Create a VAO using user supplied vertex arrays::
 
-        vao = createVAO({0: vertexPos, 1: texCoords, 2: vertexNormals})
+        from psychopy.tools.gltools import createVAO, createVBO
+        import pyglet.gl as GL
+
+        # Create vertex buffers for each array, this uploads the buffers to
+        # the video driver in the correct format.
+        vertexPos = createVBO(vertexPos)
+        texCoords = createVBO(texCoords)
+        vertexNormals = createVBO(vertexNormals)
+        indexBuffer = createVBO(
+            faces.flatten(),
+            target=GL.GL_ELEMENT_ARRAY_BUFFER,
+            dataType=GL.GL_UNSIGNED_INT)
+
+        # Create the VAO, passing a mapping to `attribBuffers` to indicate which
+        # shader input pointer location each buffer is associated with.
+
+        attribMapping = {0: vertexPos, 1: texCoords, 2: vertexNormals}
+        vao = createVAO(attribMapping)
+
+    You can use the constants defined in this module for pointers if you are
+    using GLSL version 1.1 shaders::
+
+        from psychopy.tools.gltools import (gl_Vertex,
+            gl_Normal, gl_MultiTexCoord0, createVAO, createVBO)
+        import pyglet.gl as GL
+
+        # create vertex buffers ...
+
+        vao = createVAO(
+            {gl_Vertex: vertexPos,
+             gl_MultiTexCoord0: texCoords,
+             gl_Normal: vertexNormals})
 
     Using an interleaved vertex buffer, all attributes are in the same buffer
     (`vertexAttr`). We need to specify offsets for each attribute by passing a
@@ -2689,9 +2748,8 @@ def createVAO(attribBuffers, indexBuffer=None, attribDivisors=None, legacy=False
         vao = createVAO({0: vertexPos}, indexBuffer=indices)
 
     The returned `VertexArrayInfo` instance will have attribute
-    ``isIndexed==True``.
-
-    Drawing vertex arrays using a VAO, will use the `indexBuffer` if available::
+    ``isIndexed==True``. Drawing vertex arrays using a VAO, will use the
+    `indexBuffer` if available::
 
         # draw the array
         drawVAO(vao, mode=GL.GL_TRIANGLES)
@@ -2790,12 +2848,12 @@ def createVAO(attribBuffers, indexBuffer=None, attribDivisors=None, legacy=False
 
 
 def createVAOSimple(vertices, textureCoords, normals, faces, legacy=False):
-    """Create a VAO using defaults attribute pointers.
+    """Create a VAO using default attribute pointers.
 
     This function can be used to quickly (in terms of code) create a VAO using
     default values for vertex attribute pointers. You can pass values returned
     directly from the various shapes creation functions without needing to
-    create the VBOs for each first.
+    create the VBOs and attribute pointer mapping first.
 
     Parameters
     ----------
@@ -2824,28 +2882,50 @@ def createVAOSimple(vertices, textureCoords, normals, faces, legacy=False):
     * This function is less flexible than `createVAO` and may not be supported
       on some platforms.
     * Assigned vertex pointers assume default shaders or fixed-pipeline are
-      being used.
+      being used. Instanced drawing is not supported.
+    * If you need to access any of the buffers after creating the VAO, do so
+      through the `activeAttribs` property of the returned VAO instance.
 
     Examples
     --------
     Create a VAO to draw a disc::
 
-        vao = gltools.createVAOSimple(*gltools.createDisc(edges=64))
+        vao = createVAOSimple(*createDisc(edges=64))
+
+        # above is equivalent to using `createVAO` with the following statements
+        vertices, textureCoords, normals, faces = createDisc(edges=64)
+        vertexVBO = createVBO(vertices)
+        texCoordVBO = createVBO(textureCoords)
+        normalsVBO = createVBO(normals)
+        indexBuffer = createVBO(
+            faces.flatten(),
+            target=GL.GL_ELEMENT_ARRAY_BUFFER,
+            dataType=GL.GL_UNSIGNED_INT)
+
+        vao = createVAO({0: vertexVBO, 8: texCoordVBO, 2: normalsVBO},
+                        indexBuffer=indexBuffer)
+
+        # see! much simpler :)
 
     """
-    faces = np.ascontiguousarray(faces, dtype=np.float32).flatten()
+    # attribute arrays
     vertexVBO = createVBO(
         np.ascontiguousarray(vertices, dtype=np.float32))
     texCoordVBO = createVBO(
         np.ascontiguousarray(textureCoords, dtype=np.float32))
     normalsVBO = createVBO(
         np.ascontiguousarray(normals, dtype=np.float32))
+
+    # prepare the array for faces
+    faces = np.ascontiguousarray(faces, dtype=np.float32).flatten()
     indexBuffer = createVBO(
         faces, target=GL.GL_ELEMENT_ARRAY_BUFFER, dataType=GL.GL_UNSIGNED_INT)
 
     # pick the appropriate vertex pointers
     if not legacy:
-        attribs = {0: vertexVBO, 8: texCoordVBO, 2: normalsVBO}
+        attribs = {gl_Vertex: vertexVBO,
+                   gl_MultiTexCoord0: texCoordVBO,
+                   gl_Normal: normalsVBO}
     else:
         attribs = {GL.GL_VERTEX_ARRAY: vertexVBO,
                    GL.GL_NORMAL_ARRAY: normalsVBO,
