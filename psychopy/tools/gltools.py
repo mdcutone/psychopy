@@ -1952,17 +1952,17 @@ def createTexImage2D(width, height, target=GL.GL_TEXTURE_2D, level=0,
     height : :obj:`int`
         Texture height in pixels.
     target : :obj:`int`
-        The target texture should only be either GL_TEXTURE_2D or
-        GL_TEXTURE_RECTANGLE.
+        The target texture should only be either `GL_TEXTURE_2D` or
+        `GL_TEXTURE_RECTANGLE`.
     level : :obj:`int`
         LOD number of the texture, should be 0 if GL_TEXTURE_RECTANGLE is the
         target.
     internalFormat : :obj:`int`
-        Internal format for texture data (e.g. GL_RGBA8, GL_R11F_G11F_B10F).
+        Internal format for texture data (e.g. `GL_RGBA8`, `GL_R11F_G11F_B10F`).
     pixelFormat : :obj:`int`
-        Pixel data format (e.g. GL_RGBA, GL_DEPTH_STENCIL)
+        Pixel data format (e.g. `GL_RGBA`, `GL_DEPTH_STENCIL`)
     dataType : :obj:`int`
-        Data type for pixel data (e.g. GL_FLOAT, GL_UNSIGNED_BYTE).
+        Data type for pixel data (e.g. `GL_FLOAT`, `GL_UNSIGNED_BYTE`).
     data : :obj:`ctypes` or :obj:`None`
         Ctypes pointer to image data. If None is specified, the texture will be
         created but pixel data will be uninitialized.
@@ -1984,7 +1984,7 @@ def createTexImage2D(width, height, target=GL.GL_TEXTURE_2D, level=0,
     The 'userData' field of the returned descriptor is a dictionary that can
     be used to store arbitrary data associated with the texture.
 
-    Previous textures are unbound after calling 'createTexImage2D'.
+    Previous textures are unbound after calling :func:`createTexImage2D`.
 
     Examples
     --------
@@ -2164,11 +2164,12 @@ class TexCubeMapInfo(object):
         level : :obj:`int`
             LOD number of the texture.
         internalFormat : :obj:`int`
-            Internal format for texture data (e.g. GL_RGBA8, GL_R11F_G11F_B10F).
+            Internal format for texture data (e.g. `GL_RGBA8`,
+            `GL_R11F_G11F_B10F`).
         pixelFormat : :obj:`int`
-            Pixel data format (e.g. GL_RGBA, GL_DEPTH_STENCIL)
+            Pixel data format (e.g. `GL_RGBA`, `GL_DEPTH_STENCIL`)
         dataType : :obj:`int`
-            Data type for pixel data (e.g. GL_FLOAT, GL_UNSIGNED_BYTE).
+            Data type for pixel data (e.g. `GL_FLOAT`, `GL_UNSIGNED_BYTE`).
         unpackAlignment : :obj:`int`
             Alignment requirements of each row in memory. Default is 4.
         texParams : :obj:`list` of :obj:`tuple` of :obj:`int`
@@ -2260,11 +2261,11 @@ def createCubeMap(width, height, target=GL.GL_TEXTURE_CUBE_MAP, level=0,
     level : :obj:`int`
         LOD number of the texture.
     internalFormat : :obj:`int`
-        Internal format for texture data (e.g. GL_RGBA8, GL_R11F_G11F_B10F).
+        Internal format for texture data (e.g. `GL_RGBA8`, `GL_R11F_G11F_B10F`).
     pixelFormat : :obj:`int`
-        Pixel data format (e.g. GL_RGBA, GL_DEPTH_STENCIL)
+        Pixel data format (e.g. `GL_RGBA`, `GL_DEPTH_STENCIL`)
     dataType : :obj:`int`
-        Data type for pixel data (e.g. GL_FLOAT, GL_UNSIGNED_BYTE).
+        Data type for pixel data (e.g. `GL_FLOAT`, `GL_UNSIGNED_BYTE`).
     data : list or tuple
         List of six ctypes pointers to image data for each cubemap face. Image
         data is assigned to a face by index [+X, -X, +Y, -Y, +Z, -Z]. All images
@@ -2418,7 +2419,8 @@ class TexImage2DMultisampleInfo(object):
             power-of-two (eg. 2, 4, 8, 16, etc.) Number of samples is limited
             by the graphics hardware.
         internalFormat : :obj:`int`
-            Internal format for texture data (e.g. GL_RGBA8, GL_R11F_G11F_B10F).
+            Internal format for texture data (e.g. `GL_RGBA8`,
+            `GL_R11F_G11F_B10F`).
         texParams : :obj:`list` of :obj:`tuple` of :obj:`int`
             Optional texture parameters specified as `dict`. These values are
             passed to `glTexParameteri`. Each tuple must contain a parameter
@@ -2502,12 +2504,12 @@ def createTexImage2DMultisample(width, height,
     height : :obj:`int`
         Texture height in pixels.
     target : :obj:`int`
-        The target texture (e.g. GL_TEXTURE_2D_MULTISAMPLE).
+        The target texture (e.g. `GL_TEXTURE_2D_MULTISAMPLE`).
     samples : :obj:`int`
         Number of samples for multi-sampling, should be >1 and power-of-two.
         Work with one sample, but will raise a warning.
     internalFormat : :obj:`int`
-        Internal format for texture data (e.g. GL_RGBA8, GL_R11F_G11F_B10F).
+        Internal format for texture data (e.g. `GL_RGBA8`, `GL_R11F_G11F_B10F`).
     texParameters : :obj:`list` of :obj:`tuple` of :obj:`int`
         Optional texture parameters specified as a list of tuples. These values
         are passed to 'glTexParameteri'. Each tuple must contain a parameter
@@ -2604,7 +2606,7 @@ class VertexArrayInfo(object):
         corresponds to the number of elements in the index buffer.
     activeAttribs : dict
         Attributes and buffers defined as part of this VAO state. Keys are
-        attribute pointer indices or capabilities (ie. GL_VERTEX_ARRAY).
+        attribute pointer indices or capabilities (ie. `GL_VERTEX_ARRAY`).
         Modifying these values will not update the VAO state.
     indexBuffer : VertexBufferInfo, optional
         Buffer object for indices.
@@ -2934,7 +2936,7 @@ def createVAOSimple(vertices, textureCoords, normals, faces, legacy=False):
     return createVAO(attribs, indexBuffer=indexBuffer)
 
 
-def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, instanceCount=None,
+def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, instances=None,
             flush=False):
     """Draw a vertex array object. Uses `glDrawArrays` or `glDrawElements` if
     `instanceCount` is `None`, or else `glDrawArraysInstanced` or
@@ -2952,7 +2954,7 @@ def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, instanceCount=None,
     count : int, optional
         Number of indices to draw from `start`. Must not exceed `vao.count` -
         `start`.
-    instanceCount : int or None
+    instances : int or None
         Number of instances to draw. If >0 and not `None`, instanced drawing
         will be used.
     flush : bool, optional
@@ -2977,16 +2979,16 @@ def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, instanceCount=None,
                     vao.count - start))
 
     if vao.indexBuffer is not None:
-        if instanceCount is None:
+        if instances is None:
             GL.glDrawElements(mode, count, vao.indexBuffer.dataType, start)
         else:
             GL.glDrawElementsInstanced(mode, count, vao.indexBuffer.dataType,
-                                       start, instanceCount)
+                                       start, instances)
     else:
-        if instanceCount is None:
+        if instances is None:
             GL.glDrawArrays(mode, start, count)
         else:
-            GL.glDrawArraysInstanced(mode, start, count, instanceCount)
+            GL.glDrawArraysInstanced(mode, start, count, instances)
 
     if flush:
         GL.glFlush()
