@@ -5301,7 +5301,7 @@ def calculateVertexNormals(vertices, faces, shading='smooth'):
         # get all faces the vertex belongs to
         for vertexIdx in np.unique(faces):
             match, _ = np.where(faces == vertexIdx)
-            normals.append(faceNormals[match, :])
+            normals.append(mt.vertexNormal(faceNormals[match, :]))
 
     return np.ascontiguousarray(np.vstack(normals), np.float32) + 0.0
 
