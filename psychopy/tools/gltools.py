@@ -3473,10 +3473,9 @@ def setVertexAttribPointer(index,
     For compatibility with older OpenGL specifications, some drivers will alias
     vertex pointers unless they are explicitly defined in the shader. This
     allows VAOs the be used with the fixed-function pipeline or older GLSL
-    versions.
-
-    On nVidia graphics drivers (and maybe others), the following attribute
-    pointers indices are aliased with reserved GLSL names:
+    versions. On nVidia graphics drivers (and most others), the following
+    attribute pointer indices are aliased with reserved GLSL names within the
+    shader:
 
         * gl_Vertex - 0
         * gl_Normal - 2
@@ -3492,6 +3491,9 @@ def setVertexAttribPointer(index,
         * gl_MultiTexCoord6 - 14
         * gl_MultiTexCoord7 - 15
 
+    The above constants are defined in this module (i.e. `gl_Vertex`). You can
+    use those instead of specifying the integers directly.
+
     Specifying `legacy` as `True` will allow for old-style pointer definitions.
     You must specify the capability as a `GLenum` associated with the pointer
     in this case::
@@ -3503,9 +3505,11 @@ def setVertexAttribPointer(index,
     Parameters
     ----------
     index : int
-        Index of the attribute to modify. If `legacy=True`, this value should
-        be a `GLenum` type corresponding to the capability to bind the buffer
-        to, such as `GL_VERTEX_ARRAY`, `GL_TEXTURE_COORD_ARRAY`,
+        Index of the attribute to modify. You can speify integers indicating the
+        shader attribute location to bind, or use the constants (e.g.
+        `gl_Vertex`) if the GLSL version supports them. If `legacy=True`, this
+        value should be a `GLenum` type corresponding to the capability to bind
+        the buffer to, such as `GL_VERTEX_ARRAY`, `GL_TEXTURE_COORD_ARRAY`,
         `GL_NORMAL_ARRAY`, etc.
     vbo : VertexBufferInfo
         VBO descriptor.
@@ -3547,14 +3551,14 @@ def setVertexAttribPointer(index,
         # create a VBO with interleaved attributes
         vboInterleaved = createVBO(np.asarray(vQuad, dtype=np.float32))
 
-        # ... before rendering, set the attribute pointers
+        # ... before rendering, set the attribute pointers.
         GL.glBindBuffer(vboInterleaved.target, vboInterleaved.name)
         gltools.setVertexAttribPointer(
-            0, vboInterleaved, size=3, offset=0)  # vertex pointer
+            gl_Vertex, vboInterleaved, size=3, offset=0)  # vertex pointer
         gltools.setVertexAttribPointer(
-            8, vboInterleaved, size=2, offset=3)  # texture pointer
+            gl_MultiTexCoord0, vboInterleaved, size=2, offset=3)  # texture pointer
         gltools.setVertexAttribPointer(
-            3, vboInterleaved, size=3, offset=5)  # normals pointer
+            gl_Normal, vboInterleaved, size=3, offset=5)  # normals pointer
 
         # Note, we specified `bind=False` since we are managing the binding
         # state. It is recommended that you do this when setting up interleaved
