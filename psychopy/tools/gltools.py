@@ -2781,6 +2781,7 @@ def createVAO(attribBuffers, indexBuffer=None, attribDivisors=None, legacy=False
     # add attribute pointers
     activeAttribs = {}
     bufferIndices = []
+    lastBuffer = None
     for i, buffer in attribBuffers.items():
         if isinstance(buffer, (list, tuple,)):
             if len(buffer) == 1:
@@ -2809,6 +2810,7 @@ def createVAO(attribBuffers, indexBuffer=None, attribDivisors=None, legacy=False
 
         activeAttribs[i] = buffer
         bufferIndices.append(buffer.shape[0])
+        lastBuffer = buffer
 
     # bind the EBO if available
     if indexBuffer is not None:
@@ -2839,7 +2841,14 @@ def createVAO(attribBuffers, indexBuffer=None, attribDivisors=None, legacy=False
         for key, val in attribDivisors.items():
             GL.glVertexAttribDivisor(key, val)
 
+    # unbind the VAO
     GL.glBindVertexArray(0)
+
+    # unbind the buffers afterwards, seems to be needed on MacOS
+    unbindVBO(lastBuffer)
+
+    if indexBuffer is not None:
+        GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, 0)
 
     return VertexArrayInfo(vaoId.value,
                            count,
