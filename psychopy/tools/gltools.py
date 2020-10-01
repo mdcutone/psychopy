@@ -90,6 +90,7 @@ __all__ = [
     'createMeshGridFromArrays',
     'createMeshGrid',
     'createBox',
+    'createFrustum',
     'transformMeshPosOri',
     'calculateVertexNormals',
     'getIntegerv',
@@ -4803,6 +4804,27 @@ def createDisc(radius=1.0, edges=16):
     return vertices, texCoords, normals, faces
 
 
+def createFrustum(baseSize=(1., 1.), capSize=(.5, .5), height=1.0):
+    """Create a frustum mesh.
+
+    Generate a frustum (sometimes called a truncated pyramid). This shape has
+    base and cap with different sizes.
+
+    """
+    # create a box, we'll transform it's vertices to give us our frustum
+    vertices, textureCoords, _, faces = createBox()
+    capVerts = [0, 2, 5, 7, 10, 11, 14, 15, 16, 17, 18, 19]
+
+    vertices[capVerts, 0] *= capSize[0]
+    vertices[capVerts, 1] *= capSize[1]
+
+    # recompute normals
+    normals = calculateVertexNormals(vertices, faces, shading='flat')
+    print(normals)
+
+    return vertices, textureCoords, normals, faces
+
+
 def createMeshGridFromArrays(xvals, yvals, zvals=None, tessMode='diag',
                              computeNormals=True):
     """Create a mesh grid using coordinates from arrays.
@@ -5292,7 +5314,7 @@ def calculateVertexNormals(vertices, faces, shading='smooth'):
     # compute surface normals for all faces
     faceNormals = mt.surfaceNormal(vertices[faces])
 
-    normals = []
+    normals = []  # new list of normals to return
     if shading == 'flat':
         for vertexIdx in np.unique(faces):
             match, _ = np.where(faces == vertexIdx)
@@ -5301,9 +5323,9 @@ def calculateVertexNormals(vertices, faces, shading='smooth'):
         # get all faces the vertex belongs to
         for vertexIdx in np.unique(faces):
             match, _ = np.where(faces == vertexIdx)
-            normals.append(mt.vertexNormal(faceNormals[match, :]))
+            normals.append(faceNormals[match, :])
 
-    return np.ascontiguousarray(normals) + 0.0
+    return np.ascontiguousarray(np.vstack(normals), np.float32) + 0.0
 
 
 # -----------------------------
