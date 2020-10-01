@@ -612,6 +612,9 @@ def distance(v0, v1, out=None, dtype=None):
     elif v0.ndim == v1.ndim == 1:
         dist = np.sqrt(np.sum(np.square(v1 - v0)))
     elif v0.ndim == 1 and v1.ndim == 2:
+        dist = np.zeros((v1.shape[0],), dtype=dtype) if out is None else out
+        dist[:] = np.sqrt(np.sum(np.square(v1 - v0), axis=1))
+    elif v0.ndim == 2 and v1.ndim == 1:
         dist = np.zeros((v0.shape[0],), dtype=dtype) if out is None else out
         dist[:] = np.sqrt(np.sum(np.square(v1 - v0), axis=1))
     else:
