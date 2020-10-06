@@ -88,11 +88,13 @@ __all__ = [
     'createPlane',
     'createDisc',
     'createAnnulus',
+    'createCylinder',
     'createMeshGridFromArrays',
     'createMeshGrid',
     'createBox',
     'mergeVertices',
     'smoothCreases',
+    'flipFaces',
     'transformMeshPosOri',
     'calculateVertexNormals',
     'getIntegerv',
@@ -1303,7 +1305,7 @@ def createFBO(attachments=None, sizeHint=None, sRGB=False, bindAfter=False):
         combined depth/stencil format such as GL_DEPTH24_STENCIL8, GL_DEPTH_ATTACHMENT
         and GL_STENCIL_ATTACHMENT must be passed the same buffer. Alternatively,
         one can use GL_DEPTH_STENCIL_ATTACHMENT instead. If using multisample
-        buffers, all attachment images must use the same number of samples!. As
+        buffers, all attachment images must use the same number of samples! As
         an example, one may specify attachments as `attachments={
         GL.GL_COLOR_ATTACHMENT0: frameTexture, GL.GL_DEPTH_STENCIL_ATTACHMENT:
         depthRenderBuffer}`.
@@ -4791,14 +4793,15 @@ def createDisc(radius=1.0, edges=16):
     vertices[1:, 1] = np.cos(steps)
 
     # compute the face indices
-    nFaces = vertices.shape[0] - 1  # number of rows minus the centre
-    faces = np.zeros((nFaces, 3), dtype=np.uint32)
-    faces[:, 1] = np.arange(0, nFaces, dtype=np.uint32)
-    faces[:, 2] = faces[:, 1] + 1
+    faces = []
+    for i in range(nVerts):
+        faces.append([0, i + 1, i])
+
+    faces = np.ascontiguousarray(faces, dtype=np.uint32)
 
     # compute the texture coordinates for each vertex
     normals = np.zeros_like(vertices, dtype=np.float32)
-    normals[:, 2] = -1
+    normals[:, 2] = 1.
 
     # compute texture coordinates
     texCoords = vertices.copy()
@@ -4816,7 +4819,7 @@ def createAnnulus(innerRadius=0.5, outerRadius=1.0, edges=16):
 
     Generates a flat ring mesh with the specified inner/outer radii and number
     of `edges`. The origin of the ring is located at the center. Textures
-    coordinates will be mapped to a square which bounds the circle. Normals are
+    coordinates will be mapped to a square which bounds the ring. Normals are
     perpendicular to the plane of the ring.
 
     Parameters
@@ -4862,7 +4865,7 @@ def createAnnulus(innerRadius=0.5, outerRadius=1.0, edges=16):
     # combine inner and outer vertex rings
     vertPos = np.vstack((innerVerts, outerVerts))
 
-    # generate
+    # generate faces
     faces = []
     for i in range(nVerts):
         faces.append([i, edges + i + 1, edges + i])
@@ -4880,6 +4883,78 @@ def createAnnulus(innerRadius=0.5, outerRadius=1.0, edges=16):
 
     # scale to specified outer radius
     vertPos[:, :2] *= outerRadius
+
+    return vertPos, texCoords, normals, faces
+
+
+def createCylinder(radius=1.0, height=1.0, edges=16, stacks=1):
+    """Create a cylinder mesh.
+
+    Generate a cylinder mesh with a given `height` and `radius`. The origin of
+    the mesh will centered on it and offset to the base. Texture coordinates
+    will be generated allowing a texture to wrap around it.
+
+    Parameters
+    ----------
+    radius : float
+        Radius of the cylinder in scene units.
+    height : float
+        Height in scene units.
+    edges : int
+        Number of edges, the greater the number, the smoother the cylinder will
+        appear when drawn.
+    stacks : int
+        Number of subdivisions along the height of cylinder to make. Setting to
+        1 will result in vertex data only being generated for the base and end
+        of the cylinder.
+
+    Returns
+    -------
+    tuple
+        Vertex attribute arrays (position, texture coordinates, and normals) and
+        triangle indices.
+
+    """
+    # generate vertex positions
+    nEdgeVerts = edges + 1
+    rings = stacks + 1
+    steps = np.linspace(0, 2 * np.pi, num=nEdgeVerts)
+    vertPos = np.zeros((nEdgeVerts, 3))
+    vertPos[:, 0] = np.sin(steps)
+    vertPos[:, 1] = np.cos(steps)
+    vertPos = np.tile(vertPos, (rings, 1))
+
+    # apply offset in height for each stack
+    stackHeight = np.linspace(0, height, num=rings)
+    vertPos[:, 2] = np.repeat(stackHeight, nEdgeVerts)
+
+    # generate texture coordinates to they wrap around the cylinder
+    u = np.linspace(0.0, 1.0, nEdgeVerts)
+    v = np.linspace(1.0, 0.0, rings)
+    uu, vv = np.meshgrid(u, v)
+    texCoords = np.vstack([uu.ravel(), vv.ravel()]).T
+
+    # generate vertex normals, since our vertices all on a unit circle, we can
+    # do a trick here
+    normals = vertPos.copy()
+    normals[:, 2] = 0.0
+
+    # create face indices
+    faces = []
+    for i in range(0, stacks):
+        stackOffset = nEdgeVerts * i
+        for j in range(nEdgeVerts):
+            j = stackOffset + j
+            faces.append([j, edges + j, edges + j + 1])
+            faces.append([j, edges + j + 1, j + 1])
+
+    vertPos, texCoords, normals = [
+        np.ascontiguousarray(i, dtype=np.float32) for i in (
+            vertPos, texCoords, normals)]
+    faces = np.ascontiguousarray(faces, dtype=np.uint32)
+
+    # scale the cylinder's radius and height to what the user specified
+    vertPos[:, :2] *= radius
 
     return vertPos, texCoords, normals, faces
 
@@ -5608,6 +5683,43 @@ def smoothCreases(vertices, normals, vertDist=0.0001):
 
     return newNormals
 
+
+def flipFaces(faces, out=None):
+    """Change the winding order of face indices.
+
+    OpenGL uses the winding order of face vertices to determine which side of
+    the face is either the front and back. This is useful for cases where one
+    wishes to make a mesh that's viewed from the inside.
+
+    Passing an array of face indices to this function will reverse the winding
+    order.
+
+    Parameters
+    ----------
+    faces : ndarray
+        Nx3 array of face indices.
+    out : ndarray
+        Optional output array to write values to. This can be used to flip
+        indices inplace.
+
+    Returns
+    -------
+    ndarray
+        Face indices with winding order reversed.
+
+    Examples
+    --------
+    Flip faces and normals of a box mesh so it can be viewed and lit from the
+    inside::
+
+        vertices, texCoords, normals, faces = createBox((5, 5, 5))
+        faces = flipFaces(faces)
+
+    """
+    toReturn = np.zeros_like(faces) if out is None else out
+    toReturn[:, :] = np.fliplr(faces)
+
+    return toReturn
 
 # -----------------------------
 # Misc. OpenGL Helper Functions
