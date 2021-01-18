@@ -68,8 +68,9 @@ class Test_StimuliClasses(object):
                       'ori': (45.6, 45.6),
                       'size': ([1.0, 0.5], np.array([1.0, 0.5])),
                       #'color': ((1., 1., 1.), np.array([1., 1., 1.])),
-                      'opacity': (0.5, 0.5),
-                      'contrast': (0.25, 0.25)}
+                      #'opacity': (0.5, 0.5),
+                      #'contrast': (0.25, 0.25)
+                      }
 
         for stimType in (ShapeStim, Rect, Circle,):
             stim = stimType(self.win,
