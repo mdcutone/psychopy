@@ -4,12 +4,12 @@
 """Tests to ensure the API for PsychoPy stimuli classes is stable.
 
 These tests simply check if public properties and methods for stimuli classes
-correctly handle values passed to them correctly. This ensures that if changes
-are made to the underlying implementation within those classes, we can be
-confident that users will not notice those changes. These tests also ensure that
-class properties (setters/getters) that accept various data formats to specify
-the same thing result in the same value being returned when accessed. For
-instance, the `ColorMixin` allows the color `red` to be set in many ways::
+correctly handle values passed to them. This ensures that if changes are made to
+the underlying implementation within those classes, we can be confident that
+users will not notice those changes. These tests also ensure that class
+properties (setters/getters) that accept various data formats to specify the
+same thing result in the same value being returned when accessed. For instance,
+the `ColorMixin` allows the color `red` to be set in many ways::
 
     # all these are the same
     myStim.color = (1, -1, -1)  # tuple of ints
