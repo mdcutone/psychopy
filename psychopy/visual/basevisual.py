@@ -394,7 +394,7 @@ class ColorMixin(object):
             stim.contrast =  1.2  # increases contrast
             stim.contrast = -1.2  # inverts with increased contrast
         """
-        self.__dict__['contrast'] = value
+        self.__dict__['contrast'] = float(value)
 
         # If we don't have shaders we need to rebuild the stimulus
         if hasattr(self, 'useShaders'):
@@ -1255,7 +1255,7 @@ class BaseVisualStim(MinimalStim, WindowMixin, LegacyVisualMixin):
         (transparent). :ref:`Operations <attrib-operations>` are supported.
         Precisely how this is used depends on the :ref:`blendMode`.
         """
-        self.__dict__['opacity'] = value
+        value = self.__dict__['opacity'] = float(value)
 
         if not 0 <= value <= 1 and self.autoLog:
             logging.warning('Setting opacity outside range 0.0 - 1.0'
@@ -1278,7 +1278,7 @@ class BaseVisualStim(MinimalStim, WindowMixin, LegacyVisualMixin):
         appropriately.
 
         """
-        self.__dict__['ori'] = value
+        value = self.__dict__['ori'] = float(value)  # float internally
         radians = value * 0.017453292519943295
         sin, cos = numpy.sin, numpy.cos
         self._rotationMatrix = numpy.array([[cos(radians), -sin(radians)],
