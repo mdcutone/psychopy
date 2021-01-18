@@ -4,12 +4,26 @@
 """Tests to ensure the API for PsychoPy stimuli classes is stable.
 
 These tests simply check if public properties and methods for stimuli classes
-store and return values correctly. This ensures that if changes are made to the
-underlying implementation within those classes, we can be confident that users
-will not notice those changes.
+correctly handle values passed to them correctly. This ensures that if changes
+are made to the underlying implementation within those classes, we can be
+confident that users will not notice those changes. These tests also ensure that
+class properties (setters/getters) that accept various data formats to specify
+the same thing result in the same value being returned when accessed. For
+instance, the `ColorMixin` allows the color `red` to be set in many ways::
+
+    # all these are the same
+    myStim.color = (1, -1, -1)  # tuple of ints
+    myStim.color = [1., -1., -1.]  # list of floats
+    myStim.color = '#FF0000'  # hex string
+    myStim.color = numpy.array([1., -1., -1.])  # numpy array
+
+However, when the `color` property is accessed it should always return
+`array([1. -1. -1.])` regardless of what was specified above. This is what we're
+looking for with these tests. No matter what format the data is being specified
+as, what is stored is always in the same format.
 
 Here we don't test routines for correctness (eg., colors are being correctly
-computed).
+computed), that should be done in separate tests suites.
 
 """
 
@@ -36,10 +50,7 @@ class Test_StimuliClasses(object):
         3. If the attribute is a setter/getter, set the value and check if the
            return value has the correct type/value when accessed. Try this for
            all types the attribute accepts. Methods and functions can be tested
-           to check if they return values with the appropriate type. More
-           extensive testing of these routines should be done elsewhere (i.e.
-           for correctness).
-        4.
+           to check if they return values with the appropriate type.
 
     A test should be successful if:
 
