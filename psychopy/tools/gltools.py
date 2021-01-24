@@ -50,7 +50,8 @@ __all__ = [
     'getAbsTimeGPU',
     'FramebufferInfo',
     'createFBO',
-    'attach',
+    'attachBuffer',
+    'detachBuffer',
     'isComplete',
     'deleteFBO',
     'blitFBO',
@@ -1144,6 +1145,7 @@ def getAbsTimeGPU():
     """
     global QUERY_COUNTER
     if QUERY_COUNTER is None:
+        QUERY_COUNTER = GL.GLuint()
         GL.glGenQueries(1, ctypes.byref(QUERY_COUNTER))
 
     GL.glQueryCounter(QUERY_COUNTER, GL.GL_TIMESTAMP)
@@ -1204,9 +1206,15 @@ class FramebufferInfo(object):
         self._isBound = False
         self.sizeHint = np.array(sizeHint, dtype=int)
 
+    @property
     def isBound(self):
-        """`True` if the framebuffer was previously bound using the `bindFBO`
-        function."""
+        """`True` if the framebuffer was previously bound and is current.
+
+        This is set and unset by `bindFBO` and `unbindFBO`, respectively. It
+        may not reflect the actual binding state of the FBO if the state was
+        changed by some other means.
+
+        """
         return self._isBound
 
     @property
@@ -1260,6 +1268,11 @@ class FramebufferInfo(object):
             Descriptor for the attachment. Gives `None` if there is no depth
             attachment.
 
+        Notes
+        -----
+        * If the depth and stencil buffer a combined, this function will
+          return the depth and stencil buffer.
+
         """
         if GL.GL_DEPTH_STENCIL_ATTACHMENT in self.attachments:
             return self.attachments[GL.GL_DEPTH_STENCIL_ATTACHMENT]
@@ -1276,6 +1289,11 @@ class FramebufferInfo(object):
         TexImage2DInfo, RenderbufferInfo or TexImage2DMultisampleInfo
             Descriptor for the attachment. Gives `None` if there is no stencil
             attachment.
+
+        Notes
+        -----
+        * If the depth and stencil buffer a combined, this function will
+          return the depth and stencil buffer.
 
         """
         if GL.GL_DEPTH_STENCIL_ATTACHMENT in self.attachments:
@@ -1373,11 +1391,11 @@ def createFBO(attachments=None, sizeHint=None, sRGB=False, bindAfter=False):
         frameBuffer = createFBO().name
 
     """
-    fboId = GL.GLuint()
+    fboId = GL.GLint()
     GL.glGenFramebuffers(1, ctypes.byref(fboId))
 
     # create a framebuffer descriptor
-    fboDesc = FramebufferInfo(fboId, GL.GL_FRAMEBUFFER, sizeHint, sRGB, dict())
+    fboDesc = FramebufferInfo(fboId.value, GL.GL_FRAMEBUFFER, sizeHint, sRGB, dict())
 
     # initial attachments for this framebuffer
     if attachments is not None:
@@ -1394,7 +1412,7 @@ def createFBO(attachments=None, sizeHint=None, sRGB=False, bindAfter=False):
         # bind the new FBO
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fboId)
         for attachPoint, imageBuffer in attachments.items():
-            attach(fboDesc, attachPoint, imageBuffer)
+            attachBuffer(fboDesc, attachPoint, imageBuffer)
 
         # restore the previous state
         if not bindAfter:
@@ -1413,7 +1431,7 @@ def createFBO(attachments=None, sizeHint=None, sRGB=False, bindAfter=False):
 #     """Create a `Framebuffer` object from an existing FBO handle."""
 
 
-def attach(fbo, attachPoint, imageBuffer):
+def attachBuffer(fbo, attachPoint, imageBuffer):
     """Attach an image to a specified attachment point of `fbo`.
 
     Parameters
@@ -1430,14 +1448,14 @@ def attach(fbo, attachPoint, imageBuffer):
     Attach an image to attachment points on the framebuffer::
 
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
-        attach(GL.GL_COLOR_ATTACHMENT0, colorTex)
-        attach(GL.GL_DEPTH_STENCIL_ATTACHMENT, depthRb)
+        attachBuffer(GL.GL_COLOR_ATTACHMENT0, colorTex)
+        attachBuffer(GL.GL_DEPTH_STENCIL_ATTACHMENT, depthRb)
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, lastBoundFbo)
 
         # same as above, but using a context manager
         with useFBO(fbo):
-            attach(GL.GL_COLOR_ATTACHMENT0, colorTex)
-            attach(GL.GL_DEPTH_STENCIL_ATTACHMENT, depthRb)
+            attachBuffer(GL.GL_COLOR_ATTACHMENT0, colorTex)
+            attachBuffer(GL.GL_DEPTH_STENCIL_ATTACHMENT, depthRb)
 
     """
     # We should also support binding GL names specified as integers. Right now
@@ -1459,7 +1477,7 @@ def attach(fbo, attachPoint, imageBuffer):
     fbo.attachments[attachPoint] = imageBuffer
 
 
-def detach(fbo, attachPoint):
+def detachBuffer(fbo, attachPoint):
     """Detach an image buffer from a given FBO attachment point. Framebuffer
     must be previously bound.
 
@@ -2120,6 +2138,11 @@ def createTexImage2dFromFile(imgFile, transpose=True):
                    GL.GL_TEXTURE_MIN_FILTER: GL.GL_LINEAR})
 
     return textureDesc
+
+
+def createTexture2dFromArray(arr):
+    """Convert an array to a 2D texture."""
+    pass
 
 
 class TexCubeMapInfo(object):
