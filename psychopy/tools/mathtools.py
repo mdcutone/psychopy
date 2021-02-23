@@ -64,7 +64,12 @@ __all__ = ['normalize',
            'articulate',
            'forwardProject',
            'reverseProject',
-           'lensCorrectionSpherical']
+           'lensCorrectionSpherical',
+           'splitRect',
+           'gridRect',
+           'absRect',
+           'relRect',
+           'pointInRect']
 
 
 import numpy as np
@@ -3955,11 +3960,284 @@ def lensCorrectionSpherical(xys, coefK=1.0, aspect=1.0, out=None, dtype=None):
 
     return toReturn
 
+# -------------------------------------
+# functions for working with rectangles
+
+
+def splitRect(rect, direction='vertical', prop=0.5, dtype=None):
+    """Split a rectangle.
+
+    This function takes a given rectangle and splits it either horizontally or
+    vertically. The user can specify the proportion which given to the first
+    rectangle.
+
+    Parameters
+    ----------
+    rect : ArrayLike
+        Rectangle(s) `(x, y, w, h)` as a 1x4 array.
+    direction : str
+        Direction to split, either 'vertical' or 'horizontal'.
+    prop : float
+        Proportion to give to the first rectangle, ranges between 0 and 1.
+        Specifying a value of 0.5 will result in the rectangle being split in
+        half evenly.
+    dtype : dtype or str, optional
+        Data type for computations can either be 'float32' or 'float64'. If
+        `out` is specified, the data type of `out` is used and this argument is
+        ignored. If `out` is not provided, 'float64' is used by default.
+
+    Returns
+    -------
+    tuple or ndarray
+        Rectangles `(x, y, w, h)`.
+
+    Examples
+    --------
+    Split a rectangle in two equal rectangles::
+
+        rect = (0, 0, 1, 1)
+        rectLeft, rectRight = splitRect(rect, prop=0.5)
+        # rectLeft =  [0.0, 0.0, 0.5, 1.0]
+        # rectRight = [0.5, 0.0, 0.5, 1.0]
+
+    """
+    if not 0 < prop < 1.0:
+        raise ValueError("Invalid value for `split`, must be between 0 and 1.")
+
+    dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    rect = np.asarray(rect, dtype=dtype)
+
+    # new rectangles to return
+    r0 = np.zeros_like(rect, dtype=dtype)
+    r1 = np.zeros_like(rect, dtype=dtype)
+
+    rx, ry, rw, rh = rect
+    oneMinusProp = 1 - prop
+    if direction == 'vertical':  # vertical split
+        offset = rx * prop
+        r0.data[:] = (rx, ry, offset, rh)
+        r1.data[:] = (offset, ry, rw * oneMinusProp, rh)
+    elif direction == 'horizontal':  # horizontal split
+        offset = rh * prop
+        r0.data[:] = (rx, ry, rw, offset)
+        r1.data[:] = (rx, offset, rw, rh * oneMinusProp)
+    else:
+        raise ValueError("Invalid value for `direction` specified. Must be "
+                         "either `horizontal` or `vertical`")
+
+    return r0, r1
+
+
+def gridRect(rect, subdiv=(1, 1), flipY=False, dtype=None):
+    """Split a given rectangle into a grid of equally sized rectangles.
+
+    Parameters
+    ----------
+    rect : ArrayLike
+        Rectangle `(x, y, width, height)` to subdivide.
+    subdiv : ArrayLike of int
+        Number of rows and columns `(rows, columns)` to subdivide `rect` into.
+        Each value must be 1 or greater.
+    flipY : bool
+        Invert the Y origin. By default, the origin will be located at the
+        bottom following the OpenGL screen coordinate convention. If `False`,
+        the window coordinate convention is used where the origin is at the
+        top-left corner. This value must be appropriate for what convention was
+        used when defining `rect`.
+    dtype : dtype or str, optional
+        Data type for computations can either be 'float32' or 'float64'. If
+        `out` is specified, the data type of `out` is used and this argument is
+        ignored. If `out` is not provided, 'float64' is used by default.
+
+    Returns
+    -------
+    ndarray
+        NxMx4 array of rectangles. The rectangle belonging to a specific row or
+        column can be addressed using the first two dimension indices of the
+        returned array (see Examples below).
+
+    Examples
+    --------
+    Split a rectangle into four equal panels::
+
+        rect = [-1, -1, 2, 2]
+        rects = gridRect(rect, (2, 2))
+
+        # This gives the following arrangement of rectangles:
+        #
+        #   --------------------------------------
+        #   |                  |                 |
+        #   |                  |                 |
+        #   |      [0, 0]      |     [0, 1]      |
+        #   |                  |                 |
+        #   |                  |                 |
+        #   |------------------------------------|
+        #   |                  |                 |
+        #   |                  |                 |
+        #   |      [1, 0]      |     [1, 1]      |
+        #   |                  |                 |
+        #   |                  |                 |
+        #   --------------------------------------
+        #
+
+    Get the bottom-left rectangle::
+
+        bottomLeftRect = rects[1, 0]  # or rects[1, 0, :]
+
+    Get rectangles belonging to the top row only::
+
+        topRow = rects[0, :]
+
+    Using ``subdiv=(1, 1)`` results in no splits, resulting the same rectangle
+    being returned::
+
+        rect = [-1, -1, 2, 2]
+        rects = gridRect(rect, subdiv=(1, 1))
+        isSame = np.allclose(rect, rects[0, 0])  # True
+
+    One use case for this function is to specify viewports and scissor
+    rectangles for rendering a grid of images::
+
+        glViewport(*rects[0, 1])
+
+    """
+    if subdiv[0] < 1 or subdiv[1] < 1:
+        raise ValueError(
+            "Values for rows and columns of `subdiv` must be >= 1.")
+
+    rows, columns = subdiv
+    dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    toReturn = np.zeros((rows, columns, 4), dtype=dtype)
+
+    # compute rectangle origins
+    toReturn[:, :, 0] = np.linspace(
+        rect[0], rect[0] + rect[2], columns, endpoint=False)
+    ypos = np.repeat(
+        np.linspace(rect[1], rect[1] + rect[3], rows, endpoint=False),
+        columns).reshape((rows, columns))
+    toReturn[:, :, 1] = np.flip(ypos) if flipY else ypos
+
+    # set widths and heights, all the same
+    toReturn[:, :, 2] = rect[2] / columns
+    toReturn[:, :, 3] = rect[3] / rows
+
+    return toReturn
+
+
+def absRect(rect, out=None, dtype=None):
+    """Convert a vector specifying a rectangle from relative (origin + size) to
+    absolute (two-point) notation.
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    else:
+        dtype = np.dtype(dtype).type
+
+    toReturn = np.asarray(rect.copy(), dtype=dtype) if out is None else out
+    toReturn[2:] += toReturn[:1]
+
+    return toReturn
+
+
+def relRect(rect, out=None, dtype=None):
+    """Convert a vector specifying a rectangle from absolute (two-point) to
+    relative (origin + size) notation.
+
+    """
+    if out is None:
+        dtype = np.float64 if dtype is None else np.dtype(dtype).type
+    else:
+        dtype = np.dtype(dtype).type
+
+    toReturn = np.asarray(rect.copy(), dtype=dtype) if out is None else out
+    toReturn[2:] -= toReturn[:1]
+
+    return toReturn
+
+
+def pointInRect(point, rects, test='inside', out=None, dtype=None):
+    """Check if a point is contained within one or more rectangles.
+
+    Parameters
+    ----------
+    point : ArrayLike
+        Coordinate as a 1x2 array (x, y).
+    rects : ArrayLike
+        1x4 or Nx4 array of rectangles (x, y, width, height).
+    test : str
+        Type of test to use. Possible values are 'inside' or 'outside' to check
+        if a point falls within a rectangle or not, respectively.
+
+    Returns
+    -------
+    ndarray
+        Boolean array of values indicating whether or not `point` falls in each
+        of the rectangles specified in `rects`. Where indices for the returned
+        array show the test result for the matching row of `rects`.
+
+    Examples
+    --------
+    Test if a point is inside a single rectangle::
+
+        point = (0, 0)
+        rect = (-1, -1, 2, 2)
+        testResults = pointInRect(point, rect).any()  # True
+
+    Test if a point falls inside any rectangle::
+
+         rects = [[-1, -1, 2, 2], [-4, -4, 2, 2]]
+         testResults = pointInRect(point, rects)  # [True False]
+         testResults = testResults.any()  # True
+
+    Test if a points falls within all rectangles::
+
+        # assuming the same values as above
+        testResults = pointInRect(point, rects).all()  # False
+
+    Test if the point falls outside at least one rectangle::
+
+        testResults = ~pointInRect(point, rects).any()  # True
+        # ... or specify `test='outside'`, possibly faster for large arrays ...
+        testResults = pointInRect(point, rects, test='outside').any()  # True
+
+    Get the indices for the rectangles in `rects` that contain the `point`::
+
+        testInside = pointInRect(point, rects, test='inside')
+        testOutside = pointInRect(point, rects, test='outside')
+        insideIdx = numpy.where(testInside)[0]  # [0]
+        outsideIdx = numpy.where(outsideIdx)[0]  # [1]
+
+        # get the actual rectangles that the point is within
+        insideRects = rects[insideIdx, :]
+
+    """
+    # 3D since we may want to take the input of `gridRect` directly
+    rects = np.atleast_2d(rects)
+    px, py = point
+
+    if test == 'inside':  # test if the point is inside the rectangle
+        hitTest = \
+            (rects[:, 0] <= px) & \
+            ((rects[:, 0] + rects[:, 2]) >= px) & \
+            (rects[:, 1] <= py) & \
+            ((rects[:, 1] + rects[:, 3]) >= py)
+    elif test == 'outside':  # test if the point is outside
+        hitTest = \
+            (rects[:, 0] > px) | \
+            ((rects[:, 0] + rects[:, 2]) < px) | \
+            (rects[:, 1] > py) | \
+            ((rects[:, 1] + rects[:, 3]) < py)
+    else:
+        raise ValueError(
+            "Invalid value for `test`, must be 'inside' or 'outside'.")
+
+    return hitTest
+
 
 class infrange():
-    """
-    Similar to base Python `range`, but allowing the step to be a float or even
-    0, useful for specifying ranges for logical comparisons.
+    """Similar to base Python `range`, but allowing the step to be a float or
+    even 0, useful for specifying ranges for logical comparisons.
     """
     def __init__(self, min, max, step=0):
         self.min = min
@@ -3968,7 +4246,7 @@ class infrange():
 
     @property
     def range(self):
-        return abs(self.max-self.min)
+        return abs(self.max - self.min)
 
     def __lt__(self, other):
         return other > self.max
@@ -3986,7 +4264,8 @@ class infrange():
         if self.step == 0:
             return self.min < item < self.max
         else:
-            return item in np.linspace(self.min, self.max, int(self.range/self.step)+1)
+            return item in np.linspace(
+                self.min, self.max, int(self.range / self.step) + 1)
 
     def __eq__(self, item):
         if isinstance(item, self.__class__):
@@ -3998,17 +4277,33 @@ class infrange():
         return item in self
 
     def __add__(self, other):
-        return self.__class__(self.min+other, self.max+other, self.step)
+        return self.__class__(
+            self.min+other, self.max+other, self.step)
 
     def __sub__(self, other):
         return self.__class__(self.min - other, self.max - other, self.step)
 
     def __mul__(self, other):
-        return self.__class__(self.min * other, self.max * other, self.step * other)
+        return self.__class__(
+            self.min * other, self.max * other, self.step * other)
 
     def __truedic__(self, other):
-        return self.__class__(self.min / other, self.max / other, self.step / other)
+        return self.__class__(
+            self.min / other, self.max / other, self.step / other)
 
 
 if __name__ == "__main__":
-    pass
+    g = pointInRect([0, 0], [[-1, -1, 2, 2], [-4, -4, 2, 2]])
+
+    point = (0, 0)
+    rect = (-1, -1, 2, 2)
+    testResults = ~pointInRect(point, [[-1, -1, 2, 2], [-4, -4, 2, 2]])  # True
+    print(testResults)
+    # or possibly faster for large arrays ...
+    testResults = pointInRect(point, [[-1, -1, 2, 2], [-4, -4, 2, 2]], test='outside')
+
+    print(testResults)
+    testResults = pointInRect(point, [[-1, -1, 2, 2], [-4, -4, 2, 2]], test='outside')
+    print(testResults)
+    rectIdx = np.where(testResults)[0]  # [0]
+    print(rectIdx)
