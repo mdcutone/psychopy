@@ -90,6 +90,7 @@ from .text import TextStim
 from .grating import GratingStim
 from .helpers import setColor
 from . import globalVars
+from . import framestats
 
 try:
     from PIL import Image
@@ -447,6 +448,9 @@ class Window(object):
         backendConf['depthBits'] = depthBits
         backendConf['stencilBits'] = stencilBits
 
+        # object for more advanced performance stats
+        self._framePerfStats = framestats.WindowPerfStats()
+
         # get the backend, pass the options to it
         self.backend = backends.getBackend(win=self, backendConf=backendConf)
 
@@ -579,6 +583,7 @@ class Window(object):
         else:
             self.monitorFramePeriod = 1.0 / 60  # assume a flat panel?
         self.refreshThreshold = self.monitorFramePeriod * 1.2
+
         openWindows.append(self)
 
         self.autoLog = autoLog
@@ -719,6 +724,12 @@ class Window(object):
             not self.recordFrameIntervals and value)
         self.__dict__['recordFrameIntervals'] = value
         self.frameClock.reset()
+
+    @property
+    def framePerfStats(self):
+        """Performance statistics for the last frame.
+        """
+        return self._framePerfStats
 
     def setRecordFrameIntervals(self, value=True, log=None):
         """Usually you can use 'stim.attribute = value' syntax instead,
@@ -919,6 +930,21 @@ class Window(object):
                             .format(repr(obj)))
 
     @property
+    def frameIndex(self):
+        """Current frame index (`int`)."""
+        return self._framePerfStats.frameIndex
+
+    @property
+    def frameRate(self):
+        """Frame rate in Hertz (`float`)."""
+        return self._framePerfStats.getFrameRate()
+
+    @property
+    def headroom(self):
+        """Headroom last frame (`float`)."""
+        return self._framePerfStats.getHeadroom
+
+    @property
     def currentEditable(self):
         """The editable (Text?) object that currently has key focus"""
         if self._currentEditableRef:
@@ -1039,6 +1065,7 @@ class Window(object):
             win.flip(clearBuffer=False)
 
         """
+        timeFlipStart = logging.defaultClock.getTime()
         if self._toDraw:
             for thisStim in self._toDraw:
                 thisStim.draw()
@@ -1081,6 +1108,9 @@ class Window(object):
             # If there is only one editable on screen, make sure it starts off with focus
             if sum(editablesOnScreen) == 1:
                 self.currentEditable = self._editableChildren[editablesOnScreen.index(True)]()
+
+        # mark that the user has done drawing and the flip has begun
+        self._framePerfStats.markFlipStart()
 
         flipThisFrame = self._startOfFlip()
         if self.useFBO and flipThisFrame:
@@ -1171,6 +1201,8 @@ class Window(object):
             GL.glFinish()
 
         # get timestamp
+        # mark that the GPU has returned control to the application
+        self._framePerfStats.markSwapFinished()
         self._frameTime = now = logging.defaultClock.getTime()
         self._frameTimes.append(self._frameTime)
 
@@ -1179,26 +1211,26 @@ class Window(object):
             callEntry['function'](*callEntry['args'], **callEntry['kwargs'])
         del self._toCall[:]
 
-        # do bookkeeping
-        if self.recordFrameIntervals:
-            self.frames += 1
-            deltaT = now - self.lastFrameT
-            self.lastFrameT = now
-
-            if self.recordFrameIntervalsJustTurnedOn:  # don't do anything
-                self.recordFrameIntervalsJustTurnedOn = False
-            else:  # past the first frame since turned on
-                self.frameIntervals.append(deltaT)
-                if deltaT > self.refreshThreshold:
-                    self.nDroppedFrames += 1
-                    if self.nDroppedFrames < reportNDroppedFrames:
-                        txt = 't of last frame was %.2fms (=1/%i)'
-                        msg = txt % (deltaT * 1000, 1 / deltaT)
-                        logging.warning(msg, t=now)
-                    elif self.nDroppedFrames == reportNDroppedFrames:
-                        logging.warning("Multiple dropped frames have "
-                                        "occurred - I'll stop bothering you "
-                                        "about them!")
+        # # do bookkeeping
+        # if self.recordFrameIntervals:
+        #     self.frames += 1
+        #     deltaT = now - self.lastFrameT
+        #     self.lastFrameT = now
+        #
+        #     if self.recordFrameIntervalsJustTurnedOn:  # don't do anything
+        #         self.recordFrameIntervalsJustTurnedOn = False
+        #     else:  # past the first frame since turned on
+        #         self.frameIntervals.append(deltaT)
+        #         if deltaT > self.refreshThreshold:
+        #             self.nDroppedFrames += 1
+        #             if self.nDroppedFrames < reportNDroppedFrames:
+        #                 txt = 't of last frame was %.2fms (=1/%i)'
+        #                 msg = txt % (deltaT * 1000, 1 / deltaT)
+        #                 logging.warning(msg, t=now)
+        #             elif self.nDroppedFrames == reportNDroppedFrames:
+        #                 logging.warning("Multiple dropped frames have "
+        #                                 "occurred - I'll stop bothering you "
+        #                                 "about them!")
 
         # log events
         for logEntry in self._toLog:
@@ -1211,6 +1243,9 @@ class Window(object):
 
         # keep the system awake (prevent screen-saver or sleep)
         platform_specific.sendStayAwake()
+
+        # mark that the frame has ended
+        now = self._framePerfStats.markFlipFinished()
 
         #    If self.waitBlanking is True, then return the time that
         # GL.glFinish() returned, set as the 'now' variable. Otherwise
@@ -1284,8 +1319,6 @@ class Window(object):
         for _ in range(flips - 1):
             self.flip(clearBuffer=False)
         self.flip(clearBuffer=clearBuffer)
-
-
 
     def setBuffer(self, buffer, clear=True):
         """Choose which buffer to draw to ('left' or 'right').
@@ -3076,6 +3109,7 @@ class Window(object):
         self.recordFrameIntervals = True
         for frameN in range(nMaxFrames):
             self.flip()
+            print(self.framePerfStats)
             if (len(self.frameIntervals) >= nIdentical and
                     (numpy.std(self.frameIntervals[-nIdentical:]) <
                      (threshold / 1000.0))):
@@ -3089,6 +3123,7 @@ class Window(object):
                     logging.debug(msg % (scrStr, rate))
                 self.recordFrameIntervals = recordFrmIntsOrig
                 self.frameIntervals = []
+
                 return rate
         # if we got here we reached end of maxFrames with no consistent value
         msg = ("Couldn't measure a consistent frame rate.\n"
