@@ -551,7 +551,7 @@ class Window(object):
         self.frames = 0  # frames since last fps calc
         self.movieFrames = []  # list of captured frames (Image objects)
 
-        self.recordFrameIntervals = False
+        # self.recordFrameIntervals = False
         # Be able to omit the long timegap that follows each time turn it off
         self.recordFrameIntervalsJustTurnedOn = False
         self.nDroppedFrames = 0
@@ -752,6 +752,16 @@ class Window(object):
         """Absolute time in seconds the last frame ended (`float`).
         """
         return self._framePerfStats.lastFrameStat.absFlipEndTime
+
+    @property
+    def recordFrameIntervals(self):
+        """Enable recording frame intervals (`bool`).
+        """
+        return self._framePerfStats.recordFrameIntervals
+
+    @recordFrameIntervals.setter
+    def recordFrameIntervals(self, value):
+        self._framePerfStats.recordFrameIntervals = bool(value)
 
     def setRecordFrameIntervals(self, value=True, log=None):
         """Usually you can use 'stim.attribute = value' syntax instead,
@@ -2445,10 +2455,24 @@ class Window(object):
             pass
 
     def fps(self):
-        """Report the frames per second since the last call to this function
-        (or since the window was created if this is first call)"""
+        """Report the frames per second (`float`).
+        """
+        return self._framePerfStats.frameRate
 
-        return self._framePerfStats.getFrameRate()
+    def userHeadroom(self):
+        """Report the headroom per frame available to the user (`float`).
+
+        This is a ratio between PsychoPy's `flip()` call overhead and total
+        frame time.
+
+        This value usually ranges between 0 and 1. The lower the number the more
+        time per frame the user's code is consuming. As this number approaches
+        zero, the chance of dropping a frame increases. If this number is
+        negative, then the user's code cannot ever be completed within a single
+        frame.
+
+        """
+        return self._framePerfStats.userHeadroom
 
     @property
     def depthTest(self):
