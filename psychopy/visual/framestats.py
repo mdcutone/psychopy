@@ -155,9 +155,23 @@ class WindowPerfStats(object):
     Usually one of these objects is associated with a Window. Users usually will
     not create instances of this class themselves.
 
+    Parameters
+    ----------
+    win : :class:`~psychopy.visual.window.Window`
+        Window associated with this class.
+    maxFrameStats : int
+        Number of frames statistics to keep.
+    monitorFrameRate : float or None
+        Target frame rate of the display in Hertz (Hz). If set, calling
+        `initialize()` will not attempt to measure the framerate.
+    smoothSamples : int
+        Number of samples to compute a rolling average of frame rate and
+        headroom.
+
     """
-    def __init__(self, maxFrameStats=512, nominalRefreshRate=None,
+    def __init__(self, win, maxFrameStats=512, monitorFrameRate=None,
                  smoothSamples=16):
+        self.win = win
         self._maxFrameStats = int(maxFrameStats)
         self._framePerfStats = None  # deque, created later when clear is called
 
@@ -174,16 +188,98 @@ class WindowPerfStats(object):
         self._defaultClock = logging.defaultClock
 
         # stats about the refresh rate
-        self._nominalRefreshRate = nominalRefreshRate
+        self._monitorFrameRate = monitorFrameRate
+        self._monitorFramePeriod = 1.0
+        self._refreshThreshold = 1.0
 
         # incremented after a frame is dropped, set later
-        self._droppedFrameCount = None
+        self._droppedFrameCount = 0
+        self._maxDroppedFramesToWarn = 5
 
         # number of values to buffer for smoothing headroom and FPS values
         self._smoothSamples = int(smoothSamples)
         self._frameStatBuffer = None
 
         self.clear()  # allocate buffers and setup
+        self._isInitialized = False
+
+    def initialize(self, nIdentical=10, nMaxFrames=100, nWarmUpFrames=10,
+                   threshold=1):
+        """Initialize the profiler.
+
+        This determines the framerate of the display and whether a stable
+        framerate is achievable. Must be called prior to giving control of the
+        Window to the user, but after the Window has been spawned.
+
+        Parameters
+        ----------
+        nIdentical : int, optional
+            The number of consecutive frames that will be evaluated.
+            Higher --> greater precision. Lower --> faster.
+        nMaxFrames : int, optional
+            The maximum number of frames to wait for a matching set of
+            nIdentical.
+        nWarmUpFrames : int, optional
+            The number of frames to display before starting the test
+            (this is in place to allow the system to settle after opening
+            the `Window` for the first time.
+        threshold : int, optional
+            The threshold for the std deviation (in ms) before the set
+            are considered a match.
+
+        Returns
+        -------
+        float or None
+            Frame rate (FPS) in seconds. If there is no such sequence of
+            identical frames a warning is logged and `None` will be returned.
+
+        """
+        # create a samples buffer
+        totalFrameTimes = np.empty((nIdentical,), dtype=np.float32)
+        totalFrameTimes.fill(np.nan)
+
+        threshold /= 1000.  # threshold in seconds
+
+        # do warm up, simply call `flip()` the given number of times
+        nFrame = 0
+        while nFrame < nWarmUpFrames:
+            self.win.flip()
+            nFrame += 1
+
+        if self._monitorFrameRate is None:
+            # start sampling
+            for nFrame in range(nMaxFrames):
+                self.win.flip()
+
+                if nFrame < nIdentical:
+                    continue
+
+                # add last frame time to stats buffer for processing
+                totalFrameTimes[nFrame % nIdentical] = \
+                    self.lastFrameStat.frameElapsedTime
+
+                # determine if the last bunch of frames vary less than threshold
+                if totalFrameTimes.std() <= threshold:
+                    self._monitorFramePeriod = totalFrameTimes.mean()
+                    if self.win.autoLog:
+                        msg = 'Screen{} actual frame rate measured at {:.2f}'
+                        logging.debug(
+                            msg.format(self.win.screen,
+                                       self._monitorFramePeriod))
+                    return
+
+            # cannot determine a framerate
+            logging.warning(
+                "Couldn't measure a consistent frame rate.\n"
+                "  - Is your graphics card set to sync to vertical blank?\n"
+                "  - Are you running other processes on your computer?\n"
+            )
+        else:
+            self._monitorFramePeriod = 1.0 / self._monitorFrameRate
+
+        self._isInitialized = True
+
+        return self._monitorFramePeriod
 
     def markSwapFinished(self):
         """Call after the GPU is done swapping buffers. Corresponds closely to
@@ -224,12 +320,46 @@ class WindowPerfStats(object):
         self._framePerfStats.appendleft(frameStats)
 
         # add data to the buffer for smoothing
-        self._frameStatBuffer[self.frameIndex % 16, 0] = \
-            frameStats.frameElapsedTime
-        self._frameStatBuffer[self.frameIndex % 16, 1] = frameStats.userHeadroom
+        deltaT = frameStats.frameElapsedTime
+        self._frameStatBuffer[self.frameIndex % self._smoothSamples, :] = \
+            (deltaT, frameStats.userHeadroom)
+
+        # check if we dropped a frame
+        if deltaT > self._refreshThreshold:
+            self._droppedFrameCount += 1
+            if self._maxDroppedFramesToWarn < self._droppedFrameCount:
+                txt = 't of last frame was %.2fms (=1/%i)'
+                msg = txt % (deltaT * 1000, 1 / deltaT)
+                logging.warning(msg, t=self._absFlipEndTime)
+            elif self._maxDroppedFramesToWarn == self._droppedFrameCount:
+                logging.warning(
+                    "Multiple dropped frames have occurred - I'll stop "
+                    "bothering you about them!")
 
         self._currentFrameIndex += 1  # increment the current frame index
         return self._absFlipEndTime
+
+    @property
+    def monitorFrameRate(self):
+        """Frame rate of the monitor presenting the window (`float`).
+        """
+        return 1.0 / self._monitorFrameRate
+
+    @property
+    def monitorFramePeriod(self):
+        """Nominal time per frame in seconds (`float`).
+        """
+        return self._monitorFramePeriod
+
+    @monitorFramePeriod.setter
+    def monitorFramePeriod(self, value):
+        self._monitorFramePeriod = value
+
+    @property
+    def refreshThreshold(self):
+        """Threshold for determining whether a frame has been dropped (`float`).
+        """
+        return self._monitorFramePeriod * 1.2
 
     @property
     def frameIndex(self):
@@ -389,9 +519,6 @@ class WindowPerfStats(object):
                 newLine = ",".join([str(v) for v in valuesToWrite]) + '\n'
                 f.write(newLine)
 
-
-# dummy objects used as sentinels and for testing
-NULL_WINDOW_PREF_STATS = WindowPerfStats(maxFrameStats=1)
 
 if __name__ == "__main__":
     pass

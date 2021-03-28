@@ -14,6 +14,7 @@ import os
 import sys
 import weakref
 import atexit
+import gc
 from itertools import product
 
 # from builtins import map
@@ -449,7 +450,8 @@ class Window(object):
         backendConf['stencilBits'] = stencilBits
 
         # object for more advanced performance stats
-        self._framePerfStats = framestats.WindowPerfStats()
+        self._framePerfStats = framestats.WindowPerfStats(self)
+        self._timeSensitiveMode = False
 
         # get the backend, pass the options to it
         self.backend = backends.getBackend(win=self, backendConf=backendConf)
@@ -572,17 +574,17 @@ class Window(object):
         self._editableChildren = []
         self._currentEditableRef = None
 
-        # over several frames with no drawing
-        self._monitorFrameRate = None
-        # for testing when to stop drawing a stim:
-        self.monitorFramePeriod = 0.0
-        if checkTiming:
-            self._monitorFrameRate = self.getActualFrameRate()
-        if self._monitorFrameRate is not None:
-            self.monitorFramePeriod = 1.0 / self._monitorFrameRate
-        else:
-            self.monitorFramePeriod = 1.0 / 60  # assume a flat panel?
-        self.refreshThreshold = self.monitorFramePeriod * 1.2
+        # # over several frames with no drawing
+        # self._monitorFrameRate = None
+        # # for testing when to stop drawing a stim:
+        # self.monitorFramePeriod = 0.0
+        # if checkTiming:
+        #     self._monitorFrameRate = self.getActualFrameRate()
+        # if self._monitorFrameRate is not None:
+        #     self.monitorFramePeriod = 1.0 / self._monitorFrameRate
+        # else:
+        #     self.monitorFramePeriod = 1.0 / 60  # assume a flat panel?
+        # self.refreshThreshold = self.monitorFramePeriod * 1.2
 
         openWindows.append(self)
 
@@ -600,6 +602,8 @@ class Window(object):
 
         atexit.register(close_on_exit)
 
+        # start the profiler, gets the actual refresh rate
+        self._framePerfStats.initialize()
         self._mouse = event.Mouse(win=self)
 
     def __del__(self):
@@ -727,9 +731,27 @@ class Window(object):
 
     @property
     def framePerfStats(self):
-        """Performance statistics for the last frame.
+        """Performance statistics for the last frame (`WindowPerfStats`).
         """
         return self._framePerfStats
+
+    @property
+    def monitorFramePeriod(self):
+        """Monitor frame period in seconds (`float`).
+        """
+        return self._framePerfStats.monitorFramePeriod
+
+    @property
+    def monitorFrameRate(self):
+        """Monitor frame rate in Hertz (`float`).
+        """
+        return self._framePerfStats.monitorFrameRate
+
+    @property
+    def lastFrameTime(self):
+        """Absolute time in seconds the last frame ended (`float`).
+        """
+        return self._framePerfStats.lastFrameStat.absFlipEndTime
 
     def setRecordFrameIntervals(self, value=True, log=None):
         """Usually you can use 'stim.attribute = value' syntax instead,
@@ -892,8 +914,9 @@ class Window(object):
         timeNext = lastFlip + self.monitorFramePeriod
         now = baseClock.getTime()
         if (now + targetTime) > timeNext:  # target is more than 1 frame in future
-            extraFrames = math.ceil((now + targetTime - timeNext)/self.monitorFramePeriod)
-            thisT = timeNext + extraFrames*self.monitorFramePeriod
+            extraFrames = math.ceil(
+                (now + targetTime - timeNext) / self.monitorFramePeriod)
+            thisT = timeNext + extraFrames * self.monitorFramePeriod
         else:
             thisT = timeNext
         # convert back to target clock timebase
@@ -995,7 +1018,6 @@ class Window(object):
         if len(self._editableChildren) == 1:
             self._currentEditableRef = eRef
 
-
     def removeEditable(self, editable):
         # If editable is present, remove it from editables list
         for ref in weakref.getweakrefs(editable):
@@ -1065,7 +1087,6 @@ class Window(object):
             win.flip(clearBuffer=False)
 
         """
-        timeFlipStart = logging.defaultClock.getTime()
         if self._toDraw:
             for thisStim in self._toDraw:
                 thisStim.draw()
@@ -1203,6 +1224,9 @@ class Window(object):
         # get timestamp
         # mark that the GPU has returned control to the application
         self._framePerfStats.markSwapFinished()
+        #if self.timeSensitiveMode:
+        #    gc.collect()
+
         self._frameTime = now = logging.defaultClock.getTime()
         self._frameTimes.append(self._frameTime)
 
@@ -1210,27 +1234,6 @@ class Window(object):
         for callEntry in self._toCall:
             callEntry['function'](*callEntry['args'], **callEntry['kwargs'])
         del self._toCall[:]
-
-        # # do bookkeeping
-        # if self.recordFrameIntervals:
-        #     self.frames += 1
-        #     deltaT = now - self.lastFrameT
-        #     self.lastFrameT = now
-        #
-        #     if self.recordFrameIntervalsJustTurnedOn:  # don't do anything
-        #         self.recordFrameIntervalsJustTurnedOn = False
-        #     else:  # past the first frame since turned on
-        #         self.frameIntervals.append(deltaT)
-        #         if deltaT > self.refreshThreshold:
-        #             self.nDroppedFrames += 1
-        #             if self.nDroppedFrames < reportNDroppedFrames:
-        #                 txt = 't of last frame was %.2fms (=1/%i)'
-        #                 msg = txt % (deltaT * 1000, 1 / deltaT)
-        #                 logging.warning(msg, t=now)
-        #             elif self.nDroppedFrames == reportNDroppedFrames:
-        #                 logging.warning("Multiple dropped frames have "
-        #                                 "occurred - I'll stop bothering you "
-        #                                 "about them!")
 
         # log events
         for logEntry in self._toLog:
@@ -2444,10 +2447,8 @@ class Window(object):
     def fps(self):
         """Report the frames per second since the last call to this function
         (or since the window was created if this is first call)"""
-        fps = self.frames / self.frameClock.getTime()
-        self.frameClock.reset()
-        self.frames = 0
-        return fps
+
+        return self._framePerfStats.getFrameRate()
 
     @property
     def depthTest(self):
@@ -3109,7 +3110,6 @@ class Window(object):
         self.recordFrameIntervals = True
         for frameN in range(nMaxFrames):
             self.flip()
-            print(self.framePerfStats)
             if (len(self.frameIntervals) >= nIdentical and
                     (numpy.std(self.frameIntervals[-nIdentical:]) <
                      (threshold / 1000.0))):
