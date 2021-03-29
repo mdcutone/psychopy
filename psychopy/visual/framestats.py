@@ -175,7 +175,7 @@ class WindowPerfStats(object):
         the number of dropped frames will still update.
 
     """
-    def __init__(self, win, maxFrameStats=1024, smoothSamples=16,
+    def __init__(self, win, maxFrameStats=512, smoothSamples=16,
                  maxDroppedFramesToWarn=5):
         self.win = win
         self._maxFrameStats = int(maxFrameStats)
@@ -282,7 +282,7 @@ class WindowPerfStats(object):
             (self._smoothSamples, 2), dtype=np.float32)
         self._frameStatBuffer[:] = np.nan
 
-    def initialize(self, nIdentical=10, nMaxFrames=100, nWarmUpFrames=10,
+    def initialize(self, nIdentical=25, nMaxFrames=100, nWarmUpFrames=25,
                    threshold=1):
         """Initialize the profiler.
 
@@ -319,11 +319,13 @@ class WindowPerfStats(object):
 
         threshold /= 1000.  # threshold in seconds
 
-        # collect garbage before starting
+        # collect garbage before starting so it doesn't kick in during the test
         gc.collect()
+        gc.disable()
 
         # Do warm up, simply call `flip()` the given number of times. This is
-        # always called.
+        # to give the system and driver some time to stabilize after opening the
+        # window.
         recordFrameIntervalsSetting = self._recordFrameIntervals
         self._recordFrameIntervals = False
         nFrame = 0
@@ -331,7 +333,7 @@ class WindowPerfStats(object):
             self.win.flip()
             nFrame += 1
 
-        # start sampling
+        # start sampling to determine framerate
         frameIntervalIsStable = False
         for nFrame in range(nMaxFrames):
             self.win.flip()
@@ -354,6 +356,10 @@ class WindowPerfStats(object):
 
                 frameIntervalIsStable = True
 
+        gc.enable()  # turn garbage collector back on
+        # return previous setting
+        self._recordFrameIntervals = recordFrameIntervalsSetting
+
         # cannot determine a framerate
         if not frameIntervalIsStable:
             logging.warning(
@@ -364,9 +370,6 @@ class WindowPerfStats(object):
             # Guess it for now, should get this from the monitor settings or
             # current video mode.
             self._monitorFramePeriod = 1 / 60.
-
-        # return previous setting
-        self._recordFrameIntervals = recordFrameIntervalsSetting
 
         return self._monitorFramePeriod
 
