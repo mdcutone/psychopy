@@ -801,9 +801,9 @@ class Camera:
         # get the camera information
         self._cameraInfo = None
         for mode in orderedFormatList:
-            sameDevice = mode.name == deviceName or deviceName is None
+            sameDevice = mode.name.lower().strip() == deviceName.lower().strip() or deviceName is None
             sameFrameRate = mode.frameRate == frameRate or frameRate is None
-            sameFrameSize = mode.frameSize == frameSize or frameSize is None
+            sameFrameSize = (np.array(mode.frameSize) == np.array(frameSize)).all() or frameSize is None
             if sameDevice and sameFrameRate and sameFrameSize:
                 self._cameraInfo = self._device = mode
                 break
