@@ -25,9 +25,9 @@ class CameraComponent(BaseComponent):
             name='cam',
             startType='time (s)', startVal='0', startEstim='',
             stopType='duration (s)', stopVal='', durationEstim='',
-            device="Default", mic="Default",
+            device="default", mic="Default",
             # Hardware
-            resolution="", frameRate="",
+            resolution="default", frameRate="default",
             # Data
             saveFile=True,
             outputFileType="mp4", codec="h263",
@@ -55,13 +55,25 @@ class CameraComponent(BaseComponent):
         self.exp.requireImport(importName="camera", importFrom="psychopy.hardware")
         self.exp.requireImport(importName="microphone", importFrom="psychopy.sound")
 
+        # Get list of cameras and spec
+        try:
+            from psychopy.hardware.camera import getCameras
+            cams = getCameras()
+            camsFlat = []
+            for modes in cams.values():
+                camsFlat.extend(modes)
+        except:
+            cams = {}
+            camsFlat = []
+
+
         # Basic
         msg = _translate("What device would you like to use to record video? This will only affect local "
                          "experiments - online experiments ask the participant which device to use.")
         self.params['device'] = Param(
             device, valType='str', inputType="choice", categ="Basic",
-            allowedVals=list(devices),
-            allowedLabels=[d.title() for d in list(devices)],
+            allowedVals=["default"] + list(cams),
+            allowedLabels=["default"] + list(cams),
             hint=msg,
             label=_translate("Video Device")
         )
@@ -76,22 +88,24 @@ class CameraComponent(BaseComponent):
             label=_translate("Audio Device")
         )
 
+        # Hardware
+        msg = _translate("Resolution (w x h) to record to, leave blank to use device default.")
+        self.params['resolution'] = Param(
+            resolution, valType='list', inputType="choice", categ="Hardware",
+            allowedVals=["default"] + [cam.frameSize for cam in camsFlat],
+            allowedLabels=["default"] + [f"{cam.frameSize} ({cam.name})" for cam in camsFlat],
+            hint=msg,
+            label=_translate("Resolution")
+        )
 
-        # Not implemented (yet!)
-        # # Hardware
-        # msg = _translate("Resolution (w x h) to record to, leave blank to use device default.")
-        # self.params['resolution'] = Param(
-        #     resolution, valType='list', inputType="single", categ="Hardware",
-        #     hint=msg,
-        #     label=_translate("Resolution")
-        # )
-        #
-        # msg = _translate("Frame rate (frames per second) to record at, leave blank to use device default.")
-        # self.params['frameRate'] = Param(
-        #     frameRate, valType='int', inputType="num", categ="Hardware",
-        #     hint=msg,
-        #     label=_translate("Frame Rate")
-        # )
+        msg = _translate("Frame rate (frames per second) to record at, leave blank to use device default.")
+        self.params['frameRate'] = Param(
+            frameRate, valType='int', inputType="choice", categ="Hardware",
+            allowedVals=["default"] + [cam.frameRate for cam in camsFlat],
+            allowedLabels=["default"] + [f"{cam.frameRate} ({cam.name}, {cam.frameSize})" for cam in camsFlat],
+            hint=msg,
+            label=_translate("Frame Rate")
+        )
 
         # Data
         msg = _translate("Save webcam output to a file?")
