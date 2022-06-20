@@ -759,55 +759,53 @@ class Camera:
         # get all the cameras attached to the system
         supportedCameraSettings = getCameras()
 
-        # create a mapping of supported camera formats
-        _formatMapping = dict()
-        for _, formats in supportedCameraSettings.items():
-            for _format in formats:
-                desc = _format.description()
-                _formatMapping[desc] = _format
+        # create a flat list of formats
+        formatList = []
+        for device, modes in supportedCameraSettings.items():
+            for mode in modes:
+                formatList.append(mode)
         # sort formats by resolution then frame rate
-        orderedFormats = list(_formatMapping.values())
-        orderedFormats.sort(key=lambda obj: obj.frameRate, reverse=True)
-        orderedFormats.sort(key=lambda obj: np.prod(obj.frameSize), reverse=True)
+        orderedFormatList = formatList.copy()
+        orderedFormatList.sort(key=lambda obj: obj.frameRate, reverse=True)
+        orderedFormatList.sort(key=lambda obj: np.prod(obj.frameSize), reverse=True)
 
         # list of devices
-        devList = list(_formatMapping)
-
+        devList = list(supportedCameraSettings)
         if not devList:  # no cameras found if list is empty
             raise CameraNotFoundError('No cameras found of the system!')
-
-        # Best device usually shows up last on the list, this will be the
-        # default when the index is 0 or the user specifies 'default'.
-        bestDevice = _formatMapping[devList[-1]]
 
         self._origDevSpecifier = device  # what the user provided
         self._device = None  # device identifier
 
-        # alias device None or Default as being device 0
+        # resolve getting the camera identifier
         if device in (None, "None", "none", "Default", "default"):
-            self._device = bestDevice
+            # alias various defaults as None
+            deviceName = None
+        elif isinstance(device, int):
+            # if given device as int, get corresponding name
+            try:
+                deviceName = devList[device]
+            except IndexError:
+                raise CameraNotFoundError(
+                    'Cannot find camera at index={}'.format(device))
+        elif isinstance(device, str):
+            # if given device as str, treat as name
+            if device not in devList:
+                raise CameraNotFoundError(
+                    'Cannot find camera from name={}'.format(device))
+            deviceName = device
         else:
-            # resolve getting the camera identifier
-            if isinstance(device, int):  # get camera if integer
-                try:
-                    self._device = devList[device]
-                except IndexError:
-                    raise CameraNotFoundError(
-                        'Cannot find camera at index={}'.format(device))
-            elif isinstance(device, str):  # get camera if integer
-                self._device = device
-            else:
-                raise TypeError(
-                    "Incorrect type for `camera`, expected `int` or `str`.")
+            raise TypeError(
+                "Incorrect type for `device`, expected `int`, `str` or `None`.")
 
         # get the camera information
         self._cameraInfo = None
-        for mode in orderedFormats:
-            sameDevice = mode.name == self._device.name
+        for mode in orderedFormatList:
+            sameDevice = mode.name == deviceName or deviceName is None
             sameFrameRate = mode.frameRate == frameRate or frameRate is None
             sameFrameSize = mode.frameSize == frameSize or frameSize is None
             if sameDevice and sameFrameRate and sameFrameSize:
-                self._cameraInfo = mode
+                self._cameraInfo = self._device = mode
                 break
         # raise error if couldn't find matching camera info
         if self._cameraInfo is None:
