@@ -502,7 +502,8 @@ def recognizeSphinx(audioClip=None, language='en-US', expectedWords=None,
     config['language'] = language  # sphinx users en-us not en-US
     config['show_all'] = False
     if expectedWords is not None:
-        config['keyword_entries'] = zip(_parseExpectedWords(expectedWords))
+        words, sens = _parseExpectedWords(expectedWords)
+        config['keyword_entries'] = tuple(zip(words, sens))
 
     # convert audio to format for transcription
     sampleWidth = 2  # two bytes per sample
@@ -515,6 +516,7 @@ def recognizeSphinx(audioClip=None, language='en-US', expectedWords=None,
     respAPI = ''
     unknownValueError = requestError = False
     try:
+        print(audioData, config)
         respAPI = _recogBase.recognize_sphinx(audioData, **config)
     except sr.UnknownValueError:
         unknownValueError = True
