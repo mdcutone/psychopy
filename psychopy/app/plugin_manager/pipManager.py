@@ -65,6 +65,7 @@ class PIPManagerDlg(wx.Dialog, handlers.ThemeMixin):
 
     def runCommand(self, cmd):
         """Run the command."""
+        rawcmd = cmd
         cmd = ' '.join([sys.executable, '-m', cmd])
         output = sp.Popen(cmd,
                           stdout=sp.PIPE,
@@ -74,6 +75,9 @@ class PIPManagerDlg(wx.Dialog, handlers.ThemeMixin):
         stdout, stderr = output.communicate()
         sys.stdout.write(stdout)
         sys.stderr.write(stderr)
+
+        # Display command
+        self.output.AppendText(f">> {rawcmd}\n\n")
 
         # Display output if error
         if output.returncode != 0:
