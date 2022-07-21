@@ -1,7 +1,7 @@
 import wx
 import wx.richtext
 
-from psychopy.app.themes import handlers, fonts
+from psychopy.app.themes import handlers, fonts, icons
 from psychopy.localization import _translate
 
 import sys
@@ -42,8 +42,16 @@ class PIPManagerDlg(wx.Dialog, handlers.ThemeMixin):
         self.sizer.Add(self.consoleSzr, border=3, flag=wx.ALL | wx.EXPAND)
 
         # Add output
+        self.outputSzr = wx.BoxSizer(wx.HORIZONTAL)
+        self.sizer.Add(self.outputSzr, proportion=1, border=3, flag=wx.ALL | wx.EXPAND)
+        # Clear button
+        self.clrBtn = wx.Button(self, size=(16, 16), style=wx.BORDER_NONE)
+        self.clrBtn.SetBitmap(icons.ButtonIcon(stem="clear", size=16).bitmap)
+        self.clrBtn.Bind(wx.EVT_BUTTON, self.clear)
+        self.outputSzr.Add(self.clrBtn, border=3, flag=wx.ALL)
+        # Output ctrl
         self.output = wx.richtext.RichTextCtrl(self, size=(480, -1), style=wx.TE_READONLY)
-        self.sizer.Add(self.output, proportion=1, border=3, flag=wx.ALL | wx.EXPAND)
+        self.outputSzr.Add(self.output, proportion=1, border=0, flag=wx.ALL | wx.EXPAND)
 
         self.Center()
 
@@ -75,6 +83,12 @@ class PIPManagerDlg(wx.Dialog, handlers.ThemeMixin):
 
         # Update output ctrl to style new text
         handlers.ThemeMixin._applyAppTheme(self.output)
+
+    def clear(self, evt=None):
+        """
+        Clear output
+        """
+        self.output.Value = ""
 
     def _applyAppTheme(self):
         # Apply code font to text ctrl
