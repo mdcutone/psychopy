@@ -15,8 +15,8 @@ class PIPManagerDlg(wx.Dialog, handlers.ThemeMixin):
 
     def __init__(self):
         wx.Dialog.__init__(self, None, title="PIP installer",
-                           size=(480, 240),
-                           style=wx.DEFAULT_DIALOG_STYLE | wx.DIALOG_NO_PARENT)
+                           size=(480, 480),
+                           style=wx.DEFAULT_DIALOG_STYLE | wx.DIALOG_NO_PARENT | wx.RESIZE_BORDER)
 
         # Setup sizers
         self.border = wx.BoxSizer()
