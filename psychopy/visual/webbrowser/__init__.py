@@ -245,6 +245,10 @@ class BrowserStim(BaseVisualStim, ContainerMixin, ColorMixin, TextureMixin):
         """
         pass
 
+    def draw(self, win=None):
+        """Draw the web browser to the specified window."""
+        pass
+
     def __del__(self):
         pass
 
