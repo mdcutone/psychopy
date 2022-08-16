@@ -2240,7 +2240,55 @@ def _getCameraInfoWindows():
             "Cannot query cameras with this function, platform not 'Windows'.")
 
     # FFPyPlayer can query the OS via DirectShow for Windows cameras
-    videoDevs, _, names = list_dshow_devices()
+    try:
+        # raise KeyError()
+        videoDevs, _, names = list_dshow_devices()
+    except KeyError:
+        logging.warning(
+            'Cannot get camera setting from `ffpyplayer` due to library bugs. '
+            'The camera setting retrieved may not be valid! Note that this '
+            'build is using a workaround which lists camera modes for the '
+            '"c922 Pro Stream Webcam" if this error occurs.')
+        # get around the bug at NYU, this should never appear in production!!
+        names = ['c922 Pro Stream Webcam']
+        videoDevs = {'c922 Pro Stream Webcam': [
+            {'index': 0, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (160, 90), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 1, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (160, 120), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 2, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (176, 144), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 3, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (320, 180), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 4, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (320, 240), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 5, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (352, 288), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 6, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (432, 240), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 7, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (640, 360), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 8, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (640, 480), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 9, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (800, 448), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 10, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (800, 600), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 11, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (864, 480), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 12, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (960, 720), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 13, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (1024, 576), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 14, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (1280, 720), 'frameRate': 60, 'cameraAPI': 'DirectShow'},
+            {'index': 15, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (1600, 896), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 16, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': '', 'codecFormat': 'mjpeg', 'frameSize': (1920, 1080), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 17, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (160, 90), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 18, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (160, 120), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 19, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (176, 144), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 20, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (320, 180), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 21, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (320, 240), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 22, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (352, 288), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 23, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (432, 240), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 24, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (640, 360), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 25, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (640, 480), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 26, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (800, 448), 'frameRate': 30, 'cameraAPI': 'DirectShow'},
+            {'index': 27, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (800, 600), 'frameRate': 24, 'cameraAPI': 'DirectShow'},
+            {'index': 28, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (864, 480), 'frameRate': 24, 'cameraAPI': 'DirectShow'},
+            {'index': 29, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (960, 720), 'frameRate': 15, 'cameraAPI': 'DirectShow'},
+            {'index': 30, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (1024, 576), 'frameRate': 15, 'cameraAPI': 'DirectShow'},
+            {'index': 31, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (1280, 720), 'frameRate': 10, 'cameraAPI': 'DirectShow'},
+            {'index': 32, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (1600, 896), 'frameRate': 7, 'cameraAPI': 'DirectShow'},
+            {'index': 33, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (1920, 1080), 'frameRate': 5, 'cameraAPI': 'DirectShow'},
+            {'index': 34, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (2304, 1296), 'frameRate': 2, 'cameraAPI': 'DirectShow'},
+            {'index': 35, 'name': 'c922 Pro Stream Webcam', 'pixelFormat': 'yuyv422', 'codecFormat': '', 'frameSize': (2304, 1536), 'frameRate': 2, 'cameraAPI': 'DirectShow'}]
+        }
 
     # get all the supported modes for the camera
     videoDevices = {}
@@ -2249,7 +2297,11 @@ def _getCameraInfoWindows():
     devIndex = 0
     for devURI in videoDevs.keys():
         supportedFormats = []
-        cameraName = names[devURI]
+        try:
+            cameraName = names[devURI]
+        except KeyError:
+            cameraName = devURI  # work aorund
+
         for _format in videoDevs[devURI]:
             pixelFormat, codecFormat, frameSize, frameRateRng = _format
             _, frameRateMax = frameRateRng
@@ -2387,7 +2439,7 @@ def renderVideo(outputFile, videoFile, audioFile=None):
         videoClip.audio = CompositeAudioClip([audioClip])
 
     # transcode with the format the user wants
-    videoClip.write_videofile(outputFile, verbose=False)
+    videoClip.write_videofile(outputFile, verbose=False, logger=None)
 
     return os.path.getsize(outputFile)
 
