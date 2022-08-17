@@ -18,13 +18,10 @@ The following variables control what video is played during the test as well as
 other configuration settings:
 """
 
-from __future__ import division
-from __future__ import print_function
-
 #   Test Config.
 
 # Relative path (from this scripts folder) for the video clip to be played .
-video_name = r'./jwpIntro.mov'
+video_name = r'./jwpIntro.mp4'
 
 # If False, no audio tracks will be played.
 INCLUDE_AUDIO_TRACK = True
@@ -74,7 +71,7 @@ Example Results File Output
 
  ** Video Info **
 Video File:
-    Name: 	./jwpIntro.mov
+    Name: 	./jwpIntro.mp4
     Frame Count: 	145.0
     Width: 	320.0
     Height: 	240.0
@@ -336,7 +333,7 @@ def formattedDictStr(d, indent=1, rstr=''):
     return rstr
 
 def bytes2human(n):
-    # http://code.activestate.com/recipes/578019
+    # https://code.activestate.com/recipes/578019/
     # >>  > bytes2human(10000)
     # '9.8K'
     # >>  > bytes2human(100001221)

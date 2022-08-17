@@ -4,7 +4,7 @@ from psychopy.alerts._errorHandler import _BaseErrorHandler
 from psychopy.experiment import getAllComponents, Experiment
 
 
-class TestAlertTools(object):
+class TestAlertTools():
     """A class for testing the alerttools module"""
 
     def setup(self):
@@ -78,7 +78,7 @@ class TestAlertTools(object):
     def test_disabled(self):
         self.polygonComp.params['disabled'].val = True
         alerttools.testDisabled(self.polygonComp)
-        assert ('Your component is currently disabled' in self.error.alerts[0].msg)
+        assert (f"The component {self.polygonComp.params['name']} is currently disabled" in self.error.alerts[0].msg)
 
     def test_achievable_visual_stim_onset(self):
         self.polygonComp.params['startVal'].val = .001

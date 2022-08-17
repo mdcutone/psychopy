@@ -1,10 +1,5 @@
 """Test PsychoPy sound.py using pyo backend
 """
-from __future__ import division
-
-from builtins import object
-from past.utils import old_div
-
 import pytest
 import shutil, os
 from tempfile import mkdtemp
@@ -13,19 +8,16 @@ import numpy as np
 from psychopy import prefs, core
 from psychopy.tests import utils
 from psychopy import sound
-from psychopy.constants import PY3
 
-if PY3:
-    from importlib import reload
+from importlib import reload
 
 origSoundPref = prefs.hardware['audioLib']
 
 # py.test --cov-report term-missing --cov sound.py tests/test_sound/test_sound_pyo.py
 
 
-class TestSoundDevice(object):
-    # trying to test sounddevice without it actually being installed on
-    # Travis-CI virtual machines!
+@pytest.mark.needs_sound
+class TestSoundDevice():
     @classmethod
     def setup_class(self):
         self.contextName='sounddevice'
@@ -48,10 +40,10 @@ class TestSoundDevice(object):
         with pytest.raises(ValueError):
             sound.Sound('this is not a file name')
         with pytest.raises(ValueError):
-            sound.Sound(-1) #negative frequency makes no sense
+            sound.Sound(-1)  # negative frequency makes no sense
 
         points = 100
-        snd = old_div(np.ones(points), 20)  # noqa
+        snd = np.ones(points) / 20  # noqa
 
         s = sound.Sound(self.testFile)  # noqa
 

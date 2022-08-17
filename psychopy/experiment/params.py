@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 """Experiment classes:
@@ -15,19 +15,15 @@ The code that writes out a *_lastrun.py experiment file is (in order):
         which will call the .writeBody() methods from each component
     settings.SettingsComponent.writeEndCode()
 """
-
-from __future__ import absolute_import, print_function
-# from future import standard_library
-from past.builtins import basestring
-from builtins import object
+from xml.etree.ElementTree import Element
 
 import re
+from pathlib import Path
 
 from psychopy import logging
 from . import utils
 from . import py2js
 
-# standard_library.install_aliases()
 from ..colors import Color
 from numpy import ndarray
 from ..alerts import alert
@@ -60,7 +56,7 @@ legacyParams = [
     'lineColorSpace', 'borderColorSpace', 'fillColorSpace', 'foreColorSpace',  # 2021.1, we standardised colorSpace to be object-wide rather than param-specific
 ]
 
-class Param(object):
+class Param():
     r"""Defines parameters for Experiment Components
     A string representation of the parameter will depend on the valType:
 
@@ -118,7 +114,8 @@ class Param(object):
 
     def __init__(self, val, valType, inputType=None, allowedVals=None, allowedTypes=None,
                  hint="", label="", updates=None, allowedUpdates=None,
-                 allowedLabels=None,
+                 allowedLabels=None, direct=True,
+                 canBePath=True,
                  categ="Basic"):
         """
         @param val: the value for this parameter
@@ -143,6 +140,13 @@ class Param(object):
         @param categ: category for this parameter
             will populate tabs in Component Dlg
         @type allowedUpdates: string
+        @param canBePath: is it possible for this parameter to be
+            a path? If so, writing as str will check for pathlike
+            characters and sanitise if needed.
+        @type canBePath: bool
+        @param direct: purely used in the test suite, marks whether this
+        param's value is expected to appear in the script
+        @type direct: bool
         """
         super(Param, self).__init__()
         self.label = label
@@ -158,6 +162,8 @@ class Param(object):
         self.categ = categ
         self.readOnly = False
         self.codeWanted = False
+        self.canBePath = canBePath
+        self.direct = direct
         if inputType:
             self.inputType = inputType
         elif valType in inputDefaults:
@@ -167,23 +173,25 @@ class Param(object):
 
     def __str__(self):
         if self.valType == 'num':
+            if self.val in [None, ""]:
+                return "None"
             try:
                 # will work if it can be represented as a float
                 return "{}".format(float(self.val))
             except Exception:  # might be an array
-                return "asarray(%s)" % (self.val)
+                return "%s" % self.val
         elif self.valType == 'int':
             try:
                 return "%i" % self.val  # int and float -> str(int)
             except TypeError:
-                return "{}".format(self.val)  # try array of float instead?
-        elif self.valType in ['extendedStr','str', 'file', 'table', 'color']:
+                return "%s" % self.val  # try array of float instead?
+        elif self.valType in ['extendedStr','str', 'file', 'table']:
             # at least 1 non-escaped '$' anywhere --> code wanted
             # return str if code wanted
             # return repr if str wanted; this neatly handles "it's" and 'He
             # says "hello"'
             val = self.val
-            if isinstance(self.val, basestring):
+            if isinstance(self.val, str):
                 valid, val = self.dollarSyntax()
                 if self.codeWanted and valid:
                     # If code is wanted, return code (translated to JS if needed)
@@ -201,14 +209,19 @@ class Param(object):
                             # if target is python2.x then unicode will be u'something'
                             # but for other targets that will raise an annoying error
                             val = val[1:]
-                    if self.valType in ['file', 'table']:
-                        # If param is a file of any kind, escape any \
-                        val = re.sub(r"\\", r"\\\\", val)
-                    val=re.sub("\n", "\\n", val) # Replace line breaks with escaped line break character
+                    # If param is a path or pathlike use Path to make sure it's valid (with / not \)
+                    isPathLike = bool(re.findall(r"[\\/](?!\W)", val))
+                    if self.valType in ['file', 'table'] or (isPathLike and self.canBePath):
+                        val = val.replace("\\\\", "/")
+                        val = val.replace("\\", "/")
+                    # Hide escape char on escaped $ (other escaped chars are handled by wx but $ is unique to us)
+                    val = re.sub(r"\\\$", "$", val)
+                    # Replace line breaks with escaped line break character
+                    val = re.sub("\n", "\\n", val)
                     return repr(val)
             return repr(self.val)
         elif self.valType in ['code', 'extendedCode']:
-            isStr = isinstance(self.val, basestring)
+            isStr = isinstance(self.val, str)
             if isStr and self.val.startswith("$"):
                 # a $ in a code parameter is unnecessary so remove it
                 val = "%s" % self.val[1:]
@@ -229,6 +242,18 @@ class Param(object):
                 return valJS
             else:
                 return val
+        elif self.valType == 'color':
+            _, val = self.dollarSyntax()
+            if self.codeWanted:
+                # Handle code
+                return val
+            elif "," in val:
+                # Handle lists (e.g. RGB, HSV, etc.)
+                val = toList(val)
+                return "{}".format(val)
+            else:
+                # Otherwise, treat as string
+                return repr(val)
         elif self.valType == 'list':
             valid, val = self.dollarSyntax()
             val = toList(val)
@@ -253,6 +278,9 @@ class Param(object):
             raise TypeError("Can't represent a Param of type %s" %
                             self.valType)
 
+    def __repr__(self):
+        return f"<Param: val={self.val}, valType={self.valType}>"
+
     def __eq__(self, other):
         """Test for equivalence is needed for Params because what really
         typically want to test is whether the val is the same
@@ -268,7 +296,28 @@ class Param(object):
     def __bool__(self):
         """Return a bool, so we can do `if thisParam`
         rather than `if thisParam.val`"""
+        if self.val in ['True', 'true', 'TRUE', True, 1, 1.0]:
+            # Return True for aliases of True
+            return True
+        if self.val in ['False', 'false', 'FALSE', False, 0, 0.0]:
+            # Return False for aliases of False
+            return False
+        # If not a clear alias, use bool method of value
         return bool(self.val)
+
+    @property
+    def _xml(self):
+        # Make root element
+        element = Element('Param')
+        # Assign values
+        if hasattr(self, 'val'):
+            element.set('val', u"{}".format(self.val).replace("\n", "&#10;"))
+        if hasattr(self, 'valType'):
+            element.set('valType', self.valType)
+        if hasattr(self, 'updates'):
+            element.set('updates', "{}".format(self.updates))
+
+        return element
 
     def dollarSyntax(self):
         """
@@ -296,8 +345,8 @@ class Param(object):
                 if len(re.findall(r"\$", val)) == len(re.findall(r"\$", inComment)):
                     # Return if all $ are commented out
                     return True, val
-                if len(re.findall(r"\$", val)) - len(re.findall(r"\$", inComment)) == len(re.findall(r"\\\$", inQuotes)):
-                    # Return if all non-commended $ are in strings and escaped
+                if len(re.findall(r"\$", val)) - len(re.findall(r"\$", inComment)) == len(re.findall(r"\$", inQuotes)):
+                    # Return if all non-commended $ are in strings
                     return True, val
             else:
                 # If value does not begin with an unescaped $, treat it as a string
@@ -313,15 +362,19 @@ class Param(object):
     __nonzero__ = __bool__  # for python2 compatibility
 
 
-def getCodeFromParamStr(val):
+def getCodeFromParamStr(val, target=None):
     """Convert a Param.val string to its intended python code
     (as triggered by special char $)
     """
-    tmp = re.sub(r"^(\$)+", '', val)  # remove leading $, if any
+    # Substitute target
+    if target is None:
+        target = utils.scriptTarget
+    # remove leading $, if any
+    tmp = re.sub(r"^(\$)+", '', val)
     # remove all nonescaped $, squash $$$$$
     tmp2 = re.sub(r"([^\\])(\$)+", r"\1", tmp)
     out = re.sub(r"[\\]\$", '$', tmp2)  # remove \ from all \$
-    if utils.scriptTarget=='PsychoJS':
+    if target == 'PsychoJS':
         out = py2js.expression2js(out)
     return out if out else ''
 
@@ -340,13 +393,14 @@ def toList(val):
     if isinstance(val, (list, tuple, ndarray)):
         return val  # already a list. Nothing to do
     if isinstance(val, (int, float)):
-        return [val] # single value, just needs putting in a cell
+        return [val]  # single value, just needs putting in a cell
     # we really just need to check if they need parentheses
     stripped = val.strip()
     if utils.scriptTarget == "PsychoJS":
         return py2js.expression2js(stripped)
-    elif not ((stripped.startswith('(') and stripped.endswith(')')) \
-              or ((stripped.startswith('[') and stripped.endswith(']')))):
-        return "[{}]".format(stripped)
-    else:
+    elif (stripped.startswith('(') and stripped.endswith(')')) or (stripped.startswith('[') and stripped.endswith(']')):
         return stripped
+    elif utils.valid_var_re.fullmatch(stripped):
+        return "{}".format(stripped)
+    else:
+        return "[{}]".format(stripped)

@@ -6,16 +6,11 @@ pygame to be installed).
 See demo_mouse.py and i{demo_joystick.py} for examples
 """
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 # 01/2011 modified by Dave Britton to get mouse event timing
 
-from __future__ import absolute_import, division, print_function
-
-from past.builtins import basestring
-from builtins import str
-from builtins import object
 import sys
 import string
 import copy
@@ -555,7 +550,7 @@ def xydist(p1=(0.0, 0.0), p2=(0.0, 0.0)):
     return numpy.sqrt(pow(p1[0] - p2[0], 2) + pow(p1[1] - p2[1], 2))
 
 
-class Mouse(object):
+class Mouse():
     """Easy way to track what your mouse is doing.
 
     It needn't be a class, but since Joystick works better
@@ -648,11 +643,17 @@ class Mouse(object):
         """Returns the current position of the mouse,
         in the same units as the :class:`~visual.Window` (0,0) is at centre
         """
+        lastPosPix = numpy.zeros((2,), dtype=numpy.float32)
         if usePygame:  # for pygame top left is 0,0
             lastPosPix = numpy.array(mouse.get_pos())
             # set (0,0) to centre
             lastPosPix[1] = self.win.size[1] / 2 - lastPosPix[1]
             lastPosPix[0] = lastPosPix[0] - self.win.size[0] / 2
+            self.lastPos = self._pix2windowUnits(lastPosPix)
+        elif useGLFW and self.win.winType=='glfw':
+            lastPosPix[:] = self.win.backend.getMousePos()
+            if self.win.useRetina:
+                lastPosPix *= 2.0
         else:  # for pyglet bottom left is 0,0
             # use default window if we don't have one
             if self.win:
@@ -662,12 +663,14 @@ class Mouse(object):
                 w = defDisplay.get_windows()[0]
 
             # get position in window
-            lastPosPix = numpy.array([w._mouse_x, w._mouse_y])
+            lastPosPix[:] = w._mouse_x, w._mouse_y
+
             # set (0,0) to centre
             if self.win.useRetina:
-                lastPosPix = lastPosPix*2 - numpy.array(self.win.size) / 2
+                lastPosPix = lastPosPix * 2 - numpy.array(self.win.size) / 2
             else:
                 lastPosPix = lastPosPix - numpy.array(self.win.size) / 2
+
         self.lastPos = self._pix2windowUnits(lastPosPix)
 
         return copy.copy(self.lastPos)
@@ -867,7 +870,7 @@ class Mouse(object):
         Ideally, `shape` can be anything that has a `.contains()` method,
         like `ShapeStim` or `Polygon`. Not tested with `ImageStim`.
         """
-        wanted = numpy.zeros(3, dtype=numpy.int)
+        wanted = numpy.zeros(3, dtype=int)
         for c in buttons:
             wanted[c] = 1
         pressed = self.getPressed()
@@ -923,7 +926,7 @@ class Mouse(object):
             print('Mouse exclusivity can only be set for Pyglet!')
 
 
-class BuilderKeyResponse(object):
+class BuilderKeyResponse():
     """Used in scripts created by the builder to keep track of a clock and
     the current status (whether or not we are currently checking the keyboard)
     """
@@ -1079,7 +1082,7 @@ class _GlobalEventKeys(MutableMapping):
         return iter(self._events.keys())
 
     def _gen_index_key(self, key):
-        if isinstance(key, basestring):  # Single key, passed as a string.
+        if isinstance(key, str):  # Single key, passed as a string.
             index_key = self._IndexKey(key, ())
         else:  # Convert modifiers into a hashable type.
             index_key = self._IndexKey(key[0], tuple(key[1]))

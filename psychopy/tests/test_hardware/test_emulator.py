@@ -4,7 +4,6 @@
 
 # py.test -k emulator --cov-report term-missing --cov hardware/emulator.py tests/test_hardware
 
-from builtins import object
 import os, sys
 import pytest
 
@@ -23,8 +22,8 @@ BASE_MR_SETTINGS = {
     'skip': 1     # number of volumes lacking a sync pulse at start of scan (for T1 stabilization)
     }
 
-pytest.mark.emulator
-class TestLaunchScan(object):
+@pytest.mark.emulator
+class TestLaunchScan():
     '''A base class to test launchScan with different MR_settings'''
     def setup(self):
         self.win = visual.Window(fullscr=False, autoLog=False)

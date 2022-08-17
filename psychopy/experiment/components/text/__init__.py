@@ -2,22 +2,14 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-from __future__ import absolute_import, print_function
-
-from os import path
-from psychopy import logging
+from pathlib import Path
 from psychopy.alerts import alerttools
 from psychopy.experiment.components import BaseVisualComponent, Param, getInitVals, _translate
 from psychopy.localization import _localized as __localized
 _localized = __localized.copy()
-
-# the absolute path to the folder containing this path
-thisFolder = path.abspath(path.dirname(__file__))
-iconFile = path.join(thisFolder, 'text.png')
-tooltip = _translate('Text: present text stimuli')
 
 # only use _localized values for label values, nothing functional:
 _localized.update({'text': _translate('Text'),
@@ -31,14 +23,18 @@ _localized.update({'text': _translate('Text'),
 class TextComponent(BaseVisualComponent):
     """An event class for presenting text-based stimuli
     """
+
     categories = ['Stimuli']
     targets = ['PsychoPy', 'PsychoJS']
+    iconFile = Path(__file__).parent / 'text.png'
+    tooltip = _translate('Text: present text stimuli')
+
     def __init__(self, exp, parentName, name='text',
                  # effectively just a display-value
                  text=_translate('Any text\n\nincluding line breaks'),
                  font='Open Sans', units='from exp settings',
                  color='white', colorSpace='rgb',
-                 pos=(0, 0), letterHeight=0.1, ori=0,
+                 pos=(0, 0), letterHeight=0.05, ori=0,
                  startType='time (s)', startVal=0.0,
                  stopType='duration (s)', stopVal=1.0,
                  flip='None', startEstim='', durationEstim='', wrapWidth='',
@@ -64,6 +60,7 @@ class TextComponent(BaseVisualComponent):
             text, valType='str', inputType="multi", allowedTypes=[], categ='Basic',
             updates='constant', allowedUpdates=_allow3[:],  # copy the list
             hint=_translate("The text to be displayed"),
+            canBePath=False,
             label=_localized['text'])
         self.params['font'] = Param(
             font, valType='str', inputType="single", allowedTypes=[], categ='Formatting',
@@ -156,6 +153,7 @@ class TextComponent(BaseVisualComponent):
                 "  font: %(font)s,\n" + unitsStr +
                 "  pos: %(pos)s, height: %(letterHeight)s,"
                 "  wrapWidth: %(wrapWidth)s, ori: %(ori)s,\n"
+                "  languageStyle: %(languageStyle)s,\n"
                 "  color: new util.Color(%(color)s),"
                 "  opacity: %(opacity)s,")
         buff.writeIndentedLines(code % inits)

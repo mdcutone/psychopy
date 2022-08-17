@@ -1,16 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from __future__ import absolute_import, print_function
-
-# from future import standard_library
-# standard_library.install_aliases()
-from builtins import str
 import sys
 import copy
 import pickle
 import atexit
 
+import psychopy.visual.window
 from psychopy import logging
 from psychopy.tools.filetools import (openOutputFile, genDelimiter,
                                       genFilenameFromDelimiter)
@@ -55,7 +51,7 @@ class ExperimentHandler(_ComparisonMixin):
                 (e.g. {'participant':'jwp','gender':'m','orientation':90} )
 
             runtimeInfo : :class:`psychopy.info.RunTimeInfo`
-                Containining information about the system as detected at
+                Containing information about the system as detected at
                 runtime
 
             originPath : string or unicode
@@ -107,6 +103,19 @@ class ExperimentHandler(_ComparisonMixin):
 
     def __del__(self):
         self.close()
+
+    @property
+    def currentLoop(self):
+        """
+        Return the loop which we are currently in, this will either be a handle to a loop, such as
+        a :class:`~psychopy.data.TrialHandler` or :class:`~psychopy.data.StairHandler`, or the handle
+        of the :class:`~psychopy.data.ExperimentHandler` itself if we are not in a loop.
+        """
+        # If there are unfinished (aka currently active) loops, return the most recent
+        if len(self.loopsUnfinished):
+            return self.loopsUnfinished[-1]
+        # If we are not in a loop, return handle to experiment handler
+        return self
 
     def addLoop(self, loopHandler):
         """Add a loop such as a :class:`~psychopy.data.TrialHandler`
@@ -219,6 +228,27 @@ class ExperimentHandler(_ComparisonMixin):
             value = copy.deepcopy(value)
         self.thisEntry[name] = value
 
+    def timestampOnFlip(self, win, name):
+        """Add a timestamp (in the future) to the current row
+
+        Parameters
+        ----------
+
+        win : psychopy.visual.Window
+
+            The window object that we'll base the timestamp flip on
+
+        name : str
+
+            The name of the column in the datafile being written,
+            such as 'myStim.stopped'
+        """
+        # make sure the name is used when writing the datafile
+        if name not in self.dataNames:
+            self.dataNames.append(name)
+        #
+        win.timeOnFlip(self.thisEntry, name)
+
     def nextEntry(self):
         """Calling nextEntry indicates to the ExperimentHandler that the
         current trial has ended and so further addData() calls correspond
@@ -263,7 +293,9 @@ class ExperimentHandler(_ComparisonMixin):
 
         If `appendFile=True` then the data will be added to the bottom of
         an existing file. Otherwise, if the file exists already it will
-        be overwritten
+        be kept and a new file will be created with a slightly different
+        name. If you want to overwrite the old file, pass 'overwrite'
+        to ``fileCollisionMethod``.
 
         If `matrixOnly=True` then the file will not contain a header row,
         which can be handy if you want to append data to an existing file

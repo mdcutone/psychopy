@@ -4,7 +4,6 @@
 # this script replaces hashtags with a sphinx URL string (to the github issues or pull request)
 # written by Jon with regex code by Jeremy
 
-from __future__ import absolute_import, print_function
 import re
 from pathlib import Path
 import os
@@ -47,13 +46,13 @@ print("found %i CHANGE" %(len(noncompat.findall(txt_hash))))
 txt_hash_noncompat = noncompat.sub(repl_noncompat, txt_hash)
 
 # one-off specific .rst directives:
-newRST = txt_hash_noncompat.replace('.. note::', """.. raw:: html
+newRST = txt_hash_noncompat.replace('PsychoPy uses **major.minor.patch** version numbers', """.. raw:: html
 
     <style> .noncompat {color:red} </style>
 
 .. role:: noncompat
 
-.. note::""", 1)
+PsychoPy uses **major.minor.patch** version numbers""", 1)
 
 # add note about blue meaning a change?
 

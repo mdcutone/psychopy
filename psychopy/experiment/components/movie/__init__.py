@@ -2,22 +2,15 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-from __future__ import absolute_import, print_function
-
-from os import path
+from pathlib import Path
 import copy
-from psychopy import logging
+
 from psychopy.experiment.components import BaseVisualComponent, getInitVals, Param, _translate
 from psychopy.localization import _localized as __localized
 _localized = __localized.copy()
-
-# the absolute path to the folder containing this path
-thisFolder = path.abspath(path.dirname(__file__))
-iconFile = path.join(thisFolder, 'movie.png')
-tooltip = _translate('Movie: play movie files')
 
 # only use _localized values for label values, nothing functional:
 _localized.update({'movie': _translate('Movie file'),
@@ -31,15 +24,20 @@ if _localized['backend'] == 'backend': # this is the only non-capitals label
 class MovieComponent(BaseVisualComponent):
     """An event class for presenting movie-based stimuli"""
 
+    categories = ['Stimuli']
+    targets = ['PsychoPy', 'PsychoJS']
+    iconFile = Path(__file__).parent / 'movie.png'
+    tooltip = _translate('Movie: play movie files')
+
     def __init__(self, exp, parentName, name='movie', movie='',
                  units='from exp settings',
-                 pos=(0, 0), size='', ori=0,
+                 pos=(0, 0), size='', anchor="center", ori=0,
                  startType='time (s)', startVal=0.0,
                  stopType='duration (s)', stopVal=1.0,
                  startEstim='', durationEstim='',
-                 forceEndRoutine=False, backend='moviepy',
-                 loop=False,
-                 noAudio=False):
+                 forceEndRoutine=False, backend='ffpyplayer',
+                 loop=False, volume=1, noAudio=False
+                 ):
         super(MovieComponent, self).__init__(
             exp, parentName, name=name, units=units,
             pos=pos, size=size, ori=ori,
@@ -53,7 +51,6 @@ class MovieComponent(BaseVisualComponent):
         self.order += ['movie', 'forceEndRoutine', # Basic tab
                        'loop', 'No audio', 'backend',
                        ]
-        self.targets = ['PsychoPy', 'PsychoJS']
 
         # params
         self.params['stopVal'].hint = _translate(
@@ -70,8 +67,8 @@ class MovieComponent(BaseVisualComponent):
         msg = _translate("What underlying lib to use for loading movies")
         self.params['backend'] = Param(
             backend, valType='str', inputType="choice", categ='Playback',
-            allowedVals=['moviepy', 'avbin', 'opencv'],
-            hint=msg,
+            allowedVals=['ffpyplayer', 'moviepy', 'opencv', 'vlc'],
+            hint=msg, direct=False,
             label=_localized['backend'])
 
         msg = _translate("Prevent the audio stream from being loaded/processed "
@@ -80,6 +77,21 @@ class MovieComponent(BaseVisualComponent):
             noAudio, valType='bool', inputType="bool", categ='Playback',
             hint=msg,
             label=_localized['No audio'])
+
+        self.depends.append(
+            {"dependsOn": "No audio",  # must be param name
+             "condition": "==True",  # val to check for
+             "param": "volume",  # param property to alter
+             "true": "hide",  # what to do with param if condition is True
+             "false": "show",  # permitted: hide, show, enable, disable
+             }
+        )
+
+        msg = _translate("How loud should audio be played?")
+        self.params["volume"] = Param(
+            volume, valType='num', inputType="float", categ='Playback',
+            hint=msg,
+            label=_translate("Volume"))
 
         msg = _translate("Should the end of the movie cause the end of "
                          "the routine (e.g. trial)?")
@@ -95,6 +107,21 @@ class MovieComponent(BaseVisualComponent):
             loop, valType='bool', inputType="bool", categ='Playback',
             hint=msg,
             label=_translate('Loop playback'))
+        self.params['anchor'] = Param(
+            anchor, valType='str', inputType="choice", categ='Layout',
+            allowedVals=['center',
+                         'top-center',
+                         'bottom-center',
+                         'center-left',
+                         'center-right',
+                         'top-left',
+                         'top-right',
+                         'bottom-left',
+                         'bottom-right',
+                         ],
+            updates='constant',
+            hint=_translate("Which point on the stimulus should be anchored to its exact position?"),
+            label=_translate('Anchor'))
 
         # these are normally added but we don't want them for a movie
         del self.params['color']
@@ -111,9 +138,9 @@ class MovieComponent(BaseVisualComponent):
         #
         # leave units blank if not needed
         if self.params['units'].val == 'from exp settings':
-            unitsStr = ""
+            unitsStr = "units=''"
         else:
-            unitsStr = "units=%(units)s, " % self.params
+            unitsStr = "units=%(units)s" % self.params
 
         # If we're in writeInitCode then we need to convert params to initVals
         # because some (variable) params haven't been created yet.
@@ -124,19 +151,26 @@ class MovieComponent(BaseVisualComponent):
 
         if self.params['backend'].val == 'moviepy':
             code = ("%s = visual.MovieStim3(\n" % params['name'] +
-                    "    win=win, name='%s',%s\n" % (params['name'], unitsStr) +
+                    "    win=win, name='%s', %s,\n" % (
+                        params['name'], unitsStr) +
                     "    noAudio = %(No audio)s,\n" % params)
         elif self.params['backend'].val == 'avbin':
             code = ("%s = visual.MovieStim(\n" % params['name'] +
-                    "    win=win, name='%s',%s\n" % (params['name'], unitsStr))
+                    "    win=win, name='%s', %s,\n" % (
+                        params['name'], unitsStr))
+        elif self.params['backend'].val == 'vlc':
+            code = ("%s = visual.VlcMovieStim(\n" % params['name'] +
+                    "    win=win, name='%s', %s,\n" % (
+                        params['name'], unitsStr))
         else:
             code = ("%s = visual.MovieStim2(\n" % params['name'] +
-                    "    win=win, name='%s',%s\n" % (params['name'], unitsStr) +
-                    "    noAudio = %(No audio)s,\n" % params)
+                    "    win=win, name='%s', %s,\n" % (
+                        params['name'], unitsStr) +
+                    "    noAudio=%(No audio)s,\n" % params)
 
         code += ("    filename=%(movie)s,\n"
                  "    ori=%(ori)s, pos=%(pos)s, opacity=%(opacity)s,\n"
-                 "    loop=%(loop)s,\n"
+                 "    loop=%(loop)s, anchor=%(anchor)s,\n"
                  % params)
 
         buff.writeIndentedLines(code)
@@ -192,11 +226,40 @@ class MovieComponent(BaseVisualComponent):
         buff.writeIndentedLines(code)
 
     def writeInitCode(self, buff):
-        # If needed then use _writeCreationCode()
-        # Movie could be created here or in writeRoutineStart()
-        if self.params['movie'].updates == 'constant':
-            # create the code using init vals
-            self._writeCreationCode(buff, useInits=True)
+        # Get init values
+        params = getInitVals(self.params)
+
+        # synonymise "from experiment settings" with None
+        if params["units"].val.lower() == "from exp settings":
+            params["units"].valType = "code"
+            params["units"].val = None
+
+        # Handle old backends
+        if self.params['backend'].val in ('moviepy', 'avbin', 'vlc', 'opencv'):
+            if self.params['movie'].updates == 'constant':
+                # create the code using init vals
+                self._writeCreationCode(buff, useInits=True)
+            return
+
+        code = (
+            "%(name)s = visual.MovieStim(\n"
+        )
+        buff.writeIndentedLines(code % params)
+        buff.setIndentLevel(+1, relative=True)
+        code = (
+            "win, name='%(name)s',\n"
+            "filename=%(movie)s, movieLib=%(backend)s,\n"
+            "loop=%(loop)s, volume=%(volume)s,\n"
+            "pos=%(pos)s, size=%(size)s, units=%(units)s,\n"
+            "ori=%(ori)s, anchor=%(anchor)s,"
+            "opacity=%(opacity)s, contrast=%(contrast)s,\n"
+        )
+        buff.writeIndentedLines(code % params)
+        buff.setIndentLevel(-1, relative=True)
+        code = (
+            ")\n"
+        )
+        buff.writeIndentedLines(code % params)
 
     def writeInitCodeJS(self, buff):
         # If needed then use _writeCreationCodeJS()
@@ -205,19 +268,13 @@ class MovieComponent(BaseVisualComponent):
             # create the code using init vals
             self._writeCreationCodeJS(buff, useInits=True)
 
-    def writeRoutineStartCode(self, buff):
-        # If needed then use _writeCreationCode()
-        # Movie could be created here or in writeInitCode()
-        if self.params['movie'].updates != 'constant':
-            # create the code using params, not vals
-            self._writeCreationCode(buff, useInits=False)
-
     def writeRoutineStartCodeJS(self, buff):
         # If needed then use _writeCreationCode()
         # Movie could be created here or in writeInitCode()
         if self.params['movie'].updates != 'constant':
-            # create the code using params, not vals
-            self._writeCreationCodeJS(buff, useInits=False)
+            # create the code using params, not vals (unless set during static component)
+            useInits = 'during' in self.params['movie'].updates
+            self._writeCreationCodeJS(buff, useInits=useInits)
 
     def writeFrameCode(self, buff):
         """Write the code that will be called every frame
@@ -229,13 +286,23 @@ class MovieComponent(BaseVisualComponent):
         # buff.writeIndented(
         #     "%s.seek(0.00001)  # make sure we're at the start\n"
         #     % (self.params['name']))
-        buff.writeIndented("%s.setAutoDraw(True)\n" % self.params['name'])
+        code = (
+            "%(name)s.setAutoDraw(True)\n"
+        )
+        if self.params['backend'].val not in ('moviepy', 'avbin', 'vlc'):
+            code += "%(name)s.play()\n"
+        buff.writeIndentedLines(code % self.params)
         # because of the 'if' statement of the time test
         buff.setIndentLevel(-1, relative=True)
         if self.params['stopVal'].val not in ['', None, -1, 'None']:
             # writes an if statement to determine whether to draw etc
             self.writeStopTestCode(buff)
-            buff.writeIndented("%(name)s.setAutoDraw(False)\n" % self.params)
+            code = (
+                "%(name)s.setAutoDraw(False)\n"
+            )
+            if self.params['backend'].val not in ('moviepy', 'avbin', 'vlc'):
+                code += "%(name)s.stop()\n"
+            buff.writeIndentedLines(code % self.params)
             # to get out of the if statement
             buff.setIndentLevel(-2, relative=True)
         # set parameters that need updating every frame

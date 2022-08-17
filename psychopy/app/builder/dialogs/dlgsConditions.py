@@ -2,18 +2,11 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 """Conditions-file preview and mini-editor for the Builder
 """
-
-from __future__ import absolute_import, division, print_function
-
-# from future import standard_library
-# standard_library.install_aliases()
-from builtins import str
-from builtins import range
 import os
 import sys
 import pickle
@@ -25,8 +18,6 @@ from psychopy import gui
 from psychopy.experiment.utils import valid_var_re
 from psychopy.data.utils import _nonalphanumeric_re
 from psychopy.localization import _translate
-
-from psychopy.constants import PY3
 
 darkblue = wx.Colour(30, 30, 150, 255)
 darkgrey = wx.Colour(65, 65, 65, 255)
@@ -302,7 +293,7 @@ class DlgConditions(wx.Dialog):
             if (name and not valid_var_re.match(name)
                     or not valid_var_re.match(event.GetString())):
                 msg, enable = _translate(
-                    "Name must be alpha-numeric or _, no spaces"), False
+                    "Name must be alphanumeric or _, no spaces"), False
             else:
                 msg, enable = "", True
         self.tmpMsg.SetLabel(msg)
@@ -519,18 +510,30 @@ class DlgConditions(wx.Dialog):
             helpBtn.Bind(wx.EVT_BUTTON, self.onHelp)
             buttons.Add(helpBtn, wx.ALIGN_CENTER | wx.ALL)
             buttons.AddSpacer(12)
+        # Add Okay and Cancel buttons
         self.OKbtn = wx.Button(self, wx.ID_OK, _translate(" OK "))
         if not self.fixed:
             self.OKbtn.SetToolTip(wx.ToolTip(_translate('Save and exit')))
         self.OKbtn.Bind(wx.EVT_BUTTON, self.onOK)
         self.OKbtn.SetDefault()
-        buttons.Add(self.OKbtn)
         if not self.fixed:
             buttons.AddSpacer(4)
             CANCEL = wx.Button(self, wx.ID_CANCEL, _translate(" Cancel "))
             CANCEL.SetToolTip(wx.ToolTip(
                 _translate('Exit, discard any edits')))
             buttons.Add(CANCEL)
+        else:
+            CANCEL = None
+
+        if sys.platform == "win32":
+            btns = [self.OKbtn, CANCEL]
+        else:
+            btns = [CANCEL, self.OKbtn]
+
+        if not self.fixed:
+            btns.remove(btns.index(CANCEL))
+
+        buttons.AddMany(btns)
         buttons.AddSpacer(8)
         buttons.Realize()
         self.border.Add(buttons, 1, flag=wx.BOTTOM | wx.ALIGN_RIGHT, border=8)
@@ -577,7 +580,7 @@ class DlgConditions(wx.Dialog):
                     adjustedNames = True
             elif not valid_var_re.match(paramName):
                 msg, enable = _translate(
-                    "Name must be alpha-numeric or _, no spaces"), False
+                    "Name must be alphanumeric or _, no spaces"), False
                 newName = _nonalphanumeric_re.sub('_', newName)
                 adjustedNames = True
             else:
@@ -630,12 +633,9 @@ class DlgConditions(wx.Dialog):
         if os.path.isfile(fileName) and fileName.endswith('.pkl'):
             f = open(fileName, 'rb')
             # Converting newline characters.
-            if PY3:
-                # 'b' is necessary in Python3 because byte object is 
-                # returned when file is opened in binary mode.
-                buffer = f.read().replace(b'\r\n',b'\n').replace(b'\r',b'\n')
-            else:
-                buffer = f.read().replace('\r\n','\n').replace('\r','\n')
+            # 'b' is necessary in Python3 because byte object is
+            # returned when file is opened in binary mode.
+            buffer = f.read().replace(b'\r\n',b'\n').replace(b'\r',b'\n')
             contents = pickle.loads(buffer)
             f.close()
             if self.parent:

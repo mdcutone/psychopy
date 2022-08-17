@@ -2,23 +2,14 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-from __future__ import absolute_import, print_function
-from builtins import super  # provides Py3-style super() using python-future
-
-from os import path
+from pathlib import Path
 from psychopy.experiment.components import BaseComponent, Param, _translate
 from psychopy.hardware import qmix
 from psychopy.localization import _localized as __localized
 _localized = __localized.copy()
-
-
-# The absolute path to the folder containing this path.
-thisFolder = path.abspath(path.dirname(__file__))
-iconFile = path.join(thisFolder, 'pump.png')
-tooltip = _translate('Pump: deliver liquid stimuli via a Cetoni neMESYS syringe pump')
 
 _localized.update({'pumpIndex': _translate('Pump index'),
                    'syringeType': _translate('Syringe type'),
@@ -31,7 +22,10 @@ _localized.update({'pumpIndex': _translate('Pump index'),
 
 class QmixPumpComponent(BaseComponent):
     """Operate a Cetoni neMESYS syringe pump"""
+    targets = ['PsychoPy']
     categories = ['I/O']
+    iconFile = Path(__file__).parent / 'pump.png'
+    tooltip = _translate('Pump: deliver liquid stimuli via a Cetoni neMESYS syringe pump')
 
     def __init__(self, exp, parentName, name='pump',
                  startType='time (s)', startVal=0.0,
@@ -53,7 +47,6 @@ class QmixPumpComponent(BaseComponent):
 
         self.type = 'QmixPump'
         self.url = 'https://www.psychopy.org/builder/components/pump.html'
-        self.categories = ['I/O']
 
         self.exp.requireImport(importName='qmix',
                                importFrom='psychopy.hardware')
@@ -81,6 +74,7 @@ class QmixPumpComponent(BaseComponent):
             pumpAction, categ='Hardware',
             valType='str', inputType="choice",
             allowedVals=['aspirate', 'dispense'],
+            direct=False,
             hint=_translate('Whether the syringe should be filled (aspirate) '
                             'or emptied (dispense'),
             label=_localized['pumpAction'])

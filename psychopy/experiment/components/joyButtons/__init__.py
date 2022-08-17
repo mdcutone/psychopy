@@ -2,26 +2,15 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-
-from __future__ import absolute_import, print_function
-
-from builtins import str
-from builtins import range
-from past.builtins import basestring
-from os import path
+from pathlib import Path
 
 from psychopy.experiment.components import BaseComponent, Param, _translate
 from psychopy.experiment import CodeGenerationException, valid_var_re
 from psychopy.localization import _localized as __localized
 _localized = __localized.copy()
-
-# the absolute path to the folder containing this path
-thisFolder = path.abspath(path.dirname(__file__))
-iconFile = path.join(thisFolder, 'joyButtons.png')
-tooltip = _translate('JoyButtons: check and record joystick/gamepad button presses')
 
 # only use _localized values for label values, nothing functional:
 _localized.update({'allowedKeys': _translate('Allowed buttons'),
@@ -38,6 +27,8 @@ class JoyButtonsComponent(BaseComponent):
     # an attribute of the class, determines the section in components panel
     categories = ['Responses']
     targets = ['PsychoPy']
+    iconFile = Path(__file__).parent / 'joyButtons.png'
+    tooltip = _translate('JoyButtons: check and record joystick/gamepad button presses')
 
     def __init__(self, exp, parentName, name='button_resp',
                  allowedKeys="0,1,2,3,4",
@@ -78,7 +69,7 @@ class JoyButtonsComponent(BaseComponent):
         self.params['store'] = Param(
             store, valType='str', inputType="choice", allowedTypes=[], categ='Data',
             allowedVals=['last key', 'first key', 'all keys', 'nothing'],
-            updates='constant',
+            updates='constant', direct=False,
             hint=msg,
             label=_localized['store'])
 
@@ -97,6 +88,15 @@ class JoyButtonsComponent(BaseComponent):
             updates='constant',
             hint=msg,
             label=_localized['storeCorrect'])
+
+        self.depends += [  # allows params to turn each other off/on
+            {"dependsOn": "storeCorrect",  # must be param name
+             "condition": "== True",  # val to check for
+             "param": "correctAns",  # param property to alter
+             "true": "enable",  # what to do with param if condition is True
+             "false": "disable",  # permitted: hide, show, enable, disable
+             }
+        ]
 
         msg = _translate(
             "What is the 'correct' key? Might be helpful to add a "
@@ -308,16 +308,7 @@ class JoyButtonsComponent(BaseComponent):
         if allowedKeys in [None, "none", "None", "", "[]", "()"]:
             keyList=[]
         elif not allowedKeysIsVar:
-            try:
-                keyList = eval(allowedKeys)
-            except Exception:
-                raise CodeGenerationException(
-                    self.params["name"], "Allowed keys list is invalid.")
-            # this means the user typed "left","right" not ["left","right"]
-            if type(keyList) == tuple:
-                keyList = list(keyList)
-            elif isinstance(keyList, int):  # a single string/key
-                keyList = [keyList]
+            keyList = self.params['allowedKeys']
 
         code1 = ("{name}.newButtonState = {name}.device.getAllButtons()[:]\n"
                  "{name}.pressedButtons = []\n"
@@ -456,7 +447,7 @@ class JoyButtonsComponent(BaseComponent):
         if currLoop.type in ['StairHandler', 'MultiStairHandler']:
             # data belongs to a Staircase-type of object
             if self.params['storeCorrect'].val is True:
-                code = ("%s.addResponse(%s.corr)\n" %
+                code = ("%s.addResponse(%s.corr, level)\n" %
                         (currLoop.params['name'], name) +
                         "%s.addOtherData('%s.rt', %s.rt)\n"
                         % (currLoop.params['name'], name, name))

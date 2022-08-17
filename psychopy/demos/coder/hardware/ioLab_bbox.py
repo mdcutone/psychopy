@@ -5,8 +5,6 @@
 Demo to illustrate using ioLabs button box.
 """
 
-from __future__ import absolute_import, division, print_function
-
 __author__ = 'Jonathan Roberts (orig demo); Jeremy Gray (rewrite 2013)'
 
 from psychopy.hardware import iolab
@@ -34,7 +32,7 @@ if 'escape' in event.waitKeys(['space', 'escape']):
 fixation = visual.TextStim(win, text = '+')
 target = visual.TextStim(win, text = 'set during trial loop')
 labeledResponse = {1: 'left', 6: 'right'}
-stims = list(labeledResponse.values()) * 3  # ist of stims: 3 'lefts' and 3 'rights'
+stims = list(labeledResponse.values()) * 3  # list of stims: 3 'lefts' and 3 'rights'
 random.shuffle(stims)
 
 for stim in stims:

@@ -5,7 +5,7 @@
 """
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 __all__ = [
@@ -96,10 +96,15 @@ import pyglet.gl as GL  # using Pyglet for now
 from contextlib import contextmanager
 from PIL import Image
 import numpy as np
-import os, sys
+import os
+import sys
+import platform
 import warnings
 import psychopy.tools.mathtools as mt
 from psychopy.visual.helpers import setColor
+
+
+_thisPlatform = platform.system()
 
 # create a query counter to get absolute GPU time
 
@@ -315,7 +320,7 @@ def compileShaderObjectARB(shaderSrc, shaderType):
     shaderSrc : str, list of str
         GLSL shader source code text.
     shaderType : GLenum
-        Shader program type. Must be *_ARB enums such as `GL_VERTEX_SHADER_ARB`,
+        Shader program type. Must be `*_ARB` enums such as `GL_VERTEX_SHADER_ARB`,
         `GL_FRAGMENT_SHADER_ARB`, `GL_GEOMETRY_SHADER_ARB`, etc.
 
     Returns
@@ -958,7 +963,7 @@ def getAttribLocations(program, builtins=False):
 # -----------------------------------
 
 
-class QueryObjectInfo(object):
+class QueryObjectInfo:
     """Object for querying information. This includes GPU timing information."""
     __slots__ = ['name', 'target']
 
@@ -1498,7 +1503,7 @@ def deleteRenderbuffer(renderBuffer):
 # use them with functions that require that type as input.
 #
 
-class TexImage2D(object):
+class TexImage2D:
     """Descriptor for a 2D texture.
 
     This class is used for bookkeeping 2D textures stored in video memory.
@@ -1785,7 +1790,7 @@ def createTexImage2dFromFile(imgFile, transpose=True):
     return textureDesc
 
 
-class TexCubeMap(object):
+class TexCubeMap:
     """Descriptor for a cube map texture..
 
     This class is used for bookkeeping cube maps stored in video memory.
@@ -2126,7 +2131,7 @@ def deleteTexture(texture):
 # Vertex Array Objects (VAO)
 #
 
-class VertexArrayInfo(object):
+class VertexArrayInfo:
     """Vertex array object (VAO) descriptor.
 
     This class only stores information about the VAO it refers to, it does not
@@ -2280,8 +2285,13 @@ def createVAO(attribBuffers, indexBuffer=None, attribDivisors=None, legacy=False
 
     # create a vertex buffer ID
     vaoId = GL.GLuint()
-    GL.glGenVertexArrays(1, ctypes.byref(vaoId))
-    GL.glBindVertexArray(vaoId)
+
+    if _thisPlatform != 'Darwin':
+        GL.glGenVertexArrays(1, ctypes.byref(vaoId))
+        GL.glBindVertexArray(vaoId)
+    else:
+        GL.glGenVertexArraysAPPLE(1, ctypes.byref(vaoId))
+        GL.glBindVertexArrayAPPLE(vaoId)
 
     # add attribute pointers
     activeAttribs = {}
@@ -2344,7 +2354,10 @@ def createVAO(attribBuffers, indexBuffer=None, attribDivisors=None, legacy=False
         for key, val in attribDivisors.items():
             GL.glVertexAttribDivisor(key, val)
 
-    GL.glBindVertexArray(0)
+    if _thisPlatform != 'Darwin':
+        GL.glBindVertexArray(0)
+    else:
+        GL.glBindVertexArrayAPPLE(0)
 
     return VertexArrayInfo(vaoId.value,
                            count,
@@ -2387,7 +2400,11 @@ def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, instanceCount=None,
 
     """
     # draw the array
-    GL.glBindVertexArray(vao.name)
+    if _thisPlatform != 'Darwin':
+        GL.glBindVertexArray(vao.name)
+    else:
+        GL.glBindVertexArrayAPPLE(vao.name)
+
     if count is None:
         count = vao.count
     else:
@@ -2412,7 +2429,10 @@ def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, instanceCount=None,
         GL.glFlush()
 
     # reset
-    GL.glBindVertexArray(0)
+    if _thisPlatform != 'Darwin':
+        GL.glBindVertexArray(0)
+    else:
+        GL.glBindVertexArrayAPPLE(0)
 
 
 def deleteVAO(vao):
@@ -2441,7 +2461,7 @@ def deleteVAO(vao):
 #
 
 
-class VertexBufferInfo(object):
+class VertexBufferInfo:
     """Vertex buffer object (VBO) descriptor.
 
     This class only stores information about the VBO it refers to, it does not
@@ -3087,6 +3107,7 @@ def createMaterial(params=(), textures=(), face=GL.GL_FRONT_AND_BACK):
 
     Parameters
     ----------
+
     params : :obj:`list` of :obj:`tuple`, optional
         List of material modes and values. Each mode is assigned a value as
         (mode, color). Modes can be GL_AMBIENT, GL_DIFFUSE, GL_SPECULAR,
@@ -3094,7 +3115,7 @@ def createMaterial(params=(), textures=(), face=GL.GL_FRONT_AND_BACK):
         a tuple of 4 floats which specify reflectance values for each RGBA
         component. The value of GL_SHININESS should be a single float. If no
         values are specified, an empty material will be created.
-    textures :obj:`list` of :obj:`tuple`, optional
+    textures : :obj:`list` of :obj:`tuple`, optional
         List of texture units and TexImage2D descriptors. These will be written
         to the 'textures' field of the returned descriptor. For example,
         [(GL.GL_TEXTURE0, texDesc0), (GL.GL_TEXTURE1, texDesc1)]. The number of
@@ -3105,7 +3126,7 @@ def createMaterial(params=(), textures=(), face=GL.GL_FRONT_AND_BACK):
 
     Returns
     -------
-    Material
+    Material :
         A descriptor with material properties.
 
     Examples
@@ -3171,7 +3192,7 @@ def createMaterial(params=(), textures=(), face=GL.GL_FRONT_AND_BACK):
     return matDesc
 
 
-class SimpleMaterial(object):
+class SimpleMaterial:
     """Class representing a simple material.
 
     This class stores material information to modify the appearance of drawn
@@ -3193,8 +3214,7 @@ class SimpleMaterial(object):
                  specularTexture=None,
                  opacity=1.0,
                  contrast=1.0,
-                 face='front',
-                 useShaders=False):
+                 face='front'):
         """
         Parameters
         ----------
@@ -3225,13 +3245,6 @@ class SimpleMaterial(object):
             Contrast of the material colors.
         face : str
             Face to apply material to. Values are `front`, `back` or `both`.
-        textures : dict, optional
-            Texture maps associated with this material. Textures are specified
-            as a list. The index of textures in the list will be used to set
-            the corresponding texture unit they are bound to.
-        useShaders : bool
-            Use per-pixel lighting when rendering this stimulus. By default,
-            Blinn-Phong shading will be used.
         """
         self.win = win
 
@@ -3272,7 +3285,6 @@ class SimpleMaterial(object):
         self._normalTexture = None
 
         self._useTextures = False  # keeps track if textures are being used
-        self._useShaders = useShaders
 
     @property
     def diffuseTexture(self):
@@ -3581,7 +3593,7 @@ def setAmbientLight(color):
 #
 
 
-class ObjMeshInfo(object):
+class ObjMeshInfo:
     """Descriptor for mesh data loaded from a Wavefront OBJ file.
 
     """
@@ -3612,9 +3624,9 @@ class ObjMeshInfo(object):
 def loadObjFile(objFile):
     """Load a Wavefront OBJ file (*.obj).
 
-    Loads vertex, normals, and texture coordinates from the provided *.obj file
+    Loads vertex, normals, and texture coordinates from the provided `*.obj` file
     into arrays. These arrays can be processed then loaded into vertex buffer
-    objects (VBOs) for rendering. The *.obj file must at least specify vertex
+    objects (VBOs) for rendering. The `*.obj` file must at least specify vertex
     position data to be loaded successfully. Normals and texture coordinates are
     optional.
 
@@ -3629,7 +3641,7 @@ def loadObjFile(objFile):
     Parameters
     ----------
     objFile : :obj:`str`
-        Path to the *.OBJ file to load.
+        Path to the `*.OBJ` file to load.
 
     Returns
     -------
@@ -3638,7 +3650,7 @@ def loadObjFile(objFile):
 
     See Also
     --------
-    loadMtlFile : Load a *.mtl file.
+    loadMtlFile : Load a `*.mtl` file.
 
     Notes
     -----
@@ -3649,7 +3661,7 @@ def loadObjFile(objFile):
 
     Examples
     --------
-    Loading a *.OBJ mode from file::
+    Loading a `*.obj` mode from file::
 
         objModel = loadObjFile('/path/to/file.obj')
         # load the material (*.mtl) file, textures are also loaded
@@ -3784,7 +3796,7 @@ def loadObjFile(objFile):
 
     # convert indices for materials to numpy arrays
     for key, val in materialGroups.items():
-        materialGroups[key] = np.asarray(val, dtype=np.int)
+        materialGroups[key] = np.asarray(val, dtype=int)
 
     # indicate if file has any texture coordinates of normals
     hasTexCoords = nTextureCoords > 0
@@ -3854,11 +3866,11 @@ def loadMtlFile(mtllib, texParams=None):
 
     See Also
     --------
-    loadObjFile : Load an *.OBJ file.
+    loadObjFile : Load an `*.OBJ` file.
 
     Examples
     --------
-    Load material associated with an *.OBJ file::
+    Load material associated with an `*.OBJ` file::
 
         objModel = loadObjFile('/path/to/file.obj')
         # load the material (*.mtl) file, textures are also loaded
@@ -3990,7 +4002,7 @@ def createUVSphere(radius=0.5, sectors=16, stacks=16, flipFaces=False):
         normals = mt.applyMatrix(r, normals)
 
     """
-    # based of the code found here http://www.songho.ca/opengl/gl_sphere.html
+    # based of the code found here https://www.songho.ca/opengl/gl_sphere.html
     sectorStep = 2.0 * np.pi / sectors
     stackStep = np.pi / stacks
     lengthInv = 1.0 / radius
@@ -4942,4 +4954,3 @@ defaultMaterial = createMaterial(
      (GL.GL_SPECULAR, (0.0, 0.0, 0.0, 1.0)),
      (GL.GL_EMISSION, (0.0, 0.0, 0.0, 1.0)),
      (GL.GL_SHININESS, 0)])
-

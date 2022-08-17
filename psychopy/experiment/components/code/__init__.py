@@ -2,22 +2,16 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-from __future__ import absolute_import, print_function
-
-from builtins import str
 from os import path
+from pathlib import Path
 
 from psychopy import prefs
 from psychopy.experiment.components import BaseComponent, Param, _translate
 from psychopy.alerts import alerttools
 
-# the absolute path to the folder containing this path
-thisFolder = path.abspath(path.dirname(__file__))
-iconFile = path.join(thisFolder, 'code.png')
-tooltip = _translate('Code: insert python commands into an experiment')
 _localized = {'Code Type': _translate('Code Type'),
               'Before Experiment': _translate('Before Experiment'),
               'Begin Experiment': _translate('Begin Experiment'),
@@ -35,9 +29,12 @@ _localized = {'Code Type': _translate('Code Type'),
 
 
 class CodeComponent(BaseComponent):
-    # an attribute of the class, determines the section in the components panel
-    categories = ['Custom']
     """An event class for inserting arbitrary code into Builder experiments"""
+
+    categories = ['Custom']
+    targets = ['PsychoPy', 'PsychoJS']
+    iconFile = Path(__file__).parent / 'code.png'
+    tooltip = _translate('Code: insert python commands into an experiment')
 
     def __init__(self, exp, parentName, name='code',
                  beforeExp="",
@@ -49,7 +46,6 @@ class CodeComponent(BaseComponent):
                  codeType=None, translator="manual"):
         super(CodeComponent, self).__init__(exp, parentName, name)
         self.type = 'Code'
-        self.targets = ['PsychoPy', 'PsychoJS']
         self.url = "https://www.psychopy.org/builder/components/code.html"
         # params
         # want a copy, else codeParamNames list gets mutated
@@ -66,13 +62,13 @@ class CodeComponent(BaseComponent):
         self.params['Code Type'] = Param(
             codeType, valType='str', inputType="choice", allowedTypes=[],
             allowedVals=['Py', 'JS', 'Both', 'Auto->JS'],
-            hint=msg,
+            hint=msg, direct=False,
             label=_localized['Code Type'])
 
         msg = _translate("Code to run before the experiment starts "
                          "(initialization); right-click checks syntax")
         self.params['Before Experiment'] = Param(
-            beforeExp, valType='code', inputType="multi", allowedTypes=[],
+            beforeExp, valType='extendedCode', inputType="multi", allowedTypes=[],
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['Before Experiment'])
@@ -80,7 +76,7 @@ class CodeComponent(BaseComponent):
         msg = _translate("Code at the start of the experiment ; right-click "
                          "checks syntax")
         self.params['Begin Experiment'] = Param(
-            beginExp, valType='code', inputType="multi", allowedTypes=[],
+            beginExp, valType='extendedCode', inputType="multi", allowedTypes=[],
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['Begin Experiment'])
@@ -89,7 +85,7 @@ class CodeComponent(BaseComponent):
                          "Routine (e.g. each trial); "
                          "right-click checks syntax")
         self.params['Begin Routine'] = Param(
-            beginRoutine, valType='code', inputType="multi", allowedTypes=[],
+            beginRoutine, valType='extendedCode', inputType="multi", allowedTypes=[],
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['Begin Routine'])
@@ -98,7 +94,7 @@ class CodeComponent(BaseComponent):
                          " duration of this Routine; "
                          "right-click checks syntax")
         self.params['Each Frame'] = Param(
-            eachFrame, valType='code', inputType="multi", allowedTypes=[],
+            eachFrame, valType='extendedCode', inputType="multi", allowedTypes=[],
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['Each Frame'])
@@ -107,7 +103,7 @@ class CodeComponent(BaseComponent):
                          " getting/storing responses); "
                          "right-click checks syntax")
         self.params['End Routine'] = Param(
-            endRoutine, valType='code', inputType="multi", allowedTypes=[],
+            endRoutine, valType='extendedCode', inputType="multi", allowedTypes=[],
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['End Routine'])
@@ -116,7 +112,7 @@ class CodeComponent(BaseComponent):
                          "saving files, resetting computer); "
                          "right-click checks syntax")
         self.params['End Experiment'] = Param(
-            endExperiment, valType='code', inputType="multi", allowedTypes=[],
+            endExperiment, valType='extendedCode', inputType="multi", allowedTypes=[],
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['End Experiment'])
@@ -124,14 +120,14 @@ class CodeComponent(BaseComponent):
         msg = _translate("Code before the start of the experiment (initialization"
                          "); right-click checks syntax")
         self.params['Before JS Experiment'] = Param(
-            '', valType='code', inputType="multi", allowedTypes=[],
+            '', valType='extendedCode', inputType="multi", allowedTypes=[],
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['Before JS Experiment'])
         msg = _translate("Code at the start of the experiment (initialization"
                          "); right-click checks syntax")
         self.params['Begin JS Experiment'] = Param(
-            '', valType='code', inputType="multi", allowedTypes=[],
+            '', valType='extendedCode', inputType="multi", allowedTypes=[],
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['Begin JS Experiment'])
@@ -140,7 +136,7 @@ class CodeComponent(BaseComponent):
                          "Routine (e.g. each trial); "
                          "right-click checks syntax")
         self.params['Begin JS Routine'] = Param(
-            '', valType='code', inputType="multi", allowedTypes=[],
+            '', valType='extendedCode', inputType="multi", allowedTypes=[],
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['Begin JS Routine'])
@@ -149,7 +145,7 @@ class CodeComponent(BaseComponent):
                          " duration of this Routine; "
                          "right-click checks syntax")
         self.params['Each JS Frame'] = Param(
-            '', valType='code', inputType="multi", allowedTypes=[],
+            '', valType='extendedCode', inputType="multi", allowedTypes=[],
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['Each JS Frame'])
@@ -158,7 +154,7 @@ class CodeComponent(BaseComponent):
                          " getting/storing responses); "
                          "right-click checks syntax")
         self.params['End JS Routine'] = Param(
-            '', valType='code', inputType="multi", allowedTypes=[],
+            '', valType='extendedCode', inputType="multi", allowedTypes=[],
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['End JS Routine'])
@@ -167,7 +163,7 @@ class CodeComponent(BaseComponent):
                          "saving files, resetting computer); "
                          "right-click checks syntax")
         self.params['End JS Experiment'] = Param(
-            '', valType='code', inputType="multi", allowedTypes=[],
+            '', valType='extendedCode', inputType="multi", allowedTypes=[],
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['End JS Experiment'])
@@ -205,59 +201,83 @@ class CodeComponent(BaseComponent):
     def writePreCode(self, buff):
         if len(str(self.params['Before Experiment'])) and not self.params['disabled']:
             alerttools.checkPythonSyntax(self, 'Before Experiment')
+            if self.params['Before Experiment']:
+                buff.writeIndentedLines("# Run 'Before Experiment' code from %(name)s" % self.params)
             buff.writeIndentedLines(str(self.params['Before Experiment']) + '\n')
 
     def writePreCodeJS(self, buff):
         if len(str(self.params['Before JS Experiment'])) and not self.params['disabled']:
             alerttools.checkJavaScriptSyntax(self, 'Before JS Experiment')
+            if self.params['Before Experiment']:
+                buff.writeIndentedLines("// Run 'Before Experiment' code from %(name)s" % self.params)
             buff.writeIndentedLines(str(self.params['Before JS Experiment']) + '\n')
 
     def writeInitCode(self, buff):
         if len(str(self.params['Begin Experiment'])) and not self.params['disabled']:
             alerttools.checkPythonSyntax(self, 'Begin Experiment')
+            if self.params['Begin Experiment']:
+                buff.writeIndentedLines("# Run 'Begin Experiment' code from %(name)s" % self.params)
             buff.writeIndentedLines(str(self.params['Begin Experiment']) + '\n')
 
     def writeInitCodeJS(self, buff):
         if len(str(self.params['Begin JS Experiment'])) and not self.params['disabled']:
             alerttools.checkJavaScriptSyntax(self, 'Begin JS Experiment')
+            if self.params['Begin Experiment']:
+                buff.writeIndentedLines("// Run 'Begin Experiment' code from %(name)s" % self.params)
             buff.writeIndentedLines(str(self.params['Begin JS Experiment']) + '\n')
 
     def writeRoutineStartCode(self, buff):
         if len(str(self.params['Begin Routine'])) and not self.params['disabled']:
             alerttools.checkPythonSyntax(self, 'Begin Routine')
+            if self.params['Begin Routine']:
+                buff.writeIndentedLines("# Run 'Begin Routine' code from %(name)s" % self.params)
             buff.writeIndentedLines(str(self.params['Begin Routine']) + '\n')
 
     def writeRoutineStartCodeJS(self, buff):
         if len(str(self.params['Begin JS Routine'])) and not self.params['disabled']:
             alerttools.checkJavaScriptSyntax(self, 'Begin JS Routine')
+            if self.params['Begin Routine']:
+                buff.writeIndentedLines("// Run 'Begin Routine' code from %(name)s" % self.params)
             buff.writeIndentedLines(str(self.params['Begin JS Routine']) + '\n')
 
     def writeFrameCode(self, buff):
         if len(str(self.params['Each Frame'])) and not self.params['disabled']:
             alerttools.checkPythonSyntax(self, 'Each Frame')
+            if self.params['Each Frame']:
+                buff.writeIndentedLines("# Run 'Each Frame' code from %(name)s" % self.params)
             buff.writeIndentedLines(str(self.params['Each Frame']) + '\n')
 
     def writeFrameCodeJS(self, buff):
         if len(str(self.params['Each JS Frame'])) and not self.params['disabled']:
             alerttools.checkJavaScriptSyntax(self, 'Each JS Frame')
+            if self.params['Each Frame']:
+                buff.writeIndentedLines("// Run 'Each Frame' code from %(name)s" % self.params)
             buff.writeIndentedLines(str(self.params['Each JS Frame']) + '\n')
 
     def writeRoutineEndCode(self, buff):
         if len(str(self.params['End Routine'])) and not self.params['disabled']:
             alerttools.checkPythonSyntax(self, 'End Routine')
+            if self.params['End Routine']:
+                buff.writeIndentedLines("# Run 'End Routine' code from %(name)s" % self.params)
             buff.writeIndentedLines(str(self.params['End Routine']) + '\n')
 
     def writeRoutineEndCodeJS(self, buff):
         if len(str(self.params['End JS Routine'])) and not self.params['disabled']:
             alerttools.checkJavaScriptSyntax(self, 'End JS Routine')
+            if self.params['End Routine']:
+                buff.writeIndentedLines("// Run 'End Routine' code from %(name)s" % self.params)
             buff.writeIndentedLines(str(self.params['End JS Routine']) + '\n')
 
     def writeExperimentEndCode(self, buff):
         if len(str(self.params['End Experiment'])) and not self.params['disabled']:
             alerttools.checkPythonSyntax(self, 'End Experiment')
+            if self.params['End Experiment']:
+                buff.writeIndentedLines("# Run 'End Experiment' code from %(name)s" % self.params)
             buff.writeIndentedLines(str(self.params['End Experiment']) + '\n')
 
     def writeExperimentEndCodeJS(self, buff):
         if len(str(self.params['End JS Experiment'])) and not self.params['disabled']:
             alerttools.checkJavaScriptSyntax(self, 'End JS Experiment')
+            if self.params['End Experiment']:
+                buff.writeIndentedLines("// Run 'End Experiment' code from %(name)s" % self.params)
             buff.writeIndentedLines(str(self.params['End JS Experiment']) + '\n')

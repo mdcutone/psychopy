@@ -2,20 +2,15 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-from __future__ import absolute_import, print_function
-
 from os import path
+from pathlib import Path
 from psychopy.experiment.components import BaseVisualComponent, Param, getInitVals, _translate
 from psychopy.localization import _localized as __localized
 _localized = __localized.copy()
 
-# the absolute path to the folder containing this path
-thisFolder = path.abspath(path.dirname(__file__))
-iconFile = path.join(thisFolder, 'dots.png')
-tooltip = _translate('Dots: Random Dot Kinematogram')
 # only use _localized values for label values, nothing functional:
 _localized.update({'nDots': _translate('Number of dots'),
                    'dir': _translate('Direction'),
@@ -34,12 +29,17 @@ _localized.update({'nDots': _translate('Number of dots'),
 class DotsComponent(BaseVisualComponent):
     """An event class for presenting Random Dot stimuli"""
 
+    categories = ['Stimuli']
+    targets = ['PsychoPy']
+    iconFile = Path(__file__).parent / 'dots.png'
+    tooltip = _translate('Dots: Random Dot Kinematogram')
+
     def __init__(self, exp, parentName, name='dots',
                  nDots=100,
                  direction=0.0, speed=0.1, coherence=1.0,
                  dotSize=2,
                  dotLife=3, signalDots='same', noiseDots='direction', refreshDots='repeat',
-                 fieldShape='circle', fieldSize=1.0, fieldPos=(0.0, 0.0),
+                 fieldShape='circle', fieldSize=1.0, fieldAnchor="center", fieldPos=(0.0, 0.0),
                  color='$[1.0,1.0,1.0]', colorSpace='rgb',
                  opacity="",
                  units='from exp settings',
@@ -67,7 +67,7 @@ class DotsComponent(BaseVisualComponent):
         msg = _translate("Number of dots in the field (for circular fields"
                          " this will be average number of dots)")
         self.params['nDots'] = Param(
-            nDots, valType='num', inputType="spin", categ='Dots',
+            nDots, valType='int', inputType="spin", categ='Dots',
             updates='constant',
             hint=msg,
             label=_localized['nDots'])
@@ -125,7 +125,7 @@ class DotsComponent(BaseVisualComponent):
         self.params['refreshDots'] = Param(
             refreshDots, valType='str', inputType="choice", allowedVals=['none', 'repeat'], categ='Dots',
             allowedUpdates=[],
-            hint=msg,
+            hint=msg, direct=False,
             label=_localized['refreshDots'])
             
 
@@ -162,6 +162,22 @@ class DotsComponent(BaseVisualComponent):
             hint=msg,
             label=_localized['fieldPos'])
 
+        self.params['anchor'] = Param(
+            fieldAnchor, valType='str', inputType="choice", categ='Layout',
+            allowedVals=['center',
+                         'top-center',
+                         'bottom-center',
+                         'center-left',
+                         'center-right',
+                         'top-left',
+                         'top-right',
+                         'bottom-left',
+                         'bottom-right',
+                         ],
+            updates='constant',
+            hint=_translate("Which point on the field should be anchored to its exact position?"),
+            label=_translate('Field Anchor'))
+
         # Reword colour parameters
         self.params['color'].label = _translate("Dot Color")
         self.params['colorSpace'].label = _translate("Dot Color Space")
@@ -187,7 +203,7 @@ class DotsComponent(BaseVisualComponent):
                 "    win=win, name='%s',%s\n" % (inits['name'], unitsStr) +
                 "    nDots=%(nDots)s, dotSize=%(dotSize)s,\n" % inits +
                 "    speed=%(speed)s, dir=%(dir)s, coherence=%(coherence)s,\n" % inits +
-                "    fieldPos=%(fieldPos)s, fieldSize=%(fieldSize)s,fieldShape=%(fieldShape)s,\n" % inits +
+                "    fieldPos=%(fieldPos)s, fieldSize=%(fieldSize)s, fieldAnchor=%(anchor)s, fieldShape=%(fieldShape)s,\n" % inits +
                 "    signalDots=%(signalDots)s, noiseDots=%(noiseDots)s,dotLife=%(dotLife)s,\n" % inits +
                 "    color=%(color)s, colorSpace=%(colorSpace)s, opacity=%(opacity)s,\n" % inits +
                 "    depth=%.1f)\n" % depth)

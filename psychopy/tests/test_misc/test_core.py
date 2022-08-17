@@ -16,10 +16,7 @@ Tests the psychopy.core.getTime Function:
 Jan 2014, Jeremy Gray:
 - Coverage of .quit, .shellCall, and increased coverage of StaticPeriod()
 """
-from __future__ import print_function
-from __future__ import division
 
-from builtins import range
 import time
 import sys
 import numpy as np
@@ -32,7 +29,7 @@ from psychopy.visual import Window
 from psychopy.core import (getTime, MonotonicClock, Clock, CountdownTimer, wait,
                            StaticPeriod, shellCall)
 from psychopy.clock import monotonicClock
-from psychopy.constants import PY3
+from psychopy.tests import _vmTesting
 
 
 def test_EmptyFunction():
@@ -51,12 +48,8 @@ def printf(*args):
 py_time = None
 py_timer_name = None
 
-if sys.platform == 'win32':
-    py_time=time.clock
-    py_timer_name = 'time.clock'
-else:
-    py_time=time.time
-    py_timer_name = 'time.time'
+py_time=time.time
+py_timer_name = 'time.time'
 
 
 def printExceptionDetails():
@@ -314,7 +307,7 @@ def test_Wait(duration=1.55):
         # IMO, during the hog period, which should only need to be only 1 - 2 msec
         # , not the 200 msec default now, nothing should be done but tight looping
         # waiting for the wait() to expire. This is what I do in ioHub and on this same
-        # PC I get actual vs. requested duration delta's of < 100 usec consitently.
+        # PC I get actual vs. requested duration delta's of < 100 usec consistently.
         #
         # I have not changed the wait in psychopy until feedback is given, as I
         # may be missing a reason why the current wait() implementation is required.
@@ -382,9 +375,13 @@ def test_StaticPeriod():
     timer.reset(period_duration )
     static.complete()
 
+    if _vmTesting:
+        tolerance = 0.01  # without a proper screen timing might not eb sub-ms
+    else:
+        tolerance = 0.001
     assert np.allclose(timer.getTime(),
                        1.0/refresh_rate,
-                       atol=0.001)
+                       atol=tolerance)
     win.close()
 
 
@@ -396,7 +393,7 @@ def test_quit():
 
 
 @pytest.mark.shellCall
-class Test_shellCall(object):
+class Test_shellCall():
     def setup_class(self):
         if sys.platform == 'win32':
             self.cmd = 'findstr'

@@ -18,7 +18,7 @@ Additional Software Requirements
 #################################
 
 To use your Gazepoint GP3 during an experiment you must first start the
-Gazepoint Control software on the computer running PsychoPy.
+Gazepoint Control software on the computer running |PsychoPy|.
 
 EyeTracker Class
 ################
@@ -34,7 +34,7 @@ iohub creates a BinocularEyeSampleEvent for each sample received from the GP3.
 
 The following fields of the BinocularEyeSample event are supported:
 
-.. autoclass:: psychopy.iohub.devices.eyetracker.BinocularEyeSampleEvent(object)
+.. autoclass:: psychopy.iohub.devices.eyetracker.BinocularEyeSampleEvent
 
     .. attribute:: time
 
@@ -115,7 +115,7 @@ iohub also creates basic start and end fixation events by using Gazepoint
 FPOG* fields. Identical / duplicate fixation events are created for 
 the left and right eye. 
 
-.. autoclass:: psychopy.iohub.devices.eyetracker.FixationStartEvent(object)
+.. autoclass:: psychopy.iohub.devices.eyetracker.FixationStartEvent
     
     .. attribute:: time
     
@@ -140,7 +140,7 @@ the left and right eye.
         Calibration must be done prior to reading (meaningful) gaze data.
         Uses Gazepoint FPOGY field.
     
-.. autoclass:: psychopy.iohub.devices.eyetracker.FixationEndEvent(object)
+.. autoclass:: psychopy.iohub.devices.eyetracker.FixationEndEvent
 
     .. attribute:: time
 
@@ -176,4 +176,3 @@ Default Device Settings
 
 
 **Last Updated:** January, 2021
-

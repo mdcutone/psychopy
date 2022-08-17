@@ -1,9 +1,10 @@
-from __future__ import division
 from psychopy.sound._base import apodize, HammingWindow
 from psychopy.constants import FINISHED
+from psychopy.exceptions import DependencyError
 import numpy as np
+import pytest
 
-import psychopy.sound.backend_sounddevice as sd
+import psychopy.sound.backend_ptb as ptb
 
 """
 We need to test that the new block-by-block hamming works the same as the
@@ -22,11 +23,13 @@ plotting = False
 if plotting:
     import matplotlib.pyplot as plt
 
+
+@pytest.mark.needs_sound
 def test_HammingSmallBlock():
     blockSize = 64
     snd1 = apodize(sndArray, sampleRate)  # is 5 ms
-    sndDev = sd.SoundDeviceSound(thisFreq, sampleRate=sampleRate, secs=secs,
-                                 hamming=True, blockSize=blockSize)
+    sndDev = ptb.SoundPTB(thisFreq, sampleRate=sampleRate, secs=secs,
+                          hamming=True, blockSize=blockSize)
     snd2 = []
     while sndDev.status != FINISHED:
         block = sndDev._nextBlock()

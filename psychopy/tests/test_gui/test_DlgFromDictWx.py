@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from builtins import object
 from collections import OrderedDict
 from psychopy.gui.wxgui import DlgFromDict
+import pytest
 
 
-class TestDlgFromDictWx(object):
+@pytest.mark.needs_wx
+class TestDlgFromDictWx:
     def setup(self):
         self.d = dict(
             participant='000',
@@ -76,5 +77,6 @@ class TestDlgFromDictWx(object):
 
 
 if __name__ == '__main__':
-    import pytest
-    pytest.main()
+    cls = TestDlgFromDictWx()
+    cls.setup()
+    cls.test_fixed()

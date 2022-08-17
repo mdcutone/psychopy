@@ -2,20 +2,13 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-from __future__ import absolute_import, print_function
-
-from os import path
+from pathlib import Path
 from psychopy.experiment.components import BaseVisualComponent, Param, getInitVals
 from psychopy.localization import _translate, _localized as __localized
 _localized = __localized.copy()
-
-# the absolute path to the folder containing this path
-thisFolder = path.abspath(path.dirname(__file__))
-iconFile = path.join(thisFolder, 'image.png')
-tooltip = _translate('Image: present images (bmp, jpg, tif...)')
 
 # only use _localized values for label values, nothing functional:
 _localized.update({'image': _translate('Image'),
@@ -29,10 +22,15 @@ _localized.update({'image': _translate('Image'),
 class ImageComponent(BaseVisualComponent):
     """An event class for presenting image-based stimuli"""
 
+    categories = ['Stimuli']
+    targets = ['PsychoPy', 'PsychoJS']
+    iconFile = Path(__file__).parent / 'image.png'
+    tooltip = _translate('Image: present images (bmp, jpg, tif...)')
+
     def __init__(self, exp, parentName, name='image', image='', mask='',
                  interpolate='linear', units='from exp settings',
                  color='$[1,1,1]', colorSpace='rgb', pos=(0, 0),
-                 size=(0.5, 0.5), ori=0, texRes='128', flipVert=False,
+                 size=(0.5, 0.5), anchor="center", ori=0, texRes='128', flipVert=False,
                  flipHoriz=False,
                  startType='time (s)', startVal=0.0,
                  stopType='duration (s)', stopVal=1.0,
@@ -45,7 +43,6 @@ class ImageComponent(BaseVisualComponent):
             stopType=stopType, stopVal=stopVal,
             startEstim=startEstim, durationEstim=durationEstim)
         self.type = 'Image'
-        self.targets = ['PsychoPy', 'PsychoJS']
         self.url = "https://www.psychopy.org/builder/components/image.html"
         self.exp.requirePsychopyLibs(['visual'])
         # params
@@ -85,7 +82,7 @@ class ImageComponent(BaseVisualComponent):
         self.params['interpolate'] = Param(
             interpolate, valType='str', inputType="choice", allowedVals=['linear', 'nearest'], categ='Texture',
             updates='constant', allowedUpdates=[],
-            hint=msg,
+            hint=msg, direct=False,
             label=_localized["interpolate"])
 
         msg = _translate(
@@ -103,6 +100,21 @@ class ImageComponent(BaseVisualComponent):
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized["flipHoriz"])
+        self.params['anchor'] = Param(
+            anchor, valType='str', inputType="choice", categ='Layout',
+            allowedVals=['center',
+                         'top-center',
+                         'bottom-center',
+                         'center-left',
+                         'center-right',
+                         'top-left',
+                         'top-right',
+                         'bottom-left',
+                         'bottom-right',
+                         ],
+            updates='constant',
+            hint=_translate("Which point on the stimulus should be anchored to its exact position?"),
+            label=_translate('Anchor'))
 
         del self.params['fillColor']
         del self.params['borderColor']
@@ -119,7 +131,7 @@ class ImageComponent(BaseVisualComponent):
         code = ("{inits[name]} = visual.ImageStim(\n"
                 "    win=win,\n"
                 "    name='{inits[name]}', {units}\n"
-                "    image={inits[image]}, mask={inits[mask]},\n"
+                "    image={inits[image]}, mask={inits[mask]}, anchor={inits[anchor]},\n"
                 "    ori={inits[ori]}, pos={inits[pos]}, size={inits[size]},\n"
                 "    color={inits[color]}, colorSpace={inits[colorSpace]}, opacity={inits[opacity]},\n"
                 "    flipHoriz={inits[flipHoriz]}, flipVert={inits[flipVert]},\n"

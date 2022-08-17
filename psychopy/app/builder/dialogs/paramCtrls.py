@@ -1,9 +1,18 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# Part of the PsychoPy library
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
+# Distributed under the terms of the GNU General Public License (GPL).
+
 import os
+import subprocess
+import sys
+
 import wx
 
 from psychopy.app.colorpicker import PsychoColorPicker
 from psychopy.app.dialogs import ListWidget
-from psychopy.app.themes import ThemeMixin
 from psychopy.colors import Color
 from psychopy.localization import _translate
 from psychopy import data, prefs, experiment
@@ -11,35 +20,51 @@ import re
 from pathlib import Path
 
 from ..localizedStrings import _localizedDialogs as _localized
+from ...themes import icons
 
-class _ValidatorMixin():
+
+class _ValidatorMixin:
     def validate(self, evt=None):
-        """Redirect validate calls to global validate method, assigning appropriate valType"""
+        """Redirect validate calls to global validate method, assigning
+        appropriate `valType`.
+        """
         validate(self, self.valType)
+
+        if evt is not None:
+            evt.Skip()
 
     def showValid(self, valid):
         """Style input box according to valid"""
         if not hasattr(self, "SetForegroundColour"):
             return
+
         if valid:
-            self.SetForegroundColour(wx.Colour(
-                0, 0, 0
-            ))
+            self.SetForegroundColour(wx.Colour(0, 0, 0))
         else:
-            self.SetForegroundColour(wx.Colour(
-                1, 0, 0
-            ))
+            self.SetForegroundColour(wx.Colour(1, 0, 0))
 
     def updateCodeFont(self, valType):
         """Style input box according to code wanted"""
-        if not hasattr(self, "SetFont") or self.GetName() == "name":
+        if not hasattr(self, "SetFont"):
             # Skip if font not applicable to object type
             return
-        if valType == "code":
+        if self.GetName() == "name":
+            # Name is never code
+            valType = "str"
+
+        fontNormal = self.GetTopLevelParent().app._mainFont
+        if valType == "code" or hasattr(self, "dollarLbl"):
             # Set font
-            self.SetFont(self.GetTopLevelParent().app._codeFont)
+            fontCode = self.GetTopLevelParent().app._codeFont
+            fontCodeBold = fontCode.Bold()
+            if fontCodeBold.IsOk():
+                self.SetFont(fontCodeBold)
+            else:
+                # use normal font if the bold version is invalid on the system
+                self.SetFont(fontCode)
         else:
-            self.SetFont(self.GetTopLevelParent().app._mainFont)
+            self.SetFont(fontNormal)
+
 
 class _FileMixin:
     @property
@@ -67,7 +92,7 @@ class _FileMixin:
             filename = Path(file).relative_to(self.rootDir)
         except ValueError:
             filename = Path(file).absolute()
-        return str(filename)
+        return str(filename).replace("\\", "/")
 
     def getFiles(self, msg="Specify file or files...", wildcard="All Files (*.*)|*.*"):
         dlg = wx.FileDialog(self, message=_translate(msg), defaultDir=str(self.rootDir),
@@ -82,18 +107,52 @@ class _FileMixin:
                 filename = Path(file).relative_to(self.rootDir)
             except ValueError:
                 filename = Path(file).absolute()
-            outList.append(str(filename))
+            outList.append(str(filename).replace("\\", "/"))
         return outList
 
 
-class SingleLineCtrl(wx.TextCtrl, _ValidatorMixin):
+class _HideMixin:
+    def ShowAll(self, visible):
+        # Get sizer, if present
+        if hasattr(self, "_szr"):
+            sizer = self._szr
+        elif isinstance(self, DictCtrl):
+            sizer = self
+        else:
+            sizer = self.GetSizer()
+        # If there is a sizer, recursively hide children
+        if sizer is not None:
+            self.tunnelShow(sizer, visible)
+        else:
+            self.Show(visible)
+
+    def HideAll(self):
+        self.Show(False)
+
+    def tunnelShow(self, sizer, visible):
+        if sizer is not None:
+            # Show/hide everything in the sizer
+            for child in sizer.Children:
+                if child.Window is not None:
+                    child.Window.Show(visible)
+                if child.Sizer is not None:
+                    # If child is a sizer, recur
+                    self.tunnelShow(child.Sizer, visible)
+
+
+class SingleLineCtrl(wx.TextCtrl, _ValidatorMixin, _HideMixin):
     def __init__(self, parent, valType,
                  val="", fieldName="",
-                 size=wx.Size(-1, 24), style=wx.DEFAULT):
+                 size=wx.Size(-1, 24), style=wx.TE_LEFT):
         # Create self
         wx.TextCtrl.__init__(self)
         self.Create(parent, -1, val, name=fieldName, size=size, style=style)
         self.valType = valType
+
+        # On MacOS, we need to disable smart quotes
+        if sys.platform == 'darwin':
+            self.OSXDisableAllSmartSubstitutions()
+
         # Add sizer
         self._szr = wx.BoxSizer(wx.HORIZONTAL)
         if not valType == "str" and not fieldName == "name":
@@ -104,10 +163,18 @@ class SingleLineCtrl(wx.TextCtrl, _ValidatorMixin):
         # Add self to sizer
         self._szr.Add(self, proportion=1, border=5, flag=wx.EXPAND)
         # Bind to validation
-        self.Bind(wx.EVT_TEXT, self.validate)
+        self.Bind(wx.EVT_CHAR, self.validate)
         self.validate()
 
-class MultiLineCtrl(SingleLineCtrl, _ValidatorMixin):
+    def Show(self, value=True):
+        wx.TextCtrl.Show(self, value)
+        if hasattr(self, "dollarLbl"):
+            self.dollarLbl.Show(value)
+        if hasattr(self, "deleteBtn"):
+            self.deleteBtn.Show(value)
+
+
+class MultiLineCtrl(SingleLineCtrl, _ValidatorMixin, _HideMixin):
     def __init__(self, parent, valType,
                  val="", fieldName="",
                  size=wx.Size(-1, 144)):
@@ -116,7 +183,70 @@ class MultiLineCtrl(SingleLineCtrl, _ValidatorMixin):
                                 size=size, style=wx.TE_MULTILINE)
 
 
-class IntCtrl(wx.SpinCtrl, _ValidatorMixin):
+class InvalidCtrl(SingleLineCtrl, _ValidatorMixin, _HideMixin):
+    def __init__(self, parent, valType,
+                 val="", fieldName="",
+                 size=wx.Size(-1, 24), style=wx.DEFAULT):
+        SingleLineCtrl.__init__(self, parent, valType,
+                                val=val, fieldName=fieldName,
+                                size=size, style=style)
+        self.Disable()
+        # Add delete button
+        self.deleteBtn = wx.Button(parent, label="×", size=(24, 24))
+        self.deleteBtn.SetForegroundColour("red")
+        self.deleteBtn.Bind(wx.EVT_BUTTON, self.deleteParam)
+        self.deleteBtn.SetToolTip(_translate(
+            "This parameter has come from an older version of PsychoPy. "
+            "In the latest version of PsychoPy, it is not used. Click this "
+            "button to delete it. WARNING: This may affect how this experiment "
+            "works in older versions!"))
+        self._szr.Add(self.deleteBtn, border=6, flag=wx.LEFT | wx.RIGHT)
+        # Add deleted label
+        self.deleteLbl = wx.StaticText(parent, label=_translate("DELETED"))
+        self.deleteLbl.SetForegroundColour("red")
+        self.deleteLbl.Hide()
+        self._szr.Add(self.deleteLbl, border=6, proportion=1, flag=wx.ALL | wx.ALIGN_CENTER_VERTICAL)
+        # Add undo delete button
+        self.undoBtn = wx.Button(parent, label="⟲", size=(24, 24))
+        self.undoBtn.SetToolTip(_translate(
+            "This parameter will not be deleted until you click Okay. "
+            "Click this button to revert the deletion and keep the parameter."))
+        self.undoBtn.Hide()
+        self.undoBtn.Bind(wx.EVT_BUTTON, self.undoDelete)
+        self._szr.Add(self.undoBtn, border=6, flag=wx.LEFT | wx.RIGHT)
+
+        # Set deletion flag
+        self.forDeletion = False
+
+    def deleteParam(self, evt=None):
+        """
+        When the remove button is pressed, mark this param as for deletion
+        """
+        # Mark for deletion
+        self.forDeletion = True
+        # Hide value ctrl and delete button
+        self.Hide()
+        self.deleteBtn.Hide()
+        # Show delete label and
+        self.undoBtn.Show()
+        self.deleteLbl.Show()
+
+        self._szr.Layout()
+
+    def undoDelete(self, evt=None):
+        # Mark not for deletion
+        self.forDeletion = False
+        # Show value ctrl and delete button
+        self.Show()
+        self.deleteBtn.Show()
+        # Hide delete label and
+        self.undoBtn.Hide()
+        self.deleteLbl.Hide()
+
+        self._szr.Layout()
+
+
+class IntCtrl(wx.SpinCtrl, _ValidatorMixin, _HideMixin):
     def __init__(self, parent, valType,
                  val="", fieldName="",
                  size=wx.Size(-1, 24), limits=None):
@@ -138,36 +268,50 @@ class IntCtrl(wx.SpinCtrl, _ValidatorMixin):
 BoolCtrl = wx.CheckBox
 
 
-class ChoiceCtrl(wx.Choice, _ValidatorMixin):
+class ChoiceCtrl(wx.Choice, _ValidatorMixin, _HideMixin):
     def __init__(self, parent, valType,
-                 val="", choices=[], fieldName="",
+                 val="", choices=[], labels=[], fieldName="",
                  size=wx.Size(-1, 24)):
-        # translate add each label to the dropdown
-        choiceLabels = []
-        for item in choices:
-            try:
-                choiceLabels.append(_localized[item])
-            except KeyError:
-                choiceLabels.append(item)
-
+        self._choices = list(choices)
+        # If not given any labels, alias values
+        if not labels:
+            labels = self._choices
+        # Map labels to values
+        self._labels = {}
+        for i, value in enumerate(self._choices):
+            if i < len(labels):
+                self._labels[value] = labels[i]
+            else:
+                self._labels[value] = value
+        # Translate labels
+        for k in self._labels.keys():
+            if k in _localized:
+                self._labels[k] = _localized[k]
+        # Create choice ctrl from labels
         wx.Choice.__init__(self)
-        self.Create(parent, -1, size=size, choices=choiceLabels, name=fieldName)
-        self._choices = choices
+        self.Create(parent, -1, size=size, choices=[self._labels[c] for c in self._choices], name=fieldName)
         self.valType = valType
         self.SetStringSelection(val)
 
     def SetStringSelection(self, string):
         if string not in self._choices:
             self._choices.append(string)
-            self.SetItems(self._choices)
-        # Don't use wx.Choice.SetStringSelection here
-        # because label string is localized.
+            self._labels[string] = string
+            self.SetItems(
+                [self._labels[c] for c in self._choices]
+            )
+        # Don't use wx.Choice.SetStringSelection here because label string is localized.
         wx.Choice.SetSelection(self, self._choices.index(string))
 
-class MultiChoiceCtrl(wx.CheckListBox, _ValidatorMixin):
+    def GetValue(self):
+        # Don't use wx.Choice.GetStringSelection here because label string is localized.
+        return self._choices[self.GetSelection()]
+
+
+class MultiChoiceCtrl(wx.CheckListBox, _ValidatorMixin, _HideMixin):
     def __init__(self, parent, valType,
                  vals="", choices=[], fieldName="",
-                 size=wx.Size(-1, 144)):
+                 size=wx.Size(-1, -1)):
         wx.CheckListBox.__init__(self)
         self.Create(parent, id=wx.ID_ANY, size=size, choices=choices, name=fieldName, style=wx.LB_MULTIPLE)
         self.valType = valType
@@ -175,9 +319,7 @@ class MultiChoiceCtrl(wx.CheckListBox, _ValidatorMixin):
         # Make initial selection
         if isinstance(vals, str):
             # Convert to list if needed
-            vals = re.sub(r"[\[\]\(\)\"\']", "", vals).split(",")
-            # Remove empties
-            vals = [v for v in vals if v]
+            vals = data.utils.listFromString(vals, excludeEmpties=True)
         self.SetCheckedStrings(vals)
         self.validate()
 
@@ -193,7 +335,8 @@ class MultiChoiceCtrl(wx.CheckListBox, _ValidatorMixin):
     def GetValue(self, evt=None):
         return self.GetCheckedStrings()
 
-class FileCtrl(wx.TextCtrl, _ValidatorMixin, _FileMixin):
+
+class FileCtrl(wx.TextCtrl, _ValidatorMixin, _HideMixin, _FileMixin):
     def __init__(self, parent, valType,
                  val="", fieldName="",
                  size=wx.Size(-1, 24)):
@@ -205,7 +348,7 @@ class FileCtrl(wx.TextCtrl, _ValidatorMixin, _FileMixin):
         self._szr = wx.BoxSizer(wx.HORIZONTAL)
         self._szr.Add(self, border=5, proportion=1, flag=wx.EXPAND | wx.RIGHT)
         # Add button to browse for file
-        fldr = parent.app.iconCache.getBitmap(name="folder", size=16, theme="light")
+        fldr = icons.ButtonIcon(stem="folder", size=16).bitmap
         self.findBtn = wx.BitmapButton(parent, -1, size=wx.Size(24, 24), bitmap=fldr)
         self.findBtn.SetToolTip(_translate("Specify file ..."))
         self.findBtn.Bind(wx.EVT_BUTTON, self.findFile)
@@ -221,7 +364,7 @@ class FileCtrl(wx.TextCtrl, _ValidatorMixin, _FileMixin):
             self.validate(evt)
 
 
-class FileListCtrl(wx.ListBox, _ValidatorMixin, _FileMixin):
+class FileListCtrl(wx.ListBox, _ValidatorMixin, _HideMixin, _FileMixin):
     def __init__(self, parent, valType,
                  choices=[], size=None, pathtype="rel"):
         wx.ListBox.__init__(self)
@@ -231,13 +374,15 @@ class FileListCtrl(wx.ListBox, _ValidatorMixin, _FileMixin):
         if type(choices) == str:
             choices = data.utils.listFromString(choices)
         self.Create(id=wx.ID_ANY, parent=parent, choices=choices, size=size, style=wx.LB_EXTENDED | wx.LB_HSCROLL)
+        self.addCustomBtn = wx.Button(parent, -1, size=(24,24), style=wx.BU_EXACTFIT, label="...")
+        self.addCustomBtn.Bind(wx.EVT_BUTTON, self.addCustomItem)
         self.addBtn = wx.Button(parent, -1, size=(24,24), style=wx.BU_EXACTFIT, label="+")
         self.addBtn.Bind(wx.EVT_BUTTON, self.addItem)
         self.subBtn = wx.Button(parent, -1, size=(24,24), style=wx.BU_EXACTFIT, label="-")
         self.subBtn.Bind(wx.EVT_BUTTON, self.removeItem)
         self._szr = wx.BoxSizer(wx.HORIZONTAL)
         self.btns = wx.BoxSizer(wx.VERTICAL)
-        self.btns.AddMany((self.addBtn, self.subBtn))
+        self.btns.AddMany((self.addCustomBtn, self.addBtn, self.subBtn))
         self._szr.Add(self, proportion=1, flag=wx.EXPAND)
         self._szr.Add(self.btns)
 
@@ -264,11 +409,23 @@ class FileListCtrl(wx.ListBox, _ValidatorMixin, _FileMixin):
                  if index not in i]
         self.SetItems(items)
 
+    def addCustomItem(self, event):
+        # Create string dialog
+        dlg = wx.TextEntryDialog(parent=self, message=_translate("Add custom item"))
+        # Show dialog
+        if dlg.ShowModal() != wx.ID_OK:
+            return
+        # Get string
+        stringEntry = dlg.GetValue()
+        # Add to list
+        if stringEntry:
+            self.InsertItems([stringEntry], 0)
+
     def GetValue(self):
         return self.Items
 
 
-class TableCtrl(wx.TextCtrl, _ValidatorMixin, _FileMixin):
+class TableCtrl(wx.TextCtrl, _ValidatorMixin, _HideMixin, _FileMixin):
     def __init__(self, parent, valType,
                  val="", fieldName="",
                  size=wx.Size(-1, 24)):
@@ -280,13 +437,13 @@ class TableCtrl(wx.TextCtrl, _ValidatorMixin, _FileMixin):
         self._szr = wx.BoxSizer(wx.HORIZONTAL)
         self._szr.Add(self, proportion=1, border=5, flag=wx.EXPAND | wx.RIGHT)
         # Add button to browse for file
-        fldr = parent.app.iconCache.getBitmap(name="folder", size=16, theme="light")
+        fldr = icons.ButtonIcon(stem="folder", size=16).bitmap
         self.findBtn = wx.BitmapButton(parent, -1, size=wx.Size(24,24), bitmap=fldr)
         self.findBtn.SetToolTip(_translate("Specify file ..."))
         self.findBtn.Bind(wx.EVT_BUTTON, self.findFile)
         self._szr.Add(self.findBtn)
         # Add button to open in Excel
-        xl = parent.app.iconCache.getBitmap(name="filecsv", size=16, theme="light")
+        xl = icons.ButtonIcon(stem="filecsv", size=16).bitmap
         self.xlBtn = wx.BitmapButton(parent, -1, size=wx.Size(24,24), bitmap=xl)
         self.xlBtn.SetToolTip(_translate("Open/create in your default table editor"))
         self.xlBtn.Bind(wx.EVT_BUTTON, self.openExcel)
@@ -296,12 +453,13 @@ class TableCtrl(wx.TextCtrl, _ValidatorMixin, _FileMixin):
         expRoot = Path(cmpRoot).parent
         self.templates = {
             'Form': Path(cmpRoot) / "form" / "formItems.xltx",
-            'Loop': Path(expRoot) / "loopTemplate.xltx",
+            'TrialHandler': Path(expRoot) / "loopTemplate.xltx",
+            'StairHandler': Path(expRoot) / "loopTemplate.xltx",
+            'MultiStairHandler': Path(expRoot) / "loopTemplate.xltx",
+            'QuestHandler': Path(expRoot) / "loopTemplate.xltx",
             'None': Path(expRoot) / 'blankTemplate.xltx',
         }
-        # Configure validation
-        self.Bind(wx.EVT_TEXT, self.validate)
-        self.validate()
+        # Specify valid extensions
         self.validExt = [".csv",".tsv",".txt",
                          ".xl",".xlsx",".xlsm",".xlsb",".xlam",".xltx",".xltm",".xls",".xlt",
                          ".htm",".html",".mht",".mhtml",
@@ -311,6 +469,9 @@ class TableCtrl(wx.TextCtrl, _ValidatorMixin, _FileMixin):
                          ".iqy",".dqy",".rqy",".oqy",
                          ".cub",".atom",".atomsvc",
                          ".prn",".slk",".dif"]
+        # Configure validation
+        self.Bind(wx.EVT_TEXT, self.validate)
+        self.validate()
 
     def validate(self, evt=None):
         """Redirect validate calls to global validate method, assigning appropriate valType"""
@@ -318,7 +479,7 @@ class TableCtrl(wx.TextCtrl, _ValidatorMixin, _FileMixin):
         # Enable Excel button if valid
         self.xlBtn.Enable(self.valid)
         # Is component type available?
-        if hasattr(self.GetTopLevelParent(), 'type'):
+        if self.GetValue() in [None, ""] + self.validExt and hasattr(self.GetTopLevelParent(), 'type'):
             # Does this component have a default template?
             if self.GetTopLevelParent().type in self.templates:
                 self.xlBtn.Enable(True)
@@ -326,18 +487,23 @@ class TableCtrl(wx.TextCtrl, _ValidatorMixin, _FileMixin):
     def openExcel(self, event):
         """Either open the specified excel sheet, or make a new one from a template"""
         file = self.rootDir / self.GetValue()
-        if file.is_file() and file.suffix in self.validExt:
-            os.startfile(file)
-        else:
+        if not (file.is_file() and file.suffix in self.validExt): # If not a valid file
             dlg = wx.MessageDialog(self, _translate(
-                f"Once you have created and saved your table, please remember to add it to {self.Name}"),
-                             caption="Reminder")
+                "Once you have created and saved your table,"
+                "please remember to add it to {name}").format(name=_translate(self.Name)),
+                             caption=_translate("Reminder"))
             dlg.ShowModal()
             if hasattr(self.GetTopLevelParent(), 'type'):
                 if self.GetTopLevelParent().type in self.templates:
-                    os.startfile(self.templates[self.GetTopLevelParent().type])
-                    return
-            os.startfile(self.templates['None']) # Open blank template
+                    file = self.templates[self.GetTopLevelParent().type] # Open type specific template
+                else:
+                    file = self.templates['None'] # Open blank template
+        # Open whatever file is used
+        try:
+            os.startfile(file)
+        except AttributeError:
+            opener = "open" if sys.platform == "darwin" else "xdg-open"
+            subprocess.call([opener, file])
 
     def findFile(self, event):
         _wld = f"All Table Files({'*'+';*'.join(self.validExt)})|{'*'+';*'.join(self.validExt)}|All Files (*.*)|*.*"
@@ -347,7 +513,7 @@ class TableCtrl(wx.TextCtrl, _ValidatorMixin, _FileMixin):
             self.validate(event)
 
 
-class ColorCtrl(wx.TextCtrl, _ValidatorMixin):
+class ColorCtrl(wx.TextCtrl, _ValidatorMixin, _HideMixin):
     def __init__(self, parent, valType,
                  val="", fieldName="",
                  size=wx.Size(-1, 24)):
@@ -365,17 +531,20 @@ class ColorCtrl(wx.TextCtrl, _ValidatorMixin):
         # Add ctrl to sizer
         self._szr.Add(self, proportion=1, border=5, flag=wx.EXPAND | wx.RIGHT)
         # Add button to activate color picker
-        fldr = parent.app.iconCache.getBitmap(name="color", size=16, theme="light")
+        fldr = icons.ButtonIcon(stem="color", size=16).bitmap
         self.pickerBtn = wx.BitmapButton(parent, -1, size=wx.Size(24,24), bitmap=fldr)
         self.pickerBtn.SetToolTip(_translate("Specify color ..."))
         self.pickerBtn.Bind(wx.EVT_BUTTON, self.colorPicker)
         self._szr.Add(self.pickerBtn)
         # Bind to validation
-        self.Bind(wx.EVT_TEXT, self.validate)
+        self.Bind(wx.EVT_CHAR, self.validate)
         self.validate()
 
     def colorPicker(self, evt):
-        PsychoColorPicker(self.GetTopLevelParent().frame)
+        dlg = PsychoColorPicker(self, context=self, allowCopy=False)  # open a color picker
+        dlg.ShowModal()
+        dlg.Destroy()
+
 
 def validate(obj, valType):
     val = str(obj.GetValue())
@@ -401,7 +570,7 @@ def validate(obj, valType):
         # For now, ignore
         pass
     # Validate num
-    if valType == "num":
+    if valType in ["num", "int"]:
         try:
             # Try to convert value to a float
             float(val)
@@ -437,13 +606,19 @@ def validate(obj, valType):
             # If object creation fails, input is invalid
             valid = False
     if valType == "file":
-        if not os.path.isfile(os.path.abspath(val)):
+        val = Path(str(val))
+        if not val.is_absolute():
+            frame = obj.GetTopLevelParent().frame
+            # If not an absolute path, append to current directory
+            val = Path(frame.filename).parent / val
+        if not val.is_file():
             # Is value a valid filepath?
             valid = False
         if hasattr(obj, "validExt"):
-            if not val.endswith(tuple(obj.validExt)):
-                # If control has specified list of ext, does value end in correct ext?
+            # If control has specified list of ext, does value end in correct ext?
+            if val.suffix not in obj.validExt:
                 valid = False
+
     # If additional allowed values are defined, override validation
     if hasattr(obj, "allowedVals"):
         if val in obj.allowedVals:
@@ -457,7 +632,8 @@ def validate(obj, valType):
     # Update code font
     obj.updateCodeFont(valType)
 
-class DictCtrl(ListWidget, _ValidatorMixin):
+
+class DictCtrl(ListWidget, _ValidatorMixin, _HideMixin):
     def __init__(self, parent,
                  val={}, valType='dict',
                  fieldName=""):
@@ -467,7 +643,7 @@ class DictCtrl(ListWidget, _ValidatorMixin):
         if isinstance(val, dict):
             newVal = []
             for key, v in val.items():
-                newVal.append({'Field': key, 'Default': v})
+                newVal.append({'Field': key, 'Default': v.val})
             val = newVal
         # If any items within the list are not dicts or are dicts longer than 1, throw error
         if not all(isinstance(v, dict) and len(v) == 2 for v in val):
@@ -479,3 +655,39 @@ class DictCtrl(ListWidget, _ValidatorMixin):
         for child in self.Children:
             if hasattr(child, "SetForegroundColour"):
                 child.SetForegroundColour(color)
+
+    def Enable(self, enable=True):
+        """
+        Enable or disable all items in the dict ctrl
+        """
+        # Iterate through all children
+        for cell in self.Children:
+            # Get the actual child rather than the sizer item
+            child = cell.Window
+            # If it can be enabled/disabled, enable/disable it
+            if hasattr(child, "Enable"):
+                child.Enable(enable)
+
+    def Disable(self):
+        """
+        Disable all items in the dict ctrl
+        """
+        self.Enable(False)
+
+    def Show(self, show=True):
+        """
+        Show or hide all items in the dict ctrl
+        """
+        # Iterate through all children
+        for cell in self.Children:
+            # Get the actual child rather than the sizer item
+            child = cell.Window
+            # If it can be shown/hidden, show/hide it
+            if hasattr(child, "Show"):
+                child.Show(show)
+
+    def Hide(self):
+        """
+        Hide all items in the dict ctrl
+        """
+        self.Show(False)

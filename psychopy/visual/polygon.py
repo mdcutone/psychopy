@@ -5,12 +5,9 @@
 :class:`~psychopy.visual.ShapeStim`"""
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-from __future__ import absolute_import, print_function
-
-from builtins import range
 import psychopy  # so we can get the __path__
 from psychopy.visual.shape import BaseShapeStim
 from psychopy.tools.attributetools import attributeSetter, setAttribute
@@ -113,10 +110,11 @@ class Polygon(BaseShapeStim):
                  lineWidth=1.5,
                  lineColor=None,
                  lineColorSpace=None,
-                 fillColor=None,
+                 fillColor='white',
                  fillColorSpace=None,
                  pos=(0, 0),
                  size=1.0,
+                 anchor=None,
                  ori=0.0,
                  opacity=None,
                  contrast=1.0,
@@ -137,6 +135,7 @@ class Polygon(BaseShapeStim):
 
         self.autoLog = False  # but will be changed if needed at end of init
         self.__dict__['edges'] = edges
+        self.__dict__['lineWidth'] = lineWidth
         self.radius = np.asarray(radius)
         self._calcVertices()
 
@@ -152,6 +151,7 @@ class Polygon(BaseShapeStim):
             closeShape=True,
             pos=pos,
             size=size,
+            anchor=anchor,
             ori=ori,
             opacity=opacity,
             contrast=contrast,
@@ -166,10 +166,12 @@ class Polygon(BaseShapeStim):
             colorSpace=colorSpace)
 
     def _calcVertices(self):
-        d = np.pi * 2 / self.edges
-        self.vertices = np.asarray(
-            [np.asarray((np.sin(e * d), np.cos(e * d))) * self.radius
-             for e in range(int(round(self.edges)))])
+        if self.edges == "circle":
+            # If circle is requested, calculate min edges needed for it to appear smooth
+            edges = self._calculateMinEdges(self.__dict__['lineWidth'], threshold=1)
+        else:
+            edges = self.edges
+        self.vertices = self._calcEquilateralVertices(edges, self.radius)
 
     @attributeSetter
     def edges(self, edges):

@@ -23,27 +23,24 @@ import json
 import threading
 import datetime
 from sys import platform
-# from psychopy import logging
 import websocket
 import ssl
 import time
 from pathlib import Path
 import logging  # NB this is the Python built-in logging not PsychoPy's
 import pandas as pd
+from psychopy import prefs
+
 # Set up logging for websockets library
 
 logger = logging.getLogger('test_logger')
 logger.setLevel(logging.INFO)
-fh = logging.FileHandler('cortex.log')
+fh = logging.FileHandler(Path(prefs.paths['userPrefsDir'])/'cortex.log')
 logger.addHandler(fh)
 
 
 MS_SEC_THRESHOLD = 1E+10  # if timestamp is greater than this it is in ms
 EEG_ON = os.environ.get('CORTEX_DATA', False)
-
-
-if platform == "linux" or platform == "linux2":
-    raise NotImplementedError('Linux not yet supported')
 
 
 class CortexApiException(Exception):
@@ -58,17 +55,21 @@ class CortexNoHeadsetException(Exception):
     pass
 
 
-class Cortex(object):
-    CORTEX_URL = "wss://localhost:6868"
+class Cortex:
+    if os.getenv('CORTEX_DEBUG', False):
+        CORTEX_URL = "wss://localhost:7070"
+    else:
+        CORTEX_URL = "wss://localhost:6868"
 
     def __init__(self, client_id_file=None, subject=None):
-        home = str(Path.home())
-        if client_id_file is None:
-            client_id_file = ".emotiv_creds"
-        file_path = os.path.join(home, client_id_file)
+        
+        if platform == "linux" or platform == "linux2":
+            raise NotImplementedError('Linux not yet supported')
+
         self.client_id = None
         self.client_secret = None
-        self.parse_client_id_file(file_path)
+        client_id, client_secret = self.parse_client_id_file()
+        self.set_client_id_and_secret(client_id, client_secret)
         self.id_sequence = 0
         self.session_id = None
         self.marker_dict = {}
@@ -82,7 +83,6 @@ class Cortex(object):
         self.get_user_login()
         self.get_cortex_info()
         self.has_access_right()
-        self.tt0 = time.time() - time.perf_counter()
         self.request_access()
         self.authorize()
         self.get_license_info()
@@ -96,11 +96,13 @@ class Cortex(object):
             time_str = datetime.datetime.now().isoformat()
             self.create_session(activate=True,
                                 headset_id=self.headsets[0])
+
+            self.tt0 = self.synchronise()
             self.create_record(title=f"Psychopy_{subject}_{time_str}".replace(":",""))
         else:
             logger.error("Not able to find a connected headset")
-            raise CortexNoHeadsetException("Unable to find Emotiv headset")
-        # EEG data 
+            raise CortexNoHeadsetException("No headset detected. Please connect the EMOTIV headset in Emotiv Launcher")
+        # EEG data
         if EEG_ON:
             self.timestamps = []
             self.data = []
@@ -139,7 +141,6 @@ class Cortex(object):
         msg = self.gen_request(method, auth, **kwargs)
         if method == 'injectMarker':
             self.marker_dict[self.id_sequence] = "sent"
-            # print("sending_marker", time.perf_counter())
         self.websocket.send(msg)
         if wait:
             logger.debug("data sent; awaiting response")
@@ -147,7 +148,7 @@ class Cortex(object):
             logger.debug(f"raw response received: {resp}")
             if 'error' in resp:
                 logger.warning(
-                    f"Got error in {method} with params {kwargs}:\n{resp}")
+                    f"Got error in {method} with params {kwargs}: {resp}")
                 raise CortexApiException(resp)
             resp = json.loads(resp)
             if callback:
@@ -233,12 +234,17 @@ class Cortex(object):
         else:
             raise CortexTimingException(f"Unable to interpret time: '{t}'")
 
-    def parse_client_id_file(self, client_id_file_path):
+    def set_client_id_and_secret(self, client_id, client_secret):
+        self.client_id = client_id
+        self.client_secret = client_secret
+
+    @staticmethod
+    def parse_client_id_file(client_id_file_path=None):
         """
         Parse a client_id file for client_id and client secret.
 
         Parameter:
-            client_id_file_path: absolute or relative path to a client_id file
+            client_id_file_path: absolute path to a client_id file
 
         We expect the client_id file to have the format:
         ```
@@ -247,8 +253,12 @@ class Cortex(object):
         client_secret abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN
         ```
         """
-        self.client_id = None
-        self.client_secret = None
+        home = str(Path.home())
+        if client_id_file_path is None:
+            client_id_file_path = ".emotiv_creds"
+            client_id_file_path = os.path.join(home, client_id_file_path)
+        client_id = None
+        client_secret = None
         if not os.path.exists(client_id_file_path):
             error_str = ("File {} does not exist. Please add Cortex app client"
                          "id and secret into '.emotiv_creds' file in home " 
@@ -263,18 +273,19 @@ class Cortex(object):
                     continue
                 (key, val) = line.split(' ')
                 if key == 'client_id':
-                    self.client_id = val.strip()
+                    client_id = val.strip()
                 elif key == 'client_secret':
-                    self.client_secret = val.strip()
+                    client_secret = val.strip()
                 else:
                     raise ValueError(
                         f'Found invalid key "{key}" while parsing '
                         f'client_id file {client_id_file_path}')
 
-        if not self.client_id or not self.client_secret:
+        if not client_id or not client_secret:
             raise ValueError(
                 f"Did not find expected keys in client_id file "
                 f"{client_id_file_path}")
+        return client_id, client_secret
 
     def gen_request(self, method, auth, **kwargs):
         """
@@ -324,19 +335,46 @@ class Cortex(object):
         try:
             resp = self.send_wait_command('authorize', auth=False, **params)
         except CortexApiException as e:
-            msg = json.loads(str(e))['error']['message'].lower()
-            if "no access rights" in msg:
-                raise CortexApiException("Please open the EmotivApp and grant "
-                                         "permission to your applicationId")
+            code = json.loads(str(e))['error']['code']
+            msg = json.loads(str(e))['error']['message']
+            if code == -32002:
+                raise CortexApiException("Invalid license key. Please create a new applicationId and do NOT check 'My App requires EEG access' or request API EEG access from Emotiv customer support.")
+            else:
+                raise CortexApiException(msg)
         logger.debug(f"{__name__} resp:\n{resp}")
         self.auth_token = resp['result']['cortexToken']
-
 
     ##
     # Here down are cortex specific commands
     # Each of them is documented thoroughly in the API documentation:
     # https://emotiv.gitbook.io/cortex-api
     ##
+    def synchronise(self):
+        delta = 1.0
+        logger.debug("Start synchronising")
+        t0 = time.time() - time.perf_counter()
+        while delta > 0.001:
+            params = {'headset': self.headsets[0],
+                      'monotonicTime': time.perf_counter(),
+                      'systemTime': time.time()}
+            try:
+                resp = self.send_wait_command('syncWithHeadsetClock', auth=False, **params)
+            except CortexApiException as e:
+                msg = json.loads(str(e))['error']['message']
+                code = json.loads(str(e))['error']['code']
+                if code == -32601:
+                    # Old version of Cortex... just return
+                    print("Old version of Cortex detected. Synchronisation of headset clock failed.")
+                    return
+                else:
+                    raise CortexApiException(msg)
+            logger.debug(f"{__name__} resp:\n{resp}")
+            new_t0 = resp['result']['adjustment']
+            delta = abs(t0 - new_t0)
+            t0 = new_t0
+        logger.debug("Synchronised")
+        return t0
+
     def inspectApi(self):
         """ Return a list of available cortex methods """
         resp = self.send_wait_command('inspectApi', auth=False)
@@ -366,11 +404,16 @@ class Cortex(object):
     @staticmethod
     def get_user_login_cb(resp):
         """ Example of using the callback functionality of send_command """
-        resp = resp['result'][0]
+        resp = resp['result']
+        if len(resp) == 0:
+            logger.debug(resp)
+            raise CortexApiException(
+                f"No user logged in! Please log in with the Emotiv Launcher")
+        resp = resp[0]
         if 'loggedInOSUId' not in resp:
             logger.debug(resp)
             raise CortexApiException(
-                f"No user logged in! Please log in with the Emotiv App")
+                f"No user logged in! Please log in with the Emotiv Launcher")
         if resp['currentOSUId'] != resp['loggedInOSUId']:
             logger.debug(resp)
             raise CortexApiException(
@@ -404,16 +447,18 @@ class Cortex(object):
         status = 'active' if activate else 'open'
         if not headset_id:
             headset_id = self.headsets[0]
+        logger.debug(f"Connecting to headset: {headset_id}")
         params = {'cortexToken': self.auth_token,
                   'headset': headset_id,
                   'status': status}
         try:
             resp = self.send_wait_command('createSession', **params)
         except CortexApiException as e:
-            msg = json.loads(str(e))['error']['message'].lower()
-            if "headset is missing" in msg:
-                raise CortexApiException("Please connect the headset using "
-                                         "EmotivApp or EmotivPro")
+            # msg = json.loads(str(e))['error']['message'].lower()
+            code = json.loads(str(e))['error']['code']
+            if code == -32004:
+                raise CortexNoHeadsetException("Please connect the headset using "
+                                         "EmotivLauncher or EmotivPRO")
         self.session_id = resp['result']['id']
         logger.debug(f"{__name__} resp:\n{resp}")
 
@@ -456,15 +501,23 @@ class Cortex(object):
 
     def update_marker(self, label= None, t=None, delta_time=None):
         ms_time = self.to_epoch(t, delta_time)
-        marker_id = self.marker_dict.get(label, None)
+        marker_id = self.marker_dict.pop(label, None)
         if marker_id is None:
-            raise Exception("no marker with that label")
-        params = {'cortexToken': self.auth_token,
-                  'session': self.session_id,
-                  'markerId': marker_id,
-                  'time': ms_time}
-        self.send_command('updateMarker', **params)
-        del self.marker_dict[label]
+            print("Warning: Unable to set stop marker. Probably marking too fast.")
+            method = 'injectMarker'
+            params = {'cortexToken': self.auth_token,
+                      'session': self.session_id,
+                      'label': label + '_stop',
+                      'value': 999,
+                      'port': 'psychopy',
+                      'time': ms_time}
+        else:
+            method = 'updateMarker'
+            params = {'cortexToken': self.auth_token,
+                      'session': self.session_id,
+                      'markerId': marker_id,
+                      'time': ms_time}
+        self.send_command(method, **params)
 
     def subscribe(self, streamList):
         params = {'cortexToken': self.auth_token,
@@ -507,10 +560,6 @@ class Cortex(object):
 
 if __name__ == "__main__":
     cortex = Cortex()
-    print("sending marker")
     cortex.inject_marker(label="test_marker", value=4, port="psychpy")
     time.sleep(10)
-    print("sending stop")
-    cortex.update_marker()
-    print("finished")
-    print(cortex.session_id)
+    cortex.update_marker(label="test_marker")

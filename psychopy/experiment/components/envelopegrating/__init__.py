@@ -2,22 +2,13 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-from __future__ import absolute_import, print_function
-from builtins import super  # provides Py3-style super() using python-future
-
-from os import path
+from pathlib import Path
 from psychopy.experiment.components import BaseVisualComponent, Param, getInitVals, _translate
 from psychopy.localization import _localized as __localized
 _localized = __localized.copy()
-
-# the absolute path to the folder containing this path
-thisFolder = path.abspath(path.dirname(__file__))
-iconFile = path.join(thisFolder, 'envelopegrating.png')
-tooltip = _translate('Envelope Grating: present cyclic textures including 2nd order envelope stimuli, prebuilt or from a '
-                     'file')
 
 # only use _localized values for label values, nothing functional:
 _localized.update({'carrier': _translate('Carrier texture'),
@@ -41,10 +32,16 @@ _localized.update({'carrier': _translate('Carrier texture'),
 class EnvGratingComponent(BaseVisualComponent):
     """A class for presenting grating stimuli"""
 
+    categories = ['Stimuli']
+    targets = ['PsychoPy']
+    iconFile = Path(__file__).parent / 'envelopegrating.png'
+    tooltip = _translate('Envelope Grating: present cyclic textures including 2nd order envelope stimuli, '
+                         'prebuilt or from a file')
+
     def __init__(self, exp, parentName, name='env_grating', carrier='sin',
                  mask='None', sf=1.0, interpolate='linear',
                  units='from exp settings', color='$[1,1,1]', colorSpace='rgb',
-                 pos=(0, 0), size=(0.5, 0.5), ori=0, phase=0.0, texRes='128',
+                 pos=(0, 0), size=(0.5, 0.5), anchor="center", ori=0, phase=0.0, texRes='128',
                  envelope='sin',envsf=1.0,envori=0.0,envphase=0.0, 
                  beat=False, power=1.0,
                  contrast=0.5, moddepth=1.0, blendmode='avg',
@@ -116,7 +113,7 @@ class EnvGratingComponent(BaseVisualComponent):
             "etc. For most cases a value of 256 pixels will suffice")
         self.params['texture resolution'] = Param(
             texRes,
-            valType='num', inputType="choice", allowedVals=['32', '64', '128', '256', '512'], categ="Carrier",
+            valType='code', inputType="choice", allowedVals=['32', '64', '128', '256', '512'], categ="Carrier",
             updates='constant', allowedUpdates=[],
             hint=msg,
             label=_localized['texture resolution'])
@@ -126,7 +123,7 @@ class EnvGratingComponent(BaseVisualComponent):
         self.params['interpolate'] = Param(
             interpolate, valType='str', inputType="choice", allowedVals=['linear', 'nearest'], categ="Carrier",
             updates='constant', allowedUpdates=[],
-            hint=msg,
+            hint=msg, direct=False,
             label=_localized['interpolate'])
 
         msg = _translate("The (2D) texture of the envelope - can be sin, sqr,"
@@ -214,6 +211,22 @@ class EnvGratingComponent(BaseVisualComponent):
             hint=msg,
             label=_localized['blendmode'], categ="Appearance")
 
+        self.params['anchor'] = Param(
+            anchor, valType='str', inputType="choice", categ='Layout',
+            allowedVals=['center',
+                         'top-center',
+                         'bottom-center',
+                         'center-left',
+                         'center-right',
+                         'top-left',
+                         'top-right',
+                         'bottom-left',
+                         'bottom-right',
+                         ],
+            updates='constant',
+            hint=_translate("Which point on the stimulus should be anchored to its exact position?"),
+            label=_translate('Anchor'))
+
         del self.params['fillColor']
         del self.params['borderColor']
 
@@ -232,7 +245,7 @@ class EnvGratingComponent(BaseVisualComponent):
                 "    win=win, name='%s',%s\n" % (inits['name'], unitsStr) +
                 "    carrier=%(carrier)s, mask=%(mask)s,\n" % inits +
                 "    ori=%(ori)s, pos=%(pos)s, size=%(size)s,\n" % inits +
-                "    sf=%(sf)s, phase=%(phase)s,\n" % inits +
+                "    sf=%(sf)s, phase=%(phase)s, anchor=%(anchor)s,\n" % inits +
                 "    color=%(color)s, colorSpace=%(colorSpace)s,\n " % inits +
                 "    opacity=%(opacity)s, contrast=%(contrast)s,\n" % inits +
                 "    texRes=%(texture resolution)s, envelope=%(envelope)s,\n" % inits +
@@ -301,4 +314,3 @@ class EnvGratingComponent(BaseVisualComponent):
         super().writeRoutineEndCode(buff)  # adds start/stop times to data
         #if self.params['blendmode'].val!='default':
             #buff.writeIndented("win.blendMode=__allEnvSaveBlendMode #clean up for %(name)s\n" %self.params)
-

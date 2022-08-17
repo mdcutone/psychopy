@@ -1,21 +1,19 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from __future__ import absolute_import, division, print_function
-
 import errno
-from builtins import object
 import os
 import sys
 import platform
-from psychopy.constants import PY3
+from pathlib import Path
+from .. import __version__
+
 from pkg_resources import parse_version
 import shutil
-import json
 
 try:
     import configobj
-    if (PY3 and sys.version_info.minor >= 7 and
+    if (sys.version_info.minor >= 7 and
             parse_version(configobj.__version__) < parse_version('5.1.0')):
         raise ImportError('Installed configobj does not support Python 3.7+')
     _haveConfigobj = True
@@ -36,7 +34,7 @@ else:  # Use our contrib package if configobj is not installed or too old.
 join = os.path.join
 
 
-class Preferences(object):
+class Preferences:
     """Users can alter preferences from the dialog box in the application,
     by editing their user preferences file (which is what the dialog box does)
     or, within a script, preferences can be controlled like this::
@@ -130,10 +128,8 @@ class Preferences(object):
             self.paths['userPrefsDir'] = join(os.environ['HOME'],
                                               '.psychopy3')
 
-        # Find / copy themes
+        # Define theme path
         self.paths['themes'] = join(self.paths['userPrefsDir'], 'themes')
-        baseThemes = join(self.paths['appDir'], 'themes')
-        baseAppThemes = join(self.paths['appDir'], 'themes', 'app')
         # Find / copy fonts
         self.paths['fonts'] = join(self.paths['userPrefsDir'], 'fonts')
         # avoid silent fail-to-launch-app if bad permissions:
@@ -149,31 +145,32 @@ class Preferences(object):
         except OSError as err:
             if err.errno != errno.EEXIST:
                 raise
-        try:
-            os.makedirs(join(self.paths['themes'], "app"))
-        except OSError as err:
-            if err.errno != errno.EEXIST:
-                raise
         # Make fonts folder in user space if not one already
         try:
             os.makedirs(self.paths['fonts'])
         except OSError as err:
             if err.errno != errno.EEXIST:
                 raise
-        # Make sure all the base themes are present in user's folder
-        #try:
-        for file in os.listdir(baseThemes):
-            if file.endswith('.json'):
+
+        # Get dir for base and user themes
+        baseThemeDir = Path(self.paths['appDir']) / "themes" / "spec"
+        userThemeDir = Path(self.paths['themes'])
+        # Check what version user themes were last updated in
+        if (userThemeDir / "last.ver").is_file():
+            with open(userThemeDir / "last.ver", "r") as f:
+                lastVer = parse_version(f.read())
+        else:
+            # if no version available, assume it was the first version to have themes
+            lastVer = parse_version("2020.2.0")
+        # If version has changed since base themes last copied, they need updating
+        updateThemes = lastVer < parse_version(__version__)
+        # Copy base themes to user themes folder if missing or need update
+        for file in baseThemeDir.glob("*.json"):
+            if updateThemes or not (Path(self.paths['themes']) / file.name).is_file():
                 shutil.copyfile(
-                    join(baseThemes, file),
-                    join(self.paths['themes'], file)
+                    file,
+                    Path(self.paths['themes']) / file.name
                 )
-        for file in os.listdir(baseAppThemes):
-            if file.endswith('.json'):
-                shutil.copyfile(
-                    join(baseAppThemes, file),
-                    join(self.paths['themes'], "app", file)
-                    )
 
     def loadAll(self):
         """Load the user prefs and the application data

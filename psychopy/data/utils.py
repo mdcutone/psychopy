@@ -1,19 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from __future__ import absolute_import, division, print_function
+# Part of the PsychoPy library
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
+# Distributed under the terms of the GNU General Public License (GPL).
 
-# from future import standard_library
-# standard_library.install_aliases()
-from builtins import str
-from builtins import range
-from past.builtins import basestring
 import os
 import re
 import ast
 import pickle
-import time
-import codecs
+import time, datetime
 import numpy as np
 import pandas as pd
 
@@ -21,7 +17,6 @@ from collections import OrderedDict
 from pkg_resources import parse_version
 
 from psychopy import logging, exceptions
-from psychopy.constants import PY3
 from psychopy.tools.filetools import pathToString
 
 try:
@@ -79,7 +74,7 @@ def isValidVariableName(name):
     """
     if not name:
         return False, "Variables cannot be missing, None, or ''"
-    if not isinstance(name, basestring):
+    if not isinstance(name, str):
         return False, "Variables must be string-like"
     try:
         name = str(name)  # convert from unicode if possible
@@ -165,15 +160,17 @@ def indicesFromString(indsString):
         pass
 
 
-def listFromString(val):
+def listFromString(val, excludeEmpties=False):
     """Take a string that looks like a list (with commas and/or [] and make
     an actual python list"""
+    # was previously called strToList and str2list might have been an option!
+    # I'll leave those here for anyone doing a find-in-path for those
     if type(val) == tuple:
         return list(val)
     elif type(val) == list:
         return list(val)  # nothing to do
     elif type(val) != str:
-        raise ValueError("_strToList requires a string as its input not {}"
+        raise ValueError("listFromString requires a string as its input not {}"
                          .format(repr(val)))
     # try to evaluate with ast (works for "'yes,'no'" or "['yes', 'no']")
     try:
@@ -188,7 +185,10 @@ def listFromString(val):
     if val.startswith(('[', '(')) and val.endswith((']', ')')):
         val = val[1:-1]
     asList = val.split(",")
-    asList = [this.strip() for this in asList]
+    if excludeEmpties:
+        asList = [this.strip() for this in asList if this]
+    else:
+        asList = [this.strip() for this in asList]
     return asList
 
 
@@ -200,20 +200,20 @@ def importConditions(fileName, returnFieldNames=False, selection=""):
 
     If `fileName` ends with:
 
-        - .csv:  import as a comma-separated-value file
+    - .csv:  import as a comma-separated-value file
             (header + row x col)
-        - .xlsx: import as Excel 2007 (xlsx) files.
+    - .xlsx: import as Excel 2007 (xlsx) files.
             No support for older (.xls) is planned.
-        - .pkl:  import from a pickle file as list of lists
+    - .pkl:  import from a pickle file as list of lists
             (header + row x col)
 
     The file should contain one row per type of trial needed and one column
     for each parameter that defines the trial type. The first row should give
     parameter names, which should:
 
-        - be unique
-        - begin with a letter (upper or lower case)
-        - contain no spaces or other punctuation (underscores are permitted)
+    - be unique
+    - begin with a letter (upper or lower case)
+    - contain no spaces or other punctuation (underscores are permitted)
 
 
     `selection` is used to select a subset of condition indices to be used
@@ -221,11 +221,11 @@ def importConditions(fileName, returnFieldNames=False, selection=""):
     be parsed as either option.
     e.g.:
 
-        - "1,2,4" or [1,2,4] or (1,2,4) are the same
-        - "2:5"       # 2, 3, 4 (doesn't include last whole value)
-        - "-10:2:"    # tenth from last to the last in steps of 2
-        - slice(-10, 2, None)  # the same as above
-        - random(5) * 8  # five random vals 0-7
+    - "1,2,4" or [1,2,4] or (1,2,4) are the same
+    - "2:5"       # 2, 3, 4 (doesn't include last whole value)
+    - "-10:2:"    # tenth from last to the last in steps of 2
+    - slice(-10, 2, None)  # the same as above
+    - random(5) * 8  # five random vals 0-7
 
     """
 
@@ -314,7 +314,7 @@ def importConditions(fileName, returnFieldNames=False, selection=""):
             for fieldN, fieldName in enumerate(fieldNames):
                 val = trialsArr[trialN][fieldN]
 
-                if isinstance(val, basestring):
+                if isinstance(val, str):
                     if val.startswith('[') and val.endswith(']'):
                         # val = eval('%s' %unicode(val.decode('utf8')))
                         val = eval(val)
@@ -394,12 +394,15 @@ def importConditions(fileName, returnFieldNames=False, selection=""):
                     # From 2.0, cells are referenced with 1-indexing: A1 == cell(row=1, column=1)
                     val = ws.cell(row=rowN + 1, column=colN + 1).value
                 # if it looks like a list or tuple, convert it
-                if (isinstance(val, basestring) and
+                if (isinstance(val, str) and
                         (val.startswith('[') and val.endswith(']') or
                                  val.startswith('(') and val.endswith(')'))):
                     val = eval(val)
+                # if it has any line breaks correct them
+                if isinstance(val, str):
+                    val = val.replace('\\n', '\n')
                 # Convert from eu style decimals: replace , with . and try to make it a float
-                if isinstance(val, basestring):
+                if isinstance(val, str):
                     tryVal = val.replace(",", ".")
                     try:
                         val = float(tryVal)
@@ -412,23 +415,19 @@ def importConditions(fileName, returnFieldNames=False, selection=""):
     elif fileName.endswith('.pkl'):
         f = open(fileName, 'rb')
         # Converting newline characters.
-        if PY3:
-            # 'b' is necessary in Python3 because byte object is 
-            # returned when file is opened in binary mode.
-            buffer = f.read().replace(b'\r\n',b'\n').replace(b'\r',b'\n')
-        else:
-            buffer = f.read().replace('\r\n','\n').replace('\r','\n')
+        # 'b' is necessary in Python3 because byte object is
+        # returned when file is opened in binary mode.
+        buffer = f.read().replace(b'\r\n',b'\n').replace(b'\r',b'\n')
         try:
             trialsArr = pickle.loads(buffer)
         except Exception:
             raise IOError('Could not open %s as conditions' % fileName)
         f.close()
         trialList = []
-        if PY3:
-            # In Python3, strings returned by pickle() is unhashable.
-            # So, we have to convert them to str.
-            trialsArr = [[str(item) if isinstance(item, str) else item
-                          for item in row] for row in trialsArr]
+        # In Python3, strings returned by pickle() are unhashable so we have to
+        # convert them to str.
+        trialsArr = [[str(item) if isinstance(item, str) else item
+                      for item in row] for row in trialsArr]
         fieldNames = trialsArr[0]  # header line first
         _assertValidVarNames(fieldNames, fileName)
         for row in trialsArr[1:]:
@@ -442,7 +441,7 @@ def importConditions(fileName, returnFieldNames=False, selection=""):
                       'xlsx, csv, dlm, tsv or pkl file')
 
     # if we have a selection then try to parse it
-    if isinstance(selection, basestring) and len(selection) > 0:
+    if isinstance(selection, str) and len(selection) > 0:
         selection = indicesFromString(selection)
         if not isinstance(selection, slice):
             for n in selection:
@@ -635,24 +634,42 @@ def functionFromStaircase(intensities, responses, bins=10):
     return binnedInten, binnedResp, nPoints
 
 
-def getDateStr(format="%Y_%b_%d_%H%M"):
-    """Uses ``time.strftime()``_ to generate a string of the form
-    2012_Apr_19_1531 for 19th April 3.31pm, 2012.
-    This is often useful appended to data filenames to provide unique names.
-    To include the year: getDateStr(format="%Y_%b_%d_%H%M")
-    returns '2011_Mar_16_1307' depending on locale, can have unicode chars
-    in month names, so utf_8_decode them
-    For date in the format of the current localization, do:
-        data.getDateStr(format=locale.nl_langinfo(locale.D_T_FMT))
-    """
-    now = time.strftime(format, time.localtime())
-    if PY3:
-        return now
-    else:
-        try:
-            now_decoded = codecs.utf_8_decode(now)[0]
-        except UnicodeDecodeError:
-            # '2011_03_16_1307'
-            now_decoded = time.strftime("%Y_%m_%d_%H%M", time.localtime())
+def getDateStr(format="%Y-%m-%d_%Hh%M.%S.%f", fractionalSecondDigits=3):
+    """Uses ``datetime.now().strftime(format)``_ to generate a string
+    based on ISO 8601 but made safe for filename use::
 
-        return now_decoded
+        "2022-01-14_18h35.05.386"
+
+    represents 14th Jan 2022 at 6:35pm with 5 sec and 386 ms
+
+    This is often useful appended to data filenames to provide unique names.
+
+    Parameters
+    ----------
+    format : str
+        default="%Y-%m-%d_%Hh%M.%S.%f"
+    fractionalSecondDigits : int
+        An integer value 1-6 indicating the number of digits of fractional
+        seconds to include if the `%f` parameter is included in the format.
+        This would normally give 6 digits (microseconds) but to get just
+        milliseconds you can set fractionalSecondDigits=3
+
+    """
+    now = datetime.datetime.now()
+    microsecs = now.strftime("%f")
+    nowStr = now.strftime(format)
+    if "%f" in format and (
+            fractionalSecondDigits < 1
+            or int(fractionalSecondDigits) != fractionalSecondDigits
+    ):
+        raise TypeError("fractionalSecondDigits argument to getDateStr should "
+                        f"be an integer greater than 1, not {fractionalSecondDigits}")
+    elif  "%f" in format and fractionalSecondDigits > len(microsecs):
+        logging.warning("fractionalSecondDigits argument to getDateStr requested "
+                        f"{fractionalSecondDigits} digits but only {len(microsecs)} "
+                        f"are available. Truncating to {len(microsecs)}.")
+    elif "%f" in format:
+        nowStr = nowStr.replace(
+            microsecs, microsecs[:int(fractionalSecondDigits)],
+        )
+    return nowStr

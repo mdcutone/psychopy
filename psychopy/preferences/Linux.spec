@@ -48,6 +48,8 @@
     gammaErrorPolicy = option('abort', 'warn', default='abort')
     # Add plugin names here to load when a PsychoPy session starts.
     startUpPlugins = list(default=list())
+    # Google Cloud Platform key, required for the audio transcription using Google Speech Recognition. Specified as a path to a JSON file containing the key data.
+    appKeyGoogleCloud = string(default='')
 
 # Application settings, applied to coder, builder, & prefs windows
 [app]
@@ -98,7 +100,7 @@
 # Settings for the Builder window
 [builder]
     # whether to automatically reload a previously open experiment
-    reloadPrevExp = boolean(default=False)
+    reloadPrevExp = boolean(default=True)
     # Default to when writing code components
     codeComponentLanguage = option('Py', 'JS', 'Both', 'Auto->JS', default='Auto->JS')
     # if False will create scripts with an 'easier' but more cluttered namespace
@@ -119,7 +121,10 @@
     alwaysShowReadme = boolean(default=True)
     # Upper limit on how many components can be in favorites
     maxFavorites = integer(default=10)
+    # Ask for confirmation when closing a routine tab.
+    confirmRoutineClose = boolean(default=True)
 
+# Settings for hardware
 [hardware]
     # choice of audio library
     audioLib = list(default=list('sounddevice','PTB', 'pyo', 'pygame'))
@@ -232,7 +237,7 @@
     # Coder: show / hide the output panel
     toggleOutputPanel = string(default='Ctrl+Shift+O')
     #Builder: rename an existing routine
-    renameRoutine = string(default='Ctrl+Shift+R')
+    renameRoutine = string(default='Ctrl+Shift+M')
     # switch between windows
     cycleWindows = string(default='Ctrl+L')
     # increase display size in Flow

@@ -35,12 +35,22 @@ Mouse:
     #
     save_events: True
 
-    # report_system_wide_events: Should the keyboard report events
+    # report_system_wide_events: Should the mouse report events
     #   even when the OS window target is not a PsychoPy Window?
     #   True: All events will be reported regardless of window target.
     #   False: Only events indicating that a PsychoPy Window
     #       is the intended event target will be reported.
     report_system_wide_events: True
+
+
+    # enable_multi_window: If True, iohub Mouse can be used with multi-window,
+    #   or non full screen window, experiments. If mouse is over a PsychoPy window,
+    #   position is reported as window pixel position; window center as origin (0, 0).
+    #   window_id is set to the psychopy window handle. If mouse is not over psychopy window,
+    #   position is left in desktop pixels and window_id is set to 0.
+    #   If False (default), only a single full screen window is supported
+    #   and original mouse position mapping logic is used.
+    enable_multi_window: False
 
     # stream_events: Indicate if events from this device should be made available
     #   during experiment runtime to the Experiment / PsychoPy Process.
@@ -71,17 +81,6 @@ Mouse:
     #
     device_number: 0
 
-    # serial_number: The serial number for the specific isnstance of device used
-    #   can be specified here. It is not used by the ioHub, so is FYI only.
-    #
-    serial_number: N/A
-
-    # manufacture_date: The date of manufactiurer of the device
-    # can be specified here. It is not used by the ioHub,
-    # so is FYI only.
-    #
-    manufacture_date: DD-MM-YYYY
-
     # The device manufacturer's name.
     #   It is not used by the ioHub, so is FYI only.
     #
@@ -91,23 +90,3 @@ Mouse:
     #   It is not used by the ioHub, so is FYI only.
     #
     model_name: N/A
-
-    # model_number: The device model number can be specified here.
-    #   It is not used by the ioHub, so is FYI only.
-    #
-    model_number: N/A
-
-    # software_version: The device driver and / or SDK software version number.
-    #   This field is not used by ioHub, so is FYI only.
-    #
-    software_version: N/A
-
-    # hardware_version: The device's hardware version can be specified here.
-    #   It is not used by the ioHub, so is FYI only.
-    #
-    hardware_version: N/A
-
-    # firmware_version: If the device has firmware, its revision number
-    #   can be indicated here. It is not used by the ioHub, so is FYI only.
-    #
-    firmware_version: N/A

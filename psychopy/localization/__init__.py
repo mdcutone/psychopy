@@ -9,7 +9,7 @@ translation _translate():
 """
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 # Author: Jeremy Gray, July 2014
@@ -136,10 +136,7 @@ except IOError:
     logging.debug("Locale for '%s' not found. Using default." % lang)
     trans = gettext.NullTranslations()
 
-if constants.PY3:
-    trans.install()
-else:
-    trans.install(unicode=True)
+trans.install()
 
 # PsychoPy app uses a nonstandard name _translate (instead of _)
 # A dependency overwrites _ somewhere, clobbering use of _ as global:
@@ -181,6 +178,7 @@ _localized = {
     'Name': _translate('Name'),
     'nReps': _translate('nReps'),
     'conditions': _translate('Conditions'),  # not the same
+    'conditionsFile':_translate('conditionsFile'),
     'endPoints': _translate('endPoints'),
     'Selected rows': _translate('Selected rows'),
     'loopType': _translate('loopType'),

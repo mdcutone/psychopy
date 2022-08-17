@@ -1,18 +1,18 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from __future__ import absolute_import, print_function
-
 import wx
 import re
 import wx.richtext
 import locale
 from psychopy.localization import _translate
+from .utils import sanitize
 
 _prefEncoding = locale.getpreferredencoding()
 
 from psychopy.alerts._alerts import AlertEntry
 from psychopy.alerts._errorHandler import _BaseErrorHandler
+
 
 class StdOutRich(wx.richtext.RichTextCtrl, _BaseErrorHandler):
     """
@@ -47,6 +47,8 @@ class StdOutRich(wx.richtext.RichTextCtrl, _BaseErrorHandler):
 
         if type(inStr) == AlertEntry:
             alert = inStr
+            # sanitize message
+            alert.msg = sanitize(alert.msg)
             # Write Code
             self.BeginBold()
             self.BeginTextColour(wx.BLUE)
@@ -86,6 +88,9 @@ class StdOutRich(wx.richtext.RichTextCtrl, _BaseErrorHandler):
                 inStr = inStr.decode('utf-8')
             except UnicodeDecodeError:
                 inStr = inStr.decode(_prefEncoding)
+
+        # sanitize message
+        inStr = sanitize(inStr)
 
         for thisLine in inStr.splitlines(True):
             try:

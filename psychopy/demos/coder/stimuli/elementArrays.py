@@ -16,9 +16,6 @@ would be too slow for a large array of stimuli like this.
 See also the starField demo.
 """
 
-from __future__ import division
-
-from builtins import range
 from psychopy import visual, core, event
 from psychopy.tools.coordinatetools import cart2pol
 
@@ -66,7 +63,7 @@ while not event.getKeys():
     newXYs = globForm.xys
     newOris = globForm.oris
 
-    # find the dead elemnts and reset their life
+    # find the dead elements and reset their life
     deadElements = (lives > 10)  # numpy vector, not standard python
     lives[deadElements] = 0
 

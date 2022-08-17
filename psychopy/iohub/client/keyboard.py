@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
-# Part of the psychopy.iohub library.
-# Copyright (C) 2012-2016 iSolver Software Solutions
+# Part of the PsychoPy library
+# Copyright (C) 2012-2020 iSolver Software Solutions (C) 2021 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
-from __future__ import division, absolute_import, print_function
 
-from builtins import str
-#from past.builtins import unicode
 from collections import deque
 import time
 from ..client import ioHubDeviceView, ioEvent, DeviceRPC
@@ -94,8 +91,8 @@ class KeyboardEvent(ioEvent):
 
     def __eq__(self, v):
         if isinstance(v, KeyboardEvent):
-            return self.key == v.key or self.char == v.char
-        return self.key == v or self.char == v
+            return self.key == v.key
+        return self.key == v
 
     def __ne__(self, v):
         return not self.__eq__(v)
@@ -201,8 +198,9 @@ class Keyboard(ioHubDeviceView):
     KEY_PRESS = EventConstants.KEYBOARD_PRESS
     KEY_RELEASE = EventConstants.KEYBOARD_RELEASE
     _type2class = {KEY_PRESS: KeyboardPress, KEY_RELEASE: KeyboardRelease}
+
     def __init__(self, ioclient, dev_cls_name, dev_config):
-        super(Keyboard, self).__init__(ioclient, dev_cls_name, dev_config)
+        super(Keyboard, self).__init__(ioclient, 'client.Keyboard', dev_cls_name, dev_config)
         self._events = dict()
         self._reporting = self.isReportingEvents()
         self._pressed_keys = {}

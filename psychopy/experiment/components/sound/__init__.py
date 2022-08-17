@@ -3,23 +3,15 @@
 
 """
 Part of the PsychoPy library
-Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 Distributed under the terms of the GNU General Public License (GPL).
 """
 
-from __future__ import absolute_import, print_function
-from builtins import super  # provides Py3-style super() using python-future
-
-from os import path
+from pathlib import Path
 from psychopy.experiment.components import BaseComponent, Param, getInitVals, _translate
 from psychopy.sound._base import knownNoteNames
 from psychopy.localization import _localized as __localized
 _localized = __localized.copy()
-
-# the absolute path to the folder containing this path
-thisFolder = path.abspath(path.dirname(__file__))
-iconFile = path.join(thisFolder, 'sound.png')
-tooltip = _translate('Sound: play recorded files or generated sounds',)
 
 # only use _localized values for label values, nothing functional:
 _localized.update({'sound': _translate('Sound'),
@@ -30,6 +22,9 @@ _localized.update({'sound': _translate('Sound'),
 class SoundComponent(BaseComponent):
     """An event class for presenting sound stimuli"""
     categories = ['Stimuli']
+    targets = ['PsychoPy', 'PsychoJS']
+    iconFile = Path(__file__).parent / 'sound.png'
+    tooltip = _translate('Sound: play recorded files or generated sounds', )
 
     def __init__(self, exp, parentName, name='sound_1', sound='A', volume=1,
                  startType='time (s)', startVal='0.0',
@@ -44,7 +39,6 @@ class SoundComponent(BaseComponent):
         self.type = 'Sound'
         self.url = "https://www.psychopy.org/builder/components/sound.html"
         self.exp.requirePsychopyLibs(['sound'])
-        self.targets = ['PsychoPy', 'PsychoJS']
         self.order += [
             "sound",  # Basic tab
             "volume", "hammingWindow",  # Playback tab
@@ -199,10 +193,10 @@ class SoundComponent(BaseComponent):
         else:
             # sounds with stop values
             self.writeStopTestCodeJS(buff)
-            code = ("if (%(stopVal)s > 0.5) {"
+            code = ("if (%(stopVal)s > 0.5) {\n"
                     "  %(name)s.stop();  // stop the sound (if longer than duration)\n"
-                    "  %(name)s.status = PsychoJS.Status.FINISHED;\n"
-                    "}\n")
+                    "}\n"
+                    "%(name)s.status = PsychoJS.Status.FINISHED;\n")
             buff.writeIndentedLines(code % self.params)
             # because of the 'if' statement of the time test
             buff.setIndentLevel(-1, relative=True)

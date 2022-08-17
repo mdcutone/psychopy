@@ -8,35 +8,33 @@
 py.test fixtures to create an instance of PsychoPyApp for testing
 """
 
-from __future__ import print_function
 import pytest
-from packaging import version
-from psychopy.app import psychopyApp
-from psychopy.app._psychopyApp import PsychoPyApp
+from pkg_resources import parse_version
+import psychopy.app as app
 from PIL import Image
 Image.DEBUG = False
 
-if version.parse(pytest.__version__) > version.parse('5'):
-    # this method seems to work on at least Pytest 5.4+
-    @pytest.fixture(scope='session', autouse=True)
-    def app_fixture():
-        # set_up
-        psychopyApp._called_from_test = True
-        psychopyApp._app = PsychoPyApp(testMode=True, showSplash=False)
+if parse_version(pytest.__version__) < parse_version('5'):
+    class VersionError(Exception):
+        pass
+    raise VersionError("PsychoPy test suite requires pytest>=5.4")
 
-        # yield, to let all tests within the scope run
-        yield
 
-        # teasr_down: then clear table at the end of the scope
-        psychopyApp._app.quit()
-else:
-    # this method seems to work on Pytest 4.6.4 and the above does not
-    def pytest_configure():
-        psychopyApp._called_from_test = True
-        psychopyApp._app = PsychoPyApp(testMode=True, showSplash=False)
+# this method seems to work on at least Pytest 5.4+
+@pytest.mark.needs_wx
+@pytest.fixture(scope='session')
+def get_app(request):
 
-    def pytest_unconfigure():
-        psychopyApp._app.quit()
+    # set_up
+    app.startApp(showSplash=False, testMode=True)
+
+    # yield, to let all tests within the scope run
+    _app = app.getAppInstance()
+    yield _app
+
+    # teasr_down: then clear table at the end of the scope
+    app.quitApp()
+
 
 
 if __name__ == '__main__':

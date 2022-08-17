@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
-from __future__ import absolute_import, print_function
-
 import json
-from builtins import str
+import sys
+from pathlib import Path
+
 import wx
 import wx.propgrid as pg
 import wx.py
@@ -12,6 +11,7 @@ import platform
 import re
 import os
 
+from psychopy.app.themes import icons
 from . import dialogs
 from psychopy import localization, prefs
 from psychopy.localization import _translate
@@ -48,6 +48,8 @@ _localized = {
     'shutdownKeyModifiers': _translate("shutdown key modifier keys"),
     'gammaErrorPolicy': _translate("gammaErrorPolicy"),
     'startUpPlugins': _translate("start up plugins"),
+    'appKeyGoogleCloud':_translate('appKeyGoogleCloud'),
+    'transcrKeyAzure':_translate('transcrKeyAzure'),
     # pref labels in App section
     'showStartupTips': _translate("show start-up tips"),
     'defaultView': _translate("default view"),
@@ -62,12 +64,14 @@ _localized = {
     'codeComponentLanguage': _translate('Code component language'),
     'unclutteredNamespace': _translate('uncluttered namespace'),
     'componentsFolders': _translate('components folders'),
+    'componentFilter':_translate('componentFilter'),
     'hiddenComponents': _translate('hidden components'),
     'unpackedDemosDir': _translate('unpacked demos dir'),
     'savedDataFolder': _translate('saved data folder'),
     'builderLayout': _translate('Builder layout'),
     'alwaysShowReadme': _translate('always show readme'),
     'maxFavorites': _translate('max favorites'),
+    'confirmRoutineClose': _translate('confirmRoutineClose'),
     # pref labels in Coder section
     'readonly': _translate('read-only'),
     'outputFont': _translate('output font'),
@@ -255,7 +259,7 @@ class PrefPropGrid(wx.Panel):
             if s not in self.sections.keys():
                 self.sections[s] = dict()
 
-        nbBitmap = self.app.iconCache.getBitmap(bitmap)
+        nbBitmap = icons.ButtonIcon(stem=bitmap, size=(48, 48)).bitmap
         if nbBitmap.IsOk():
             self.prefsImages.Add(nbBitmap)
 
@@ -325,8 +329,9 @@ class PrefPropGrid(wx.Panel):
         if section not in self.sections.keys():
             self.sections[section] = []
 
-        self.sections[section].update(
-            {name: wx.propgrid.FileProperty(label, name, value)})
+        prop = wx.propgrid.FileProperty(label, name, value)
+        self.sections[section].update({name: prop})
+        prop.SetAttribute(wx.propgrid.PG_FILE_SHOW_FULL_PATH, True)
 
         self.helpText[name] = helpText
 
@@ -471,18 +476,18 @@ class PreferencesDlg(wx.Dialog):
         # add property pages to the manager
         self.proPrefs.addPage(
             'General', 'general', ['general'],
-            'preferences-general48.png')
+            'preferences-general')
         self.proPrefs.addPage(
             'Application', 'app', ['app', 'builder', 'coder'],
-            'preferences-app48.png')
+            'preferences-app')
         self.proPrefs.addPage(
             'Key Bindings', 'keyBindings', ['keyBindings'],
-            'preferences-keyboard48.png')
+            'preferences-keyboard')
         self.proPrefs.addPage(
-            'Hardware', 'hardware', ['hardware'], 'preferences-hardware48.png')
+            'Hardware', 'hardware', ['hardware'], 'preferences-hardware')
         self.proPrefs.addPage(
             'Connections', 'connections', ['connections'],
-            'preferences-conn48.png')
+            'preferences-conn')
         self.proPrefs.populateGrid()
 
         sbPrefs.Add(self.proPrefs, 1, wx.EXPAND)
@@ -493,19 +498,30 @@ class PreferencesDlg(wx.Dialog):
         sbPrefs.Add(self.stlMain, 0, wx.EXPAND | wx.ALL, 5)
 
         # dialog controls, have builtin localization
-        sdbControls = wx.StdDialogButtonSizer()
+        sdbControls = wx.BoxSizer(wx.HORIZONTAL)
         self.sdbControlsHelp = wx.Button(self.pnlMain, wx.ID_HELP)
-        sdbControls.AddButton(self.sdbControlsHelp)
+        sdbControls.Add(self.sdbControlsHelp, 0,
+                        wx.LEFT | wx.ALL | wx.ALIGN_CENTER_VERTICAL,
+                        border=3)
+        sdbControls.AddStretchSpacer()
+        # Add Okay and Cancel buttons
         self.sdbControlsApply = wx.Button(self.pnlMain, wx.ID_APPLY)
-        sdbControls.AddButton(self.sdbControlsApply)
         self.sdbControlsOK = wx.Button(self.pnlMain, wx.ID_OK)
-        sdbControls.AddButton(self.sdbControlsOK)
         self.sdbControlsCancel = wx.Button(self.pnlMain, wx.ID_CANCEL)
-        sdbControls.AddButton(self.sdbControlsCancel)
-
-        sdbControls.Realize()
-
-        sbPrefs.Add(sdbControls, 0, wx.ALL | wx.ALIGN_RIGHT, 0)
+        if sys.platform == "win32":
+            btns = [self.sdbControlsOK, self.sdbControlsApply, self.sdbControlsCancel]
+        else:
+            btns = [self.sdbControlsCancel, self.sdbControlsApply, self.sdbControlsOK]
+        sdbControls.Add(btns[0], 0,
+                        wx.ALL | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
+                        border=3)
+        sdbControls.Add(btns[1], 0,
+                        wx.ALL | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
+                        border=3)
+        sdbControls.Add(btns[2], 0,
+                        wx.ALL | wx.RIGHT | wx.ALIGN_CENTER_VERTICAL,
+                        border=3)
+        sbPrefs.Add(sdbControls, flag=wx.ALL | wx.EXPAND, border=3)
 
         self.pnlMain.SetSizer(sbPrefs)
         self.pnlMain.Layout()
@@ -529,17 +545,8 @@ class PreferencesDlg(wx.Dialog):
         # valid themes
         themePath = self.GetTopLevelParent().app.prefs.paths['themes']
         self.themeList = []
-        for themeFile in os.listdir(themePath):
-            try:
-                # Load theme from json file
-                with open(os.path.join(themePath, themeFile), "rb") as fp:
-                    theme = json.load(fp)
-                # Add themes to list only if min spec is defined
-                base = theme['base']
-                if all(key in base for key in ['bg', 'fg', 'font']):
-                    self.themeList += [themeFile.replace('.json', '')]
-            except:
-                pass
+        for file in Path(themePath).glob("*.json"):
+            self.themeList.append(file.stem)
 
         # get sound devices for "audioDevice" property
         try:
@@ -608,11 +615,12 @@ class PreferencesDlg(wx.Dialog):
                         default = self.fontList.index(thisPref)
                     except ValueError:
                         default = 0
+                    labels = [_translate(font) for font in self.fontList]
                     self.proPrefs.addEnumItem(
                             sectionName,
                             pLabel,
                             prefName,
-                            labels=self.fontList,
+                            labels=labels,
                             values=[i for i in range(len(self.fontList))],
                             value=default, helpText=helpText)
                 elif prefName in ('theme',):
@@ -652,7 +660,7 @@ class PreferencesDlg(wx.Dialog):
                         sectionName, pLabel, prefName, thisPref,
                         helpText=helpText)
                 # single file
-                elif prefName in ('flac',):
+                elif prefName in ('flac', 'appKeyGoogleCloud',):
                     self.proPrefs.addFileItem(
                         sectionName, pLabel, prefName, thisPref,
                         helpText=helpText)
@@ -730,7 +738,7 @@ class PreferencesDlg(wx.Dialog):
                         item = self.proPrefs.sections[sectionName][prefName]
                         for i in range(len(item.GetChoices())):
                             choice = item.GetChoices()[i]
-                            icon = self.app.iconCache.getBitmap(choice.Text)
+                            icon = icons.ButtonIcon(stem=choice.Text).bitmap
                             choice.SetBitmap(icon)
                 # # lists are given a property that can edit and reorder items
                 elif thisSpec.startswith('list'):  # list
@@ -768,8 +776,7 @@ class PreferencesDlg(wx.Dialog):
                         self.fontList[thisPref]
                     continue
                 if prefName in ('theme',):
-                    self.prefsCfg[sectionName][prefName] = \
-                        self.themeList[thisPref]
+                    self.app.theme = self.prefsCfg[sectionName][prefName] = self.themeList[thisPref]
                     continue
                 elif prefName == 'audioDevice':
                     self.prefsCfg[sectionName][prefName] = \
@@ -842,8 +849,11 @@ class PreferencesDlg(wx.Dialog):
         # > sure, why not? - mdc
         self.populatePrefs()
 
+        # Update Builder window if needed
+        if self.app.builder:
+            self.app.builder.updateAllViews()
+
         # after validation, update the UI
-        self.app.theme = self.app.theme
         self.updateFramesUI()
 
     def updateFramesUI(self):
@@ -859,6 +869,10 @@ class PreferencesDlg(wx.Dialog):
                 for ii in range(frame.shelf.GetPageCount()):
                     doc = frame.shelf.GetPage(ii)
                     doc.theme = prefs.app['theme']
+
+                # apply console font, not handled by theme system ATM
+                if hasattr(frame, 'shell'):
+                    frame.shell.setFonts()
 
     def OnApplyClicked(self, event):
         """Apply button clicked, this makes changes to the UI without leaving

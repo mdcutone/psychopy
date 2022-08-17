@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-from __future__ import absolute_import, print_function
-from builtins import super  # provides Py3-style super() using python-future
+from pathlib import Path
 
-from os import path
-from psychopy.experiment.components import BaseVisualComponent, getInitVals, _translate
+from psychopy.experiment import Param
+from psychopy.experiment.components import getInitVals, _translate
+from psychopy.experiment.components.polygon import PolygonComponent
 from psychopy.localization import _localized as __localized
 _localized = __localized.copy()
 
@@ -17,26 +17,28 @@ __author__ = 'Jeremy Gray, Jon Peirce'
 # March 2011; builder-component for Yuri Spitsyn's visual.Aperture class
 # July 2011: jwp added the code for it to be enabled only when needed
 
-# the absolute path to the folder containing this path
-thisFolder = path.abspath(path.dirname(__file__))
-iconFile = path.join(thisFolder, 'aperture.png')
-tooltip = _translate('Aperture: restrict the drawing of stimuli to a given '
-                     'region')
 
-
-class ApertureComponent(BaseVisualComponent):
+class ApertureComponent(PolygonComponent):
     """An event class for using GL stencil to restrict the viewing area to a
     circle or square of a given size and position"""
 
+    categories = ['Stimuli']
+    targets = ['PsychoPy']
+    iconFile = Path(__file__).parent / 'aperture.png'
+    tooltip = _translate('Aperture: restrict the drawing of stimuli to a given '
+                         'region')
+
     def __init__(self, exp, parentName, name='aperture', units='norm',
-                 size=1, pos=(0, 0),
+                 size=1, pos=(0, 0), anchor="center", ori=0,
+                 shape='triangle', nVertices=4, vertices="",
                  startType='time (s)', startVal=0.0,
                  stopType='duration (s)', stopVal=1.0,
                  startEstim='', durationEstim=''):
         # initialise main parameters
         super(ApertureComponent, self).__init__(
             exp, parentName, name=name, units=units,
-            pos=pos, size=size,
+            pos=pos, size=size, ori=ori,
+            shape=shape, nVertices=nVertices, vertices=vertices,
             startType=startType, startVal=startVal,
             stopType=stopType, stopVal=stopVal,
             startEstim=startEstim, durationEstim=durationEstim)
@@ -48,33 +50,68 @@ class ApertureComponent(BaseVisualComponent):
         msg = _translate(
             "How big is the aperture? (a single number for diameter)")
         self.params['size'].hint = msg
+
+        self.params['anchor'] = Param(
+            anchor, valType='str', inputType="choice", categ='Layout',
+            allowedVals=['center',
+                         'top-center',
+                         'bottom-center',
+                         'center-left',
+                         'center-right',
+                         'top-left',
+                         'top-right',
+                         'bottom-left',
+                         'bottom-right',
+                         ],
+            updates='constant',
+            hint=_translate("Which point on the aperture should be anchored to its exact position?"),
+            label=_translate("Anchor"))
+
         # only localize hints and labels
         self.params['size'].label = _translate("Size")
         self.params['pos'].hint = _translate("Where is the aperture centred?")
 
-        # Remove BaseVisual params which are not needed
-        del self.params['ori']
-        del self.params['color']
+        # Remove Polygon params which are not needed
         del self.params['colorSpace']
         del self.params['fillColor']
-        del self.params['borderColor']
+        del self.params['lineColor']
+        del self.params['lineWidth']
+        del self.params['contrast']
         del self.params['opacity']
+        del self.params['interpolate']
 
     def writeInitCode(self, buff):
         # do writing of init
         inits = getInitVals(self.params)
 
-        # do we need units code?
+        # additional substitutions
         if self.params['units'].val == 'from exp settings':
-            unitsStr = ""
-        else:
-            unitsStr = f"units={inits['units']},"
+            inits['units'].val = None
 
-        code = (f"{inits['name']} = visual.Aperture(\n"
-                f"    win=win, name='{inits['name']}',\n"
-                f"    {unitsStr} size={inits['size']}, pos={inits['pos']})\n"
-                f"{inits['name']}.disable()  # disable until its actually used\n")
-        buff.writeIndentedLines(code)
+        if self.params['shape'] == 'regular polygon...':
+            inits['vertices'] = self.params['nVertices']
+        elif self.params['shape'] != 'custom polygon...':
+            inits['vertices'] = self.params['shape']
+
+        code = (
+            "%(name)s = visual.Aperture(\n"
+        )
+        buff.writeIndentedLines(code % inits)
+
+        buff.setIndentLevel(1, relative=True)
+        code = (
+                "win=win, name='%(name)s',\n"
+                "units=%(units)s, size=%(size)s, pos=%(pos)s, ori=%(ori)s,\n"
+                "shape=%(vertices)s, anchor=%(anchor)s\n"
+        )
+        buff.writeIndentedLines(code % inits)
+
+        buff.setIndentLevel(-1, relative=True)
+        code = (
+                ")\n"
+                "%(name)s.disable()  # disable until its actually used\n"
+        )
+        buff.writeIndentedLines(code % inits)
 
     def writeFrameCode(self, buff):
         """Only activate the aperture for the required frames

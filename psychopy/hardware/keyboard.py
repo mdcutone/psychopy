@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""To handle input from keyboard (supercedes event.getKeys)
+"""To handle input from keyboard (supersedes event.getKeys)
 
 
 The Keyboard class was new in PsychoPy 3.1 and replaces the older
@@ -55,26 +55,25 @@ Example usage
 """
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
-
-# 01/2011 modified by Dave Britton to get mouse event timing
 
 from __future__ import absolute_import, division, print_function
 
 from collections import deque
 import sys
 import copy
-
 import psychopy.core
 import psychopy.clock
 from psychopy import logging
 from psychopy.constants import NOT_STARTED
+import time
 
 try:
     import psychtoolbox as ptb
     from psychtoolbox import hid
     havePTB = True
+
 except ImportError as err:
     logging.warning(("Import Error: "
                      + err.args[0]
@@ -83,6 +82,22 @@ except ImportError as err:
     havePTB = False
 
 defaultBufferSize = 10000
+# default ptb flush_type, used by macOS & linux
+_ptb_flush_type = 1
+
+# monkey-patch bug in PTB keyboard where winHandle=0 is documented but crashes.
+# Also set ptb _ptb_flush_type to 0 for win32.
+if havePTB and sys.platform == 'win32':
+    from psychtoolbox import PsychHID
+    # make a new function where we set default win_handle to be None instead of 0
+    def _replacement_create_queue(self, num_slots=10000, flags=0, win_handle=None):
+        PsychHID('KbQueueCreate', self.device_number,
+                 None, 0, num_slots, flags, win_handle)
+    # replace the broken function with ours
+    hid.Keyboard._create_queue = _replacement_create_queue
+
+    # On win32, flush_type must be 0 or events can get flushed before being processed
+    _ptb_flush_type = 0
 
 
 def getKeyboards():
@@ -99,8 +114,10 @@ def getKeyboards():
         USB Info including with name, manufacturer, id, etc for each device
 
     """
-    indices, names, keyboards = hid.get_keyboard_indices()
-    return keyboards
+    if havePTB:
+        indices, names, keyboards = hid.get_keyboard_indices()
+        return keyboards
+    return []
 
 
 class Keyboard:
@@ -109,9 +126,12 @@ class Keyboard:
     systems.
 
     """
+    _backend = None
+    _iohubKeyboard = None
+    _iohubOffset = 0.0
+    _ptbOffset = 0.0
 
-    def __init__(self, device=-1, bufferSize=10000, waitForStart=False,
-                 clock=None):
+    def __init__(self, device=-1, bufferSize=10000, waitForStart=False, clock=None, backend=None):
         """Create the device (default keyboard or select one)
 
         Parameters
@@ -133,6 +153,18 @@ class Keyboard:
             setting this to True
 
         """
+        global havePTB
+
+        if self._backend is None and backend in ['iohub', 'ptb', 'event', '']:
+            Keyboard._backend = backend
+
+        if self._backend is None:
+            Keyboard._backend = ''
+
+        if backend and self._backend != backend:
+            logging.warning("keyboard.Keyboard already using '%s' backend. Can not switch to '%s'" % (self._backend,
+                                                                                                      backend))
+
         self.status = NOT_STARTED
         # Initiate containers for storing responses
         self.keys = []  # the key(s) pressed
@@ -145,13 +177,29 @@ class Keyboard:
         else:
             self.clock = psychopy.clock.Clock()
 
-        if havePTB:
+        if Keyboard._backend in ['', 'iohub']:
+            from psychopy.iohub.client import ioHubConnection
+            from psychopy.iohub.devices import Computer
+            if not ioHubConnection.getActiveConnection() and Keyboard._backend == 'iohub':
+                # iohub backend was explicitly requested, but iohub is not running, so start it up
+                # setting keyboard to use standard psychopy key mappings
+                from psychopy.iohub import launchHubServer
+                launchHubServer(Keyboard=dict(use_keymap='psychopy'))
+
+            if ioHubConnection.getActiveConnection() and Keyboard._iohubKeyboard is None:
+                Keyboard._iohubKeyboard = ioHubConnection.getActiveConnection().getDevice('keyboard')
+                Keyboard._iohubOffset = Computer.global_clock.getLastResetTime()
+                Keyboard._backend = 'iohub'
+
+        if Keyboard._backend in ['', 'ptb'] and havePTB:
+            Keyboard._backend = 'ptb'
+            Keyboard._ptbOffset = self.clock.getLastResetTime()
             # get the necessary keyboard buffer(s)
-            if sys.platform=='win32':
+            if sys.platform == 'win32':
                 self._ids = [-1]  # no indexing possible so get the combo keyboard
             else:
                 allInds, allNames, allKBs = hid.get_keyboard_indices()
-                if device==-1:
+                if device == -1:
                     self._ids = allInds
                 elif type(device) in [list, tuple]:
                     self._ids = device
@@ -162,27 +210,63 @@ class Keyboard:
             self._devs = {}
             for devId in self._ids:
                 # now we have a list of device IDs to monitor
-                if devId==-1 or devId in allInds:
+                if devId == -1 or devId in allInds:
                     buffer = _keyBuffers.getBuffer(devId, bufferSize)
                     self._buffers[devId] = buffer
                     self._devs[devId] = buffer.dev
 
-            
             # Is this right, waiting if waitForStart=False??
             if not waitForStart:
                 self.start()
 
+        if Keyboard._backend in ['', 'event']:
+            global event
+            from psychopy import event
+            Keyboard._backend = 'event'
+
+        logging.info('keyboard.Keyboard is using %s backend.' % Keyboard._backend)
+
+    @classmethod
+    def getBackend(self):
+        """Return backend being used."""
+        return self._backend
+
+    @classmethod
+    def setBackend(self, backend):
+        """
+        Set backend event handler. Returns currently active handler.
+
+        :param backend: 'iohub', 'ptb', 'event', or ''
+        :return: str
+        """
+        if self._backend is None:
+            if backend in ['iohub', 'ptb', 'event', '']:
+                Keyboard._backend = backend
+            else:
+                logging.warning("keyboard.Keyboard.setBackend failed. backend must be one of %s"
+                                % str(['iohub', 'ptb', 'event', '']))
+            if backend == 'event':
+                global event
+                from psychopy import event
+        else:
+            logging.warning("keyboard.Keyboard.setBackend already using '%s' backend. "
+                            "Can not switch to '%s'" % (self._backend, backend))
+
+        return self._backend
+
     def start(self):
         """Start recording from this keyboard """
-        for buffer in self._buffers.values():
-            buffer.start()
+        if Keyboard._backend == 'ptb':
+            for buffer in self._buffers.values():
+                buffer.start()
 
     def stop(self):
         """Start recording from this keyboard"""
-        logging.warning("Stopping key buffers but this could be dangerous if"
-                        "other keyboards rely on the same.")
-        for buffer in self._buffers.values():
-            buffer.stop()
+        if Keyboard._backend == 'ptb':
+            logging.warning("Stopping key buffers but this could be dangerous if"
+                            "other keyboards rely on the same.")
+            for buffer in self._buffers.values():
+                buffer.stop()
 
     def getKeys(self, keyList=None, waitRelease=True, clear=True):
         """
@@ -212,14 +296,56 @@ class Keyboard:
 
         """
         keys = []
-        if havePTB:
+        if Keyboard._backend == 'ptb':
             for buffer in self._buffers.values():
                 for origKey in buffer.getKeys(keyList, waitRelease, clear):
                     # calculate rt from time and self.timer
                     thisKey = copy.copy(origKey)  # don't alter the original
                     thisKey.rt = thisKey.tDown - self.clock.getLastResetTime()
+                    thisKey.tDown = thisKey.tDown - self._ptbOffset 
                     keys.append(thisKey)
-        else:
+        elif Keyboard._backend == 'iohub':
+            watchForKeys = keyList
+            if waitRelease:
+                key_events = Keyboard._iohubKeyboard.getReleases(keys=watchForKeys, clear=clear)
+            else:
+                key_events = []
+                released_press_evt_ids = []
+                all_key_events = Keyboard._iohubKeyboard.getKeys(keys=watchForKeys, clear=clear)
+                if all_key_events:
+                    all_key_events_ids = [k.id for k in all_key_events]
+                    all_key_events.reverse()
+                    for k in all_key_events:
+                        if hasattr(k, 'pressEventID'):
+                            if k.pressEventID in all_key_events_ids:
+                                # Only if press event also occurs,
+                                # use release key event so duration can be calculated.
+                                released_press_evt_ids.append(k.pressEventID)
+                                key_events.append(k)
+                        elif k.id not in released_press_evt_ids:
+                            # Add press key event as long as release key event has not already been
+                            # handled.
+                            key_events.append(k)
+
+                    key_events.reverse()
+
+            for k in key_events:
+                kname = k.key
+
+                if hasattr(k, 'duration'):
+                    tDown = k.time-k.duration
+                else:
+                    tDown = k.time
+
+                kpress = KeyPress(code=k.char, tDown=tDown, name=kname)
+                kpress.rt = kpress.tDown - self.clock.getLastResetTime() + Keyboard._iohubOffset
+                if hasattr(k, 'duration'):
+                    kpress.duration = k.duration
+
+
+                keys.append(kpress)
+        else:  # Keyboard.backend == 'event'
+            global event
             name = event.getKeys(keyList, modifiers=False, timeStamped=False)
             rt = self.clock.getTime()
             if len(name):
@@ -260,34 +386,29 @@ class Keyboard:
         if clear:
             self.clearEvents()
 
-        windows_list = psychopy.core.openWindows    
         while timer.getTime() < maxWait:
-            keys = self.getKeys(keyList=keyList, waitRelease=waitRelease,
-                                clear=clear)
+            keys = self.getKeys(keyList=keyList, waitRelease=waitRelease, clear=clear)
             if keys:
                 return keys
-            
-            #pump pyglet events of window will become unresponsive
-            #on windows
-            for winWeakRef in windows_list:
-                win = winWeakRef()
-                if (win.winType == "pyglet" and hasattr(win.winHandle,
-                                                        "dispatch_events")):
-                    win.winHandle.dispatch_events()  # pump events
-    
+            time.sleep(0.00001)
+
         logging.data('No keypress (maxWait exceeded)')
         return None
-    
+
     def clearEvents(self, eventType=None):
         """"""
-        if havePTB:
+        if Keyboard._backend == 'ptb':
             for buffer in self._buffers.values():
                 buffer.flush()  # flush the device events to the soft buffer
                 buffer._evts.clear()
                 buffer._keys.clear()
                 buffer._keysStillDown.clear()
+        elif Keyboard._backend == 'iohub':
+            Keyboard._iohubKeyboard.clearEvents()
         else:
+            global event
             event.clearEvents(eventType)
+
 
 class KeyPress(object):
     """Class to store key presses, as returned by `Keyboard.getKeys()`
@@ -316,11 +437,13 @@ class KeyPress(object):
 
     def __init__(self, code, tDown, name=None):
         self.code = code
-
-        if name is not None:  # we have event.getKeys()
+        self.tDown = tDown
+        self.duration = None
+        self.rt = None
+        if Keyboard._backend == 'event':  # we have event.getKeys()
             self.name = name
             self.rt = tDown
-        else:
+        elif Keyboard._backend == 'ptb':
             if code not in keyNames:
                 self.name = 'n/a'
                 logging.warning("Got keycode {} but that code isn't yet known")
@@ -331,9 +454,8 @@ class KeyPress(object):
                 self.name = 'unknown'
             else:
                 self.name = keyNames[code]
-            self.rt = None  # can only be assigned by the keyboard object on return
-        self.tDown = tDown
-        self.duration = None
+        elif Keyboard._backend == 'iohub':
+            self.name = name
 
     def __eq__(self, other):
         return self.name == other
@@ -365,7 +487,7 @@ class _KeyBuffers(dict):
                                   "System Preferences/Privacy/InputMonitoring "
                                   "(macOS >= 10.15).")
                 else:
-                    raise(e)
+                    raise (e)
 
         return self[kb_id]
 
@@ -395,7 +517,7 @@ class _KeyBuffer(object):
             self.dev = hid.Keyboard()  # a PTB keyboard object
         else:
             self.dev = hid.Keyboard(kb_id)  # a PTB keyboard object
-        self.dev._create_queue(bufferSize)
+        self.dev._create_queue(bufferSize, win_handle=None)
 
     def flush(self):
         """Flushes and processes events from the device to this software buffer
@@ -403,8 +525,7 @@ class _KeyBuffer(object):
         self._processEvts()
 
     def _flushEvts(self):
-        ptb.WaitSecs('YieldSecs', 0.00001)
-        while self.dev.flush():
+        while self.dev.flush(flush_type=_ptb_flush_type):
             evt, remaining = self.dev.queue_get_event()
             key = {}
             key['keycode'] = int(evt['Keycode'])
@@ -430,11 +551,12 @@ class _KeyBuffer(object):
         if not keyList and not waitRelease:
             keyPresses = list(self._keysStillDown)
             for k in list(self._keys):
-                if k not in keyPresses:
+                if not any(x.name == k.name and x.tDown == k.tDown  for x in keyPresses):
                     keyPresses.append(k)
             if clear:
                 self._keys = deque()
                 self._keysStillDown = deque()
+            keyPresses.sort(key=lambda x: x.tDown, reverse=False)
             return keyPresses
 
         # otherwise loop through and check each key
@@ -540,7 +662,7 @@ keyNamesMac = {
     74: 'home', 75: 'pageup', 76: 'delete', 77: 'end', 78: 'pagedown',
 }
 
-keyNamesLinux={
+keyNamesLinux = {
     66: 'space', 68: 'f1', 69: 'f2', 70: 'f3', 71: 'f4', 72: 'f5',
     73: 'f6', 74: 'f7', 75: 'f8', 76: 'f9', 77: 'f10', 96: 'f11', 97: 'f12',
     79: 'scrolllock', 153: 'scrolllock', 128: 'pause', 119: 'insert', 111: 'home',
@@ -557,8 +679,7 @@ keyNamesLinux={
     83: 'num_subtract', 80: 'num_7', 81: 'num_8', 82: 'num_9', 87: 'num_add', 84: 'num_4',
     85: 'num_5', 86: 'num_6', 88: 'num_1', 89: 'num_2', 90: 'num_3',
     105: 'num_enter', 91: 'num_0', 92: 'num_decimal', 10: 'escape'
-    }
-
+}
 
 if sys.platform == 'darwin':
     keyNames = keyNamesMac
@@ -566,12 +687,3 @@ elif sys.platform == 'win32':
     keyNames = keyNamesWin
 else:
     keyNames = keyNamesLinux
-
-# check if mac prefs are working
-macPrefsBad = False
-if sys.platform == 'darwin' and havePTB:
-    try:
-        Keyboard()
-    except OSError:
-        macPrefsBad = True
-        havePTB = False

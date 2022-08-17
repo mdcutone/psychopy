@@ -2,22 +2,15 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-from __future__ import absolute_import, print_function
-
-from os import path
-
-from psychopy.alerts import alerttools
+from pathlib import Path
+from psychopy.alerts import alerttools, alert
 from psychopy.experiment.components import BaseVisualComponent, Param, getInitVals, _translate
 from psychopy.localization import _localized as __localized
+from ..keyboard import KeyboardComponent
 _localized = __localized.copy()
-
-# the absolute path to the folder containing this path
-thisFolder = path.abspath(path.dirname(__file__))
-iconFile = path.join(thisFolder, 'textbox.png')
-tooltip = _translate('Textbox: present text stimuli but cooler')
 
 # only use _localized values for label values, nothing functional:
 _localized.update({'text': _translate('Text'),
@@ -44,14 +37,19 @@ class TextboxComponent(BaseVisualComponent):
     """
     categories = ['Stimuli', 'Responses']
     targets = ['PsychoPy', 'PsychoJS']
+    iconFile = Path(__file__).parent / 'textbox.png'
+    tooltip = _translate('Textbox: present text stimuli but cooler')
+    beta = True
+
     def __init__(self, exp, parentName, name='textbox',
                  # effectively just a display-value
                  text=_translate('Any text\n\nincluding line breaks'),
                  font='Open Sans', units='from exp settings', bold=False, italic=False,
                  color='white', colorSpace='rgb', opacity="",
-                 pos=(0, 0), size='', letterHeight=0.05, ori=0,
-                 lineSpacing=1.0, padding="",  # gap between box and text
-                 startType='time (s)', startVal=0.0, anchor='center',
+                 pos=(0, 0), size=(None, None), letterHeight=0.05, ori=0,
+                 anchor='center', alignment='center',
+                 lineSpacing=1.0, padding=0,  # gap between box and text
+                 startType='time (s)', startVal=0.0,
                  stopType='duration (s)', stopVal=1.0,
                  startEstim='', durationEstim='',
                  languageStyle='LTR', fillColor="None",
@@ -88,6 +86,7 @@ class TextboxComponent(BaseVisualComponent):
             text, valType='str', inputType="multi", allowedTypes=[], categ='Basic',
             updates='constant', allowedUpdates=_allow3[:],  # copy the list
             hint=_translate("The text to be displayed"),
+            canBePath=False,
             label=_localized['text'])
         self.params['font'] = Param(
             font, valType='str', inputType="single", allowedTypes=[], categ='Formatting',
@@ -150,8 +149,23 @@ class TextboxComponent(BaseVisualComponent):
                          'bottom-right',
                          ],
             updates='constant',
-            hint=_translate("Should text anchor to the top, center or bottom of the box?"),
-            label=_localized['anchor'])
+            hint=_translate("Which point on the stimulus should be anchored to its exact position?"),
+            label=_translate('Anchor'))
+        self.params['alignment'] = Param(
+            alignment, valType='str', inputType="choice", categ='Formatting',
+            allowedVals=['center',
+                         'top-center',
+                         'bottom-center',
+                         'center-left',
+                         'center-right',
+                         'top-left',
+                         'top-right',
+                         'bottom-left',
+                         'bottom-right',
+                         ],
+            updates='constant',
+            hint=_translate("How should text be laid out within the box?"),
+            label=_translate("Alignment"))
         self.params['borderWidth'] = Param(
             borderWidth, valType='num', inputType="single", allowedTypes=[], categ='Appearance',
             updates='constant', allowedUpdates=_allow3[:],
@@ -188,10 +202,10 @@ class TextboxComponent(BaseVisualComponent):
             "     opacity=%(opacity)s,\n"
             "     bold=%(bold)s, italic=%(italic)s,\n"
             "     lineSpacing=%(lineSpacing)s,\n"
-            "     padding=%(padding)s,\n"
+            "     padding=%(padding)s, alignment=%(alignment)s,\n"
             "     anchor=%(anchor)s,\n"
             "     fillColor=%(fillColor)s, borderColor=%(borderColor)s,\n"
-            "     flipHoriz=%(flipHoriz)s, flipVert=%(flipVert)s,\n"
+            "     flipHoriz=%(flipHoriz)s, flipVert=%(flipVert)s, languageStyle=%(languageStyle)s,\n"
             "     editable=%(editable)s,\n"
             "     name='%(name)s',\n"
             "     autoLog=%(autoLog)s,\n"
@@ -225,9 +239,11 @@ class TextboxComponent(BaseVisualComponent):
                 "  size: %(size)s," + unitsStr +
                 "  color: %(color)s, colorSpace: %(colorSpace)s,\n"
                 "  fillColor: %(fillColor)s, borderColor: %(borderColor)s,\n"
+                "  languageStyle: %(languageStyle)s,\n"
                 "  bold: %(bold)s, italic: %(italic)s,\n"
                 "  opacity: %(opacity)s,\n"
                 "  padding: %(padding)s,\n"
+                "  alignment: %(alignment)s,\n"
                 "  editable: %(editable)s,\n"
                 "  multiline: true,\n"
                 "  anchor: %(anchor)s,\n")
@@ -239,6 +255,38 @@ class TextboxComponent(BaseVisualComponent):
         buff.writeIndentedLines(code)
         depth = -self.getPosInRoutine()
 
+    def writeRoutineStartCode(self, buff):
+        # Give alert if in the same routine as a Keyboard component
+        if self.params['editable'].val:
+            routine = self.exp.routines[self.parentName]
+            for sibling in routine:
+                if isinstance(sibling, KeyboardComponent):
+                    alert(4405, strFields={'textbox': self.params['name'], 'keyboard': sibling.params['name']})
+
+        code = (
+            "%(name)s.reset()"
+        )
+        buff.writeIndentedLines(code % self.params)
+        BaseVisualComponent.writeRoutineStartCode(self, buff)
+
+    def writeRoutineStartCodeJS(self, buff):
+        if self.params['editable']:
+            # replaces variable params with sensible defaults
+            inits = getInitVals(self.params, 'PsychoJS')
+            # check for NoneTypes
+            for param in inits:
+                if inits[param] in [None, 'None', '']:
+                    inits[param].val = 'undefined'
+                    if param == 'text':
+                        inits[param].val = ""
+
+            code = (
+                "%(name)s.setText(%(text)s);\n"
+                "%(name)s.refresh();\n"
+            )
+            buff.writeIndentedLines(code % inits)
+        BaseVisualComponent.writeRoutineStartCodeJS(self, buff)
+
     def writeRoutineEndCode(self, buff):
         name = self.params['name']
         if len(self.exp.flow._loopList):
@@ -246,19 +294,18 @@ class TextboxComponent(BaseVisualComponent):
         else:
             currLoop = self.exp._expHandler
         if self.params['editable']:
-            buff.writeIndentedLines(f"{currLoop.params['name']}.addData('{name}.text',{name}.text)\n"
-                               f"{name}.reset()\n")
+            buff.writeIndentedLines(f"{currLoop.params['name']}.addData('{name}.text',{name}.text)\n")
         # get parent to write code too (e.g. store onset/offset times)
         super().writeRoutineEndCode(buff)
 
     def writeRoutineEndCodeJS(self, buff):
+        name = self.params['name']
         if len(self.exp.flow._loopList):
             currLoop = self.exp.flow._loopList[-1]  # last (outer-most) loop
         else:
             currLoop = self.exp._expHandler
         if self.params['editable']:
-            buff.writeIndented("psychoJS.experiment.addData('%(name)s.text', %(name)s.text);\n" %
-                               self.params)
+            buff.writeIndentedLines(f"psychoJS.experiment.addData('{name}.text',{name}.text)\n")
         # get parent to write code too (e.g. store onset/offset times)
         super().writeRoutineEndCodeJS(buff)
 

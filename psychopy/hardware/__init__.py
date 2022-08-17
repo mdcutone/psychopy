@@ -1,22 +1,18 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from __future__ import absolute_import, print_function
-
-from builtins import map
-from builtins import range
-from past.builtins import basestring
 import sys
 import glob
 from itertools import chain
 from psychopy import logging
+from . import eyetracker
 
 try:
     from collections.abc import Iterable
 except ImportError:
     from collections import Iterable
 
-__all__ = ['forp', 'cedrus', 'minolta', 'pr', 'crs', 'iolab']
+__all__ = ['forp', 'cedrus', 'minolta', 'gammasci', 'pr', 'crs', 'iolab', 'eyetracker']
 
 
 def getSerialPorts():
@@ -74,10 +70,10 @@ def getAllPhotometers():
     :returns:
     A list of all photometer classes
     """
-    from . import minolta, pr
+    from . import minolta, pr, gammasci
     from . import crs
 
-    photometers = [pr.PR650, pr.PR655, minolta.LS100]
+    photometers = [pr.PR650, pr.PR655, minolta.CS100A, minolta.LS100, gammasci.S470]
     if hasattr(crs, "ColorCAL"):
         photometers.append(crs.ColorCAL)
 
@@ -119,8 +115,8 @@ def findPhotometer(ports=None, device=None):
             then PsychoPy will sweep COM0-10 on win32 and search known
             likely port names on macOS and Linux.
 
-        device : string giving expected device (e.g. 'PR650', 'PR655',
-            'LS100', 'LS110'). If this is not given then an attempt will be made
+        device : string giving expected device (e.g. 'PR650', 'PR655', 'CS100A',
+            'LS100', 'LS110', 'S470'). If this is not given then an attempt will be made
             to find a device of any type, but this often fails
 
     :returns:
@@ -140,13 +136,13 @@ def findPhotometer(ports=None, device=None):
             print(photom.getSpectrum())
 
     """
-    if isinstance(device, basestring):
+    if isinstance(device, str):
         photometers = [getPhotometerByName(device)]
     elif isinstance(device, Iterable):
         # if we find a string assume it is a name, otherwise treat it like a
         # photometer
         photometers = [getPhotometerByName(d)
-                       if isinstance(d, basestring) else d
+                       if isinstance(d, str) else d
                        for d in device]
     else:
         photometers = getAllPhotometers()
@@ -154,7 +150,7 @@ def findPhotometer(ports=None, device=None):
     # determine candidate ports
     if ports is None:
         ports = getSerialPorts()
-    elif type(ports) in (int, float) or isinstance(ports, basestring):
+    elif type(ports) in (int, float, str):
         ports = [ports]  # so that we can iterate
 
     # go through each port in turn

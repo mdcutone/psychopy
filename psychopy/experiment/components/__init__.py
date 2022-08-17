@@ -2,16 +2,13 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 """Extensible set of components for the PsychoPy Builder view
 """
 
-from __future__ import absolute_import, print_function
-
-from builtins import str
-from past.builtins import basestring
+import sys
 import os
 import glob
 import copy
@@ -22,9 +19,10 @@ from ._base import BaseVisualComponent, BaseComponent
 from ..params import Param
 from psychopy.localization import _translate
 from psychopy.experiment import py2js
+import psychopy.logging as logging
 
-excludeComponents = ['BaseComponent', 'BaseVisualComponent',  # templates only
-                     'EyetrackerComponent']  # this one isn't ready yet
+excludeComponents = ['BaseComponent', 'BaseVisualComponent', 'BaseStandaloneRoutine'  # templates only
+                     ]  # this one isn't ready yet
 
 pluginComponents = {}  # components registered by loaded plugins
 
@@ -41,12 +39,16 @@ for filename in pycFiles:
 
 def getAllCategories(folderList=()):
     allComps = getAllComponents(folderList)
-    allCats = ['Stimuli', 'Responses', 'Custom']
+    # Hardcode some categories to always appear first/last
+    firstCats = ['Favorites', 'Stimuli', 'Responses', 'Custom']
+    lastCats = ['I/O', 'Other']
+    # Start getting categories
+    allCats = firstCats
     for name, thisComp in list(allComps.items()):
         for thisCat in thisComp.categories:
-            if thisCat not in allCats:
+            if thisCat not in allCats + lastCats:
                 allCats.append(thisCat)
-    return allCats
+    return allCats + lastCats
 
 
 def getAllComponents(folderList=(), fetchIcons=True):
@@ -54,7 +56,7 @@ def getAllComponents(folderList=(), fetchIcons=True):
     as all folders in the folderlist.
     User-defined components will override built-ins with the same name.
     """
-    if isinstance(folderList, basestring):
+    if isinstance(folderList, str):
         raise TypeError('folderList should be iterable, not a string')
     components = getComponents(fetchIcons=fetchIcons)  # get the built-ins
     for folder in folderList:
@@ -126,8 +128,9 @@ def getComponents(folder=None, fetchIcons=True):
                     if f.startswith('_'):
                         continue
                     shutil.copy(f, folder)
-    if not pth in os.sys.path:
-        os.sys.path.insert(0, pth)
+
+    if pth not in sys.path:
+        sys.path.insert(0, pth)
 
     components = {}
 
@@ -144,7 +147,6 @@ def getComponents(folder=None, fetchIcons=True):
         # module = imp.load_source(file[:-3], fullPath)
         # v1.83.00 used exec(implicit-relative), no go for python3:
         # exec('import %s as module' % file[:-3])
-
         # importlib.import_module eases 2.7 -> 3.x migration
         if cmpfile.endswith('.py'):
             explicit_rel_path = pkg + '.' + cmpfile[:-3]
@@ -153,7 +155,11 @@ def getComponents(folder=None, fetchIcons=True):
         try:
             module = import_module(explicit_rel_path, package=pkg)
         except ImportError:
+            logging.error(
+                'Failed to load component package `{}`. Does it have a '
+                '`__init__.py`?'.format(cmpfile))
             continue  # not a valid module (no __init__.py?)
+            
         # check for orphaned pyc files (__file__ is not a .py file)
         if hasattr(module, '__file__'):
             if not module.__file__:
@@ -181,13 +187,12 @@ def getComponents(folder=None, fetchIcons=True):
 
                 if hasattr(module, 'tooltip'):
                     tooltips[name] = module.tooltip
-                if hasattr(module, 'iconFile'):
-                    iconFiles[name] = module.iconFile
+                if hasattr(components[attrib], 'iconFile'):
+                    iconFiles[name] = components[attrib].iconFile
                 # assign the module categories to the Component
                 if not hasattr(components[attrib], 'categories'):
                     components[attrib].categories = ['Custom']
     return components
-
 
 
 def getInitVals(params, target="PsychoPy"):
@@ -195,6 +200,15 @@ def getInitVals(params, target="PsychoPy"):
     __init__ of a stimulus object, avoiding using a variable name if possible
     """
     inits = copy.deepcopy(params)
+    # Alias units = from exp settings with None
+    if 'units' in inits and str(inits['units'].val).lower() in (
+            "from experiment settings",
+            "from exp settings",
+            "none"
+    ):
+        inits['units'].val = "win.units"
+        inits['units'].valType = 'code'
+
     for name in params:
         if target == "PsychoJS":
             # convert (0,0.5) to [0,0.5] but don't convert "rand()" to "rand[]" and don't convert text
@@ -259,7 +273,7 @@ def getInitVals(params, target="PsychoPy"):
             inits[name].val = "norm"
             inits[name].valType = 'str'
         elif name == 'text':
-            inits[name].val = "default text"
+            inits[name].val = ""
             inits[name].valType = 'str'
         elif name == 'flip':
             inits[name].val = ""
@@ -279,14 +293,20 @@ def getInitVals(params, target="PsychoPy"):
         elif name == 'noiseType':
             inits[name].val = 'Binary'
             inits[name].valType = 'str'
-        elif name == 'marker_label':
+        elif name == 'emotiv_marker_label':
             inits[name].val = 'Label'
             inits[name].valType = 'str'
-        elif name == 'marker_value':
+        elif name == 'emotiv_marker_value':
             inits[name].val = 'Value'
             inits[name].valType = 'str'
         elif name == 'buttonRequired':
             inits[name].val = "True"
+            inits[name].valType = 'code'
+        elif name == 'vertices':
+            inits[name].val = "[[-0.5,-0.5], [-0.5, 0.5], [0.5, 0.5], [0.5, -0.5]]"
+            inits[name].valType = 'code'
+        elif name == 'movie':
+            inits[name].val = 'None'
             inits[name].valType = 'code'
         else:
             print("I don't know the appropriate default value for a '%s' "

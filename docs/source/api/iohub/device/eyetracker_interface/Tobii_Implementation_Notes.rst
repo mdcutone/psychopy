@@ -22,7 +22,7 @@ Additional Software Requirements
 #################################
 
 To use the ioHub interface for Tobii, the Tobi Pro SDK must be installed
-in your Python environment. If a recent standalone installation of PsychoPy3,
+in your Python environment. If a recent standalone installation of |PsychoPy|,
 this package should already be included. 
 
 To install tobii-research type::
@@ -42,7 +42,7 @@ tobii_research provides real-time access to binocular sample data.
 
 The following fields of the ioHub BinocularEyeSample event are supported:
 
-.. autoclass:: psychopy.iohub.devices.eyetracker.BinocularEyeSampleEvent(object)
+.. autoclass:: psychopy.iohub.devices.eyetracker.BinocularEyeSampleEvent
 
     .. attribute:: time
 

@@ -16,16 +16,20 @@ some more added:
 
 """
 import numpy as np
+from arabic_reshaper import ArabicReshaper
 from pyglet import gl
+from bidi import algorithm as bidi
 
-from ..basevisual import BaseVisualStim, ColorMixin, ContainerMixin
+from ..basevisual import BaseVisualStim, ColorMixin, ContainerMixin, WindowMixin
 from psychopy.tools.attributetools import attributeSetter, setAttribute
 from psychopy.tools.arraytools import val2array
 from psychopy.tools.monitorunittools import convertToPix
 from .fontmanager import FontManager, GLFont
 from .. import shaders
 from ..rect import Rect
-from ... import core
+from ... import core, alerts, layout
+
+from psychopy.tools.linebreak import get_breakable_points, break_units
 
 allFonts = FontManager()
 
@@ -43,34 +47,20 @@ codes = {'BOLD_START': u'\uE100',
          'ITAL_START': u'\uE102',
          'ITAL_END': u'\uE103'}
 
-defaultLetterHeight = {'cm': 1.0,
-                       'deg': 1.0,
-                       'degs': 1.0,
-                       'degFlatPos': 1.0,
-                       'degFlat': 1.0,
-                       'norm': 0.1,
-                       'height': 0.2,
-                       'pix': 20,
-                       'pixels': 20}
-
-defaultBoxWidth = {'cm': 15.0,
-                   'deg': 15.0,
-                   'degs': 15.0,
-                   'degFlatPos': 15.0,
-                   'degFlat': 15.0,
-                   'norm': 1,
-                   'height': 1,
-                   'pix': 500,
-                   'pixels': 500}
-
 wordBreaks = " -\n"  # what about ",."?
+
 
 END_OF_THIS_LINE = 983349843
 
+# Setting debug to True will make the sub-elements on TextBox2 to be outlined in red, making it easier to determine their position
+debug = False
+
 # If text is ". " we don't want to start next line with single space?
 
+
 class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
-    def __init__(self, win, text, font,
+    def __init__(self, win, text,
+                 font="Open Sans",
                  pos=(0, 0), units=None, letterHeight=None,
                  size=None,
                  color=(1.0, 1.0, 1.0), colorSpace='rgb',
@@ -80,15 +70,18 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
                  opacity=None,
                  bold=False,
                  italic=False,
-                 lineSpacing=1.0,
+                 lineSpacing=None,
                  padding=None,  # gap between box and text
                  anchor='center',
                  alignment='left',
                  flipHoriz=False,
                  flipVert=False,
+                 languageStyle="LTR",
                  editable=False,
+                 lineBreaking='default',
                  name='',
                  autoLog=None,
+                 autoDraw=False,
                  onTextCallback=None):
         """
 
@@ -120,6 +113,9 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
         flipHoriz
         flipVert
         editable
+        lineBreaking: Specifying 'default', text will be broken at a set of
+            characters defined in the module. Specifying 'uax14', text will be
+            broken in accordance with UAX#14 (Unicode Line Breaking Algorithm).
         name
         autoLog
         """
@@ -130,36 +126,59 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
         ColorMixin.foreColor.fset(self, color)  # Have to call the superclass directly on init as text has not been set
         self.onTextCallback = onTextCallback
 
-        if units=='norm':
-            raise NotImplementedError("TextBox2 doesn't support 'norm' units "
-                                 "at the moment. Use 'height' units instead")
-        # first set params needed to create font (letter sizes etc)
-        if letterHeight is None:
-            self.letterHeight = defaultLetterHeight[self.units]
-        else:
-            self.letterHeight = letterHeight
+        # Box around the whole textbox - drawn
+        self.box = Rect(
+            win,
+            units=self.units, pos=(0, 0), size=(0, 0),  # set later by self.size and self.pos
+            colorSpace=colorSpace, lineColor=borderColor, fillColor=fillColor,
+            lineWidth=borderWidth,
+            opacity=self.opacity,
+            autoLog=False,
+        )
+        # Box around just the content area, excluding padding - not drawn
+        self.contentBox = Rect(
+            win,
+            units=self.units, pos=(0, 0), size=(0, 0),  # set later by self.size and self.pos
+            colorSpace=colorSpace, lineColor='red', fillColor=None,
+            lineWidth=1, opacity=int(debug),
+            autoLog=False
+        )
+        # Box around current content, wrapped tight - not drawn
+        self.boundingBox = Rect(
+            win,
+            units='pix', pos=(0, 0), size=(0, 0),  # set later by self.size and self.pos
+            colorSpace=colorSpace, lineColor='blue', fillColor=None,
+            lineWidth=1, opacity=int(debug),
+            autoLog=False
+        )
+        # Sizing params
+        self.letterHeight = letterHeight
+        self.padding = padding
+        self.size = size
+        self.pos = pos
+
         # self._pixLetterHeight helps get font size right but not final layout
         if 'deg' in self.units:  # treat deg, degFlat or degFlatPos the same
             scaleUnits = 'deg'  # scale units are just for font resolution
         else:
             scaleUnits = self.units
-        self._pixLetterHeight = convertToPix(
-                self.letterHeight, pos=0, units=scaleUnits, win=self.win)
-        if isinstance(self._pixLetterHeight, np.ndarray):
-            # If pixLetterHeight is an array, take the Height value
-            self._pixLetterHeight = self._pixLetterHeight[1]
-        self._pixelScaling = self._pixLetterHeight / self.letterHeight
-        if size is None:
-            size = [defaultBoxWidth[self.units], None]
-        self.size = size  # but this will be updated later to actual size
+        self._pixelScaling = self.letterHeightPix / self.letterHeight
         self.bold = bold
         self.italic = italic
-        self.lineSpacing = lineSpacing
-        if padding is None:
-            padding = self.letterHeight / 2.0
-        self.padding = padding
         self.glFont = None  # will be set by the self.font attribute setter
         self.font = font
+        if lineSpacing is not None:
+            self.lineSpacing = lineSpacing
+        # If font not found, default to Open Sans Regular and raise alert
+        if not self.glFont:
+            alerts.alert(4325, self, {
+                'font': font,
+                'weight': 'bold' if self.bold is True else 'regular' if self.bold is False else self.bold,
+                'style': 'italic' if self.italic else '',
+                'name': self.name})
+            self.bold = False
+            self.italic = False
+            self.font = "Open Sans"
 
         # once font is set up we can set the shader (depends on rgb/a of font)
         if self.glFont.atlas.format == 'rgb':
@@ -187,54 +206,78 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
         self.alignment = alignment
 
         # box border and fill
-        w, h = self.size
         self.borderWidth = borderWidth
         self.borderColor = borderColor
         self.fillColor = fillColor
         self.contrast = contrast
         self.opacity = opacity
 
-        self.box = Rect(
-                win, pos=self.pos,
-                units=self.units,
-                lineWidth=borderWidth, lineColor=borderColor,
-                fillColor=fillColor, opacity=self.opacity,
-                autoLog=False, fillColorSpace=self.colorSpace)
-        # also bounding box (not normally drawn but gives tight box around chrs)
-        self.boundingBox = Rect(
-                win, pos=self.pos,
-                units=self.units,
-                lineWidth=1, lineColor=None, fillColor=fillColor, opacity=0.1,
-                autoLog=False)
+        # set linebraking option
+        if lineBreaking not in ('default', 'uax14'):
+            raise ValueError("Unknown lineBreaking option ({}) is"
+                "specified.".format(lineBreaking))
+        self._lineBreaking = lineBreaking
         # then layout the text (setting text triggers _layout())
-        self.startText = text
+        self.languageStyle = languageStyle
         self._text = ''
-        self.text = text if text is not None else ""
+        self.text = self.placeholder = text if text is not None else ""
+
+        # Initialise arabic reshaper
+        arabic_config = {'delete_harakat': False,  # if present, retain any diacritics
+                         'shift_harakat_position': False}  # shift by 1 to be compatible with the bidi algorithm
+        self.arabicReshaper = ArabicReshaper(configuration=arabic_config)
 
         # caret
-        self._editable = editable
-        self.caret = Caret(self, color=self.color, width=5)
+        self.editable = editable
+        self.caret = Caret(self, color=self.color, width=2)
 
-
+        self.autoDraw = autoDraw
         self.autoLog = autoLog
+
+    def __copy__(self):
+        return TextBox2(
+            self.win, self.text, self.font,
+            pos=self.pos, units=self.units, letterHeight=self.letterHeight,
+            size=self.size,
+            color=self.color, colorSpace=self.colorSpace,
+            fillColor=self.fillColor,
+            borderWidth=self.borderWidth, borderColor=self.borderColor,
+            contrast=self.contrast,
+            opacity=self.opacity,
+            bold=self.bold,
+            italic=self.italic,
+            lineSpacing=self.lineSpacing,
+            padding=self.padding,  # gap between box and text
+            anchor=self.anchor,
+            alignment=self.alignment,
+            flipHoriz=self.flipHoriz,
+            flipVert=self.flipVert,
+            editable=self.editable,
+            lineBreaking=self._lineBreaking,
+            name=self.name,
+            autoLog=self.autoLog,
+            onTextCallback=self.onTextCallback
+        )
 
     @property
     def editable(self):
+        """Determines whether or not the TextBox2 instance can receive typed text"""
         return self._editable
     
     @editable.setter
     def editable(self, editable):
         self._editable = editable
-        if editable is False and self.hasFocus:
+        if editable is False:
             if self.win:
                 self.win.removeEditable(self)
         if editable is True:
             if self.win:
                 self.win.addEditable(self)
-        
+
     @property
-    def pallette(self):
-        self._pallette = {
+    def palette(self):
+        """Describes the current visual properties of the TextBox in a dict"""
+        self._palette = {
             False: {
                 'lineColor': self._borderColor,
                 'lineWidth': self.borderWidth,
@@ -246,11 +289,34 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
                 'fillColor': self._fillColor+0.1
             }
         }
-        return self._pallette[self.hasFocus]
+        return self._palette[self.hasFocus]
+
+    @property
+    def pallette(self):  # deprecated, use palette instead
+        self._palette = {
+            False: {
+                'lineColor': self._borderColor,
+                'lineWidth': self.borderWidth,
+                'fillColor': self._fillColor
+            },
+            True: {
+                'lineColor': self._borderColor-0.1,
+                'lineWidth': self.borderWidth+1,
+                'fillColor': self._fillColor+0.1
+            }
+        }
+        return self._palette[self.hasFocus]
+
+    @palette.setter
+    def pallette(self, value):
+        self._palette = {
+            False: value,
+            True: value
+        }
 
     @pallette.setter
-    def pallette(self, value):
-        self._pallette = {
+    def pallette(self, value):  # deprecated, use palette instead
+        self._palette = {
             False: value,
             True: value
         }
@@ -262,6 +328,8 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
     def foreColor(self, value):
         ColorMixin.foreColor.fset(self, value)
         self._layout()
+        if hasattr(self, "foreColor") and hasattr(self, 'caret'):
+            self.caret.color = self._foreColor
 
     @attributeSetter
     def font(self, fontName, italic=False, bold=False):
@@ -272,12 +340,158 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
             self.__dict__['font'] = fontName
             self.glFont = allFonts.getFont(
                     fontName,
-                    size=int(round(self._pixLetterHeight)),
+                    size=self.letterHeightPix,
                     bold=self.bold, italic=self.italic)
+
+    @property
+    def units(self):
+        return WindowMixin.units.fget(self)
+
+    @units.setter
+    def units(self, value):
+        WindowMixin.units.fset(self, value)
+        if hasattr(self, "box"):
+            self.box.units = value
+        if hasattr(self, "contentBox"):
+            self.contentBox.units = value
+        if hasattr(self, "caret"):
+            self.caret.units = value
+
+    @property
+    def size(self):
+        """The (requested) size of the TextBox (w,h) in whatever units the stimulus is using
+
+        This determines the outer extent of the area.
+
+        If the width is set to None then the text will continue extending and not wrap.
+        If the height is set to None then the text will continue to grow downwards as needed.
+        """
+        return WindowMixin.size.fget(self)
+
+    @size.setter
+    def size(self, value):
+        WindowMixin.size.fset(self, value)
+        if hasattr(self, "box"):
+            self.box.size = self._size
+        if hasattr(self, "contentBox"):
+            self.contentBox.size = self._size - self._padding * 2
+        # Refresh pos
+        self.pos = self.pos
+
+    @property
+    def pos(self):
+        """The position of the center of the TextBox in the stimulus
+        :ref:`units <units>`
+
+        `value` should be an :ref:`x,y-pair <attrib-xy>`.
+        :ref:`Operations <attrib-operations>` are also supported.
+
+        Example::
+
+            stim.pos = (0.5, 0)  # Set slightly to the right of center
+            stim.pos += (0.5, -1)  # Increment pos rightwards and upwards.
+                Is now (1.0, -1.0)
+            stim.pos *= 0.2  # Move stim towards the center.
+                Is now (0.2, -0.2)
+
+        Tip: If you need the position of stim in pixels, you can obtain
+        it like this:
+
+            myTextbox._pos.pix
+        """
+        return WindowMixin.pos.fget(self)
+
+    @pos.setter
+    def pos(self, value):
+        WindowMixin.pos.fset(self, value)
+        if hasattr(self, "box"):
+            self.box.size = self._pos
+        if hasattr(self, "contentBox"):
+            # Content box should be anchored center relative to box, but its pos needs to be relative to box's vertices, not its pos
+            self.contentBox.pos = self.pos + self.size * self.box._vertices.anchorAdjust
+            self.contentBox._needVertexUpdate = True
+
+        # Set caret pos again so it recalculates its vertices
+        if hasattr(self, "caret"):
+            self.caret.index = self.caret.index
+
+        if hasattr(self, "_text"):
+            self._layout()
+        self._needVertexUpdate = True
+
+    @property
+    def vertices(self):
+        return WindowMixin.vertices.fget(self)
+
+    @vertices.setter
+    def vertices(self, value):
+        # If None, use defaut
+        if value is None:
+            value = [
+                [0.5, -0.5],
+                [-0.5, -0.5],
+                [-0.5, 0.5],
+                [0.5, 0.5],
+            ]
+        # Create Vertices object
+        self._vertices = layout.Vertices(value, obj=self.contentBox, flip=self.flip)
+
+    @property
+    def padding(self):
+        if hasattr(self, "_padding"):
+            return getattr(self._padding, self.units)
+
+    @padding.setter
+    def padding(self, value):
+        # Substitute None for a default value
+        if value is None:
+            value = self.letterHeight / 2
+        # Create a Size object to handle padding
+        self._padding = layout.Size(value, self.units, self.win)
+        # Update size of bounding box
+        if hasattr(self, "contentBox") and hasattr(self, "_size"):
+            self.contentBox.size = self._size - self._padding * 2
+
+    @property
+    def letterHeight(self):
+        if hasattr(self, "_letterHeight"):
+            return getattr(self._letterHeight, self.units)[1]
+
+    @letterHeight.setter
+    def letterHeight(self, value):
+        if isinstance(value, layout.Vector):
+            # If given a Vector, use it directly
+            self._letterHeight = value
+        elif isinstance(value, (int, float)):
+            # If given an integer, convert it to a 2D Vector with width 0
+            self._letterHeight = layout.Size([0, value], units=self.units, win=self.win)
+        elif value is None:
+            # If None, use default (20px)
+            self._letterHeight = layout.Size([0, 20], units='pix', win=self.win)
+        elif isinstance(value, (list, tuple, np.ndarray)):
+            # If given an array, convert it to a Vector
+            self._letterHeight = layout.Size(value, units=self.units, win=self.win)
+
+    @property
+    def letterHeightPix(self):
+        """
+        Convenience function to get self._letterHeight.pix and be guaranteed a return that is a single integer
+        """
+        return self._letterHeight.pix[1]
+
+    @property
+    def lineSpacing(self):
+        return self.glFont.lineSpacing
+
+    @lineSpacing.setter
+    def lineSpacing(self, value):
+        self.glFont.lineSpacing = value
+        self._needVertexUpdate = True
 
     @property
     def fontMGR(self):
             return allFonts
+
     @fontMGR.setter
     def fontMGR(self, mgr):
         global allFonts
@@ -286,32 +500,41 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
         else:
             raise TypeError(f"Could not set font manager for TextBox2 object `{self.name}`, must be supplied with a FontManager object")
 
-    @attributeSetter
+    @property
+    def languageStyle(self):
+        """
+        How is text laid out? Left to right (LTR), right to left (RTL) or using Arabic layout rules?
+        """
+        if hasattr(self, "_languageStyle"):
+            return self._languageStyle
+
+    @languageStyle.setter
+    def languageStyle(self, value):
+        self._languageStyle = value
+        # If layout is anything other than LTR, mark that we need to use bidi to lay it out
+        self._needsBidi = value != "LTR"
+        self._needsArabic = value.lower() == "arabic"
+
+    @property
+    def anchor(self):
+        return self.box.anchor
+
+    @anchor.setter
     def anchor(self, anchor):
-        """anchor is a string of terms, top, bottom, left, right, center
+        # Box should use this anchor
+        self.box.anchor = anchor
+        # Set pos again to update sub-element vertices
+        self.pos = self.pos
 
-        e.g. 'top_center', 'center-right', 'topleft', 'center' are all valid"""
-        self.__dict__['anchor'] = anchor
-        # look for unambiguous terms first (top, bottom, left, right)
-        self._anchorY = None
-        self._anchorX = None
-        if 'top' in anchor:
-            self._anchorY = 'top'
-        elif 'bottom' in anchor:
-            self._anchorY = 'bottom'
-        if 'right' in anchor:
-            self._anchorX = 'right'
-        elif 'left' in anchor:
-            self._anchorX = 'left'
-        # then 'center' can apply to either axis that isn't already set
-        if self._anchorX is None:
-            self._anchorX = 'center'
-        if self._anchorY is None:
-            self._anchorY = 'center'
+    @property
+    def alignment(self):
+        if hasattr(self, "_alignX") and hasattr(self, "_alignY"):
+            return (self._alignX, self._alignY)
+        else:
+            return ("top", "left")
 
-    @attributeSetter
+    @alignment.setter
     def alignment(self, alignment):
-        self.__dict__['alignment'] = alignment
         # look for unambiguous terms first (top, bottom, left, right)
         self._alignY = None
         self._alignX = None
@@ -330,6 +553,9 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
             self._alignY = 'center'
 
         self._needVertexUpdate = True
+        if hasattr(self, "_text"):
+            # If text has been set, layout
+            self._layout()
 
     @property
     def text(self):
@@ -353,6 +579,9 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
     
     @text.setter
     def text(self, text):
+        # Convert to string
+        text = str(text)
+        # Substitute HTML tags
         text = text.replace('<i>', codes['ITAL_START'])
         text = text.replace('</i>', codes['ITAL_END'])
         text = text.replace('<b>', codes['BOLD_START'])
@@ -360,6 +589,10 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
         visible_text = ''.join([c for c in text if c not in codes.values()])
         self._styles = [0,]*len(visible_text)
         self._text = visible_text
+        if self._needsArabic and hasattr(self, "arabicReshaper"):
+            self._text = self.arabicReshaper.reshape(self._text)
+        if self._needsBidi:
+            self._text = bidi.get_display(self._text)
         
         current_style=0
         ci = 0
@@ -379,6 +612,7 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
         self._layout()
 
     def addCharAtCaret(self, char):
+        """Allows a character to be added programmatically at the current caret"""
         txt = self._text
         txt = txt[:self.caret.index] + char + txt[self.caret.index:]
         cstyle = NONE
@@ -390,6 +624,7 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
         self._layout()
 
     def deleteCaretLeft(self):
+        """Deletes 1 character to the left of the caret"""
         if self.caret.index > 0:
             txt = self._text
             ci = self.caret.index
@@ -400,6 +635,7 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
             self._layout()
 
     def deleteCaretRight(self):
+        """Deletes 1 character to the right of the caret"""
         ci = self.caret.index
         if ci < len(self._text):
             txt = self._text
@@ -411,8 +647,6 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
     def _layout(self):
         """Layout the text, calculating the vertex locations
         """
-        def getLineWidthFromPix(pixVal):
-            return pixVal / self._pixelScaling + self.padding * 2
         
         rgb = self._foreColor.render('rgba1')
         font = self.glFont
@@ -429,19 +663,12 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
 
         # the following are used internally for layout
         self._lineNs = np.zeros(len(visible_text), dtype=int)
-        self._lineTops = []  # just length of nLines
-        self._lineBottoms = []
+        _lineBottoms = []
         self._lineLenChars = []  #
-        self._lineWidths = []  # width in stim units of each line
+        _lineWidths = []  # width in stim units of each line
 
-        self._lineHeight = font.height * self.lineSpacing
-
-        if np.isnan(self._requestedSize[0]):
-            lineMax = float('inf')
-        else:
-            lineMax = (self._requestedSize[0] - self.padding) * self._pixelScaling
-
-        current = [0, 0]
+        lineMax = self.contentBox._size.pix[0]
+        current = [0, 0 - font.ascender]
         fakeItalic = 0.0
         fakeBold = 0.0
         # for some reason glyphs too wide when using alpha channel only
@@ -450,125 +677,308 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
         else:
             alphaCorrection = 1
 
-        wordLen = 0
-        charsThisLine = 0
-        wordsThisLine = 0
-        lineN = 0
+        if self._lineBreaking == 'default':
 
-        for i, charcode in enumerate(self._text):
-            printable = True  # unless we decide otherwise
-            # handle formatting codes
-            if self._styles[i] == NONE:
-                fakeItalic = 0.0
-                fakeBold = 0.0
-            elif self._styles[i] == ITALIC:
-                fakeItalic = 0.1 * font.size
-            elif self._styles[i] == ITALIC:
-                fakeBold = 0.3 * font.size
+            wordLen = 0
+            charsThisLine = 0
+            wordsThisLine = 0
+            lineN = 0
 
-            # handle newline
-            if charcode == '\n':
-                printable = False
+            for i, charcode in enumerate(self._text):
+                printable = True  # unless we decide otherwise
+                # handle formatting codes
+                if self._styles[i] == NONE:
+                    fakeItalic = 0.0
+                    fakeBold = 0.0
+                elif self._styles[i] == ITALIC:
+                    fakeItalic = 0.1 * font.size
+                elif self._styles[i] == BOLD:
+                    fakeBold = 0.3 * font.size
 
-            # handle printable characters
-            if printable:
-                if showWhiteSpace and charcode == " ":
-                    glyph = font[u"·"]
-                else:
+                # handle newline
+                if charcode == '\n':
+                    printable = False
+
+                # handle printable characters
+                if printable:
                     glyph = font[charcode]
-                xBotL = current[0] + glyph.offset[0] - fakeItalic - fakeBold / 2
-                xTopL = current[0] + glyph.offset[0] - fakeBold / 2
-                yTop = current[1] + glyph.offset[1]
-                xBotR = xBotL + glyph.size[0] * alphaCorrection + fakeBold
-                xTopR = xTopL + glyph.size[0] * alphaCorrection + fakeBold
-                yBot = yTop - glyph.size[1]
-                u0 = glyph.texcoords[0]
-                v0 = glyph.texcoords[1]
-                u1 = glyph.texcoords[2]
-                v1 = glyph.texcoords[3]
+                    if showWhiteSpace and charcode == " ":
+                        glyph = font[u"·"]
+                    elif charcode == " ":
+                        # glyph size of space is smaller than actual size, so use size of dot instead
+                        glyph.size = font[u"·"].size
+                    # Get top and bottom coords
+                    yTop = current[1] + glyph.offset[1]
+                    yBot = yTop - glyph.size[1]
+                    # Get x mid point
+                    xMid = current[0] + glyph.offset[0] + glyph.size[0] * alphaCorrection / 2 + fakeBold / 2
+                    # Get left and right corners from midpoint
+                    xBotL = xMid - glyph.size[0] * alphaCorrection / 2 - fakeItalic - fakeBold / 2
+                    xBotR = xMid + glyph.size[0] * alphaCorrection / 2 - fakeItalic + fakeBold / 2
+                    xTopL = xMid - glyph.size[0] * alphaCorrection / 2 - fakeBold / 2
+                    xTopR = xMid + glyph.size[0] * alphaCorrection / 2 + fakeBold / 2
+
+                    u0 = glyph.texcoords[0]
+                    v0 = glyph.texcoords[1]
+                    u1 = glyph.texcoords[2]
+                    v1 = glyph.texcoords[3]
+                else:
+                    glyph = font[u"·"]
+                    x = current[0] + glyph.offset[0]
+                    yTop = current[1] + glyph.offset[1]
+                    yBot = yTop - glyph.size[1]
+                    xBotL = x
+                    xTopL = x
+                    xBotR = x
+                    xTopR = x
+                    u0 = glyph.texcoords[0]
+                    v0 = glyph.texcoords[1]
+                    u1 = glyph.texcoords[2]
+                    v1 = glyph.texcoords[3]
+
+                theseVertices = [[xTopL, yTop], [xBotL, yBot],
+                                 [xBotR, yBot], [xTopR, yTop]]
+                texcoords = [[u0, v0], [u0, v1],
+                             [u1, v1], [u1, v0]]
+
+                vertices[i * 4:i * 4 + 4] = theseVertices
+                self._texcoords[i * 4:i * 4 + 4] = texcoords
+                self._colors[i*4 : i*4+4, :4] = rgb
+                self._lineNs[i] = lineN
+                current[0] = current[0] + glyph.advance[0] + fakeBold / 2
+                current[1] = current[1] + glyph.advance[1]
+
+                # are we wrapping the line?
+                if charcode == "\n":
+                    lineWPix = current[0]
+                    current[0] = 0
+                    current[1] -= font.height
+                    lineN += 1
+                    charsThisLine += 1
+                    self._lineLenChars.append(charsThisLine)
+                    _lineWidths.append(lineWPix)
+                    charsThisLine = 0
+                    wordsThisLine = 0
+                elif charcode in wordBreaks:
+                    wordLen = 0
+                    charsThisLine += 1
+                    wordsThisLine += 1
+                elif printable:
+                    wordLen += 1
+                    charsThisLine += 1
+
+                # end line with auto-wrap on space
+                if current[0] >= lineMax and wordLen > 0 and wordsThisLine > 1:
+                    # move the current word to next line
+                    lineBreakPt = vertices[(i - wordLen + 1) * 4, 0]
+                    wordWidth = current[0] - lineBreakPt
+                    # shift all chars of the word left by wordStartX
+                    vertices[(i - wordLen + 1) * 4: (i + 1) * 4, 0] -= lineBreakPt
+                    vertices[(i - wordLen + 1) * 4: (i + 1) * 4, 1] -= font.height
+                    # update line values
+                    self._lineNs[i - wordLen + 1: i + 1] += 1
+                    self._lineLenChars.append(charsThisLine - wordLen)
+                    _lineWidths.append(lineBreakPt)
+                    lineN += 1
+                    # and set current to correct location
+                    current[0] = wordWidth
+                    current[1] -= font.height
+                    charsThisLine = wordLen
+                    wordsThisLine = 1
+
+                # have we stored the top/bottom of this line yet
+                if lineN + 1 > len(_lineBottoms):
+                    _lineBottoms.append(current[1])
+
+            # add length of this (unfinished) line
+            _lineWidths.append(current[0])
+            self._lineLenChars.append(charsThisLine)
+
+        elif self._lineBreaking == 'uax14':
+
+            # get a list of line-breakable points according to UAX#14
+            breakable_points = list(get_breakable_points(self._text))
+            text_seg = list(break_units(self._text, breakable_points))
+            styles_seg = list(break_units(self._styles, breakable_points))
+
+            lineN = 0
+            charwidth_list = []
+            segwidth_list = []
+            y_advance_list = []
+            vertices_list = []
+            texcoords_list = []
+
+            # calculate width of each segments
+            for this_seg in range(len(text_seg)):
+
+                thisSegWidth = 0 # width of this segment
+
+                for i, charcode in enumerate(text_seg[this_seg]):
+                    printable = True  # unless we decide otherwise
+                    # handle formatting codes
+                    if styles_seg[this_seg][i] == NONE:
+                        fakeItalic = 0.0
+                        fakeBold = 0.0
+                    elif styles_seg[this_seg][i] == ITALIC:
+                        fakeItalic = 0.1 * font.size
+                    elif styles_seg[this_seg][i] == ITALIC:
+                        fakeBold = 0.3 * font.size
+
+                    # handle newline
+                    if charcode == '\n':
+                        printable = False
+
+                    # handle printable characters
+                    if printable:
+                        if showWhiteSpace and charcode == " ":
+                            glyph = font[u"·"]
+                        else:
+                            glyph = font[charcode]
+                        xBotL = glyph.offset[0] - fakeItalic - fakeBold / 2
+                        xTopL = glyph.offset[0] - fakeBold / 2
+                        yTop = glyph.offset[1]
+                        xBotR = xBotL + glyph.size[0] * alphaCorrection + fakeBold
+                        xTopR = xTopL + glyph.size[0] * alphaCorrection + fakeBold
+                        yBot = yTop - glyph.size[1]
+                        u0 = glyph.texcoords[0]
+                        v0 = glyph.texcoords[1]
+                        u1 = glyph.texcoords[2]
+                        v1 = glyph.texcoords[3]
+                    else:
+                        glyph = font[u"·"]
+                        x = glyph.offset[0]
+                        yTop = glyph.offset[1]
+                        yBot = yTop - glyph.size[1]
+                        xBotL = x
+                        xTopL = x
+                        xBotR = x
+                        xTopR = x
+                        u0 = glyph.texcoords[0]
+                        v0 = glyph.texcoords[1]
+                        u1 = glyph.texcoords[2]
+                        v1 = glyph.texcoords[3]
+
+                    # calculate width and update segment width
+                    w = glyph.advance[0] + fakeBold / 2
+                    thisSegWidth += w
+
+                    # keep vertices, texcoords, width and y_advance of this character
+                    vertices_list.append([[xTopL, yTop], [xBotL, yBot],
+                                          [xBotR, yBot], [xTopR, yTop]])
+                    texcoords_list.append([[u0, v0], [u0, v1],
+                                           [u1, v1], [u1, v0]])
+                    charwidth_list.append(w)
+                    y_advance_list.append(glyph.advance[1])
+
+                # append width of this segment to the list
+                segwidth_list.append(thisSegWidth)
+
+            # concatenate segments to build line
+            lines = []
+            while text_seg:
+                line_width = 0
+                for i in range(len(text_seg)):
+                    # if this segment is \n, break line here.
+                    if text_seg[i][-1] == '\n':
+                        i+=1 # increment index to include \n to current line
+                        break
+                    # concatenate next segment
+                    line_width += segwidth_list[i]
+                    # break if line_width is greater than lineMax
+                    if lineMax < line_width:
+                        break
+                else:
+                    # if for sentence finished without break, all segments 
+                    # should be concatenated.
+                    i = len(text_seg)
+                p = max(1, i)
+                # concatenate segments and remove from segment list
+                lines.append("".join(text_seg[:p]))
+                del text_seg[:p], segwidth_list[:p] #, avoid[:p]
+
+            # build lines
+            i = 0 # index of the current character
+            if lines:
+                for line in lines:
+                    for c in line:
+                        theseVertices = vertices_list[i]
+                        #update vertices
+                        for j in range(4):
+                            theseVertices[j][0] += current[0]
+                            theseVertices[j][1] += current[1]
+                        texcoords = texcoords_list[i]
+
+                        vertices[i * 4:i * 4 + 4] = theseVertices
+                        self._texcoords[i * 4:i * 4 + 4] = texcoords
+                        self._colors[i*4 : i*4+4, :4] = rgb
+                        self._lineNs[i] = lineN
+
+                        current[0] = current[0] + charwidth_list[i]
+                        current[1] = current[1] + y_advance_list[i]
+                        
+                        # have we stored the top/bottom of this line yet
+                        if lineN + 1 > len(_lineBottoms):
+                            _lineBottoms.append(current[1])
+
+                        # next chacactor
+                        i += 1
+
+                    # prepare for next line
+                    current[0] = 0
+                    current[1] -= font.height
+                    
+                    lineBreakPt = vertices[(i-1) * 4, 0]
+                    self._lineLenChars.append(len(line))
+                    _lineWidths.append(lineBreakPt)
+
+                    # need not increase lineN when the last line doesn't end with '\n'
+                    if lineN < len(lines)-1 or line[-1] == '\n' :
+                        lineN += 1
+        else:
+            raise ValueError("Unknown lineBreaking option ({}) is"
+                "specified.".format(self._lineBreaking))
+
+        # Apply vertical alignment
+        if self.alignment[1] in ("bottom", "center"):
+            # Get bottom of last line (or starting line, if there are none)
+            if len(_lineBottoms):
+                lastLine = min(_lineBottoms)
             else:
-                glyph = font[u"·"]
-                x = current[0] + glyph.offset[0]
-                yTop = current[1] + glyph.offset[1]
-                yBot = yTop - glyph.size[1]
-                xBotL = x
-                xTopL = x
-                xBotR = x
-                xTopR = x
-                u0 = glyph.texcoords[0]
-                v0 = glyph.texcoords[1]
-                u1 = glyph.texcoords[2]
-                v1 = glyph.texcoords[3]
+                lastLine = current[1]
+            if self.alignment[1] == "bottom":
+                # Work out how much we need to adjust by for the bottom base line to sit at the bottom of the content box
+                adjustY = lastLine + self.contentBox._size.pix[1]
+            if self.alignment[1] == "center":
+                # Work out how much we need to adjust by for the line midpoint (mean of ascender and descender) to sit in the middle of the content box
+                adjustY = (lastLine + font.descender + self.contentBox._size.pix[1]) / 2
+            # Adjust vertices and line bottoms
+            vertices[:, 1] = vertices[:, 1] - adjustY
+            _lineBottoms -= adjustY
 
-            theseVertices = [[xTopL, yTop], [xBotL, yBot],
-                             [xBotR, yBot], [xTopR, yTop]]
-            texcoords = [[u0, v0], [u0, v1],
-                         [u1, v1], [u1, v0]]
+        # Apply horizontal alignment
+        if self.alignment[0] in ("right", "center"):
+            if self.alignment[0] == "right":
+                # Calculate adjust value per line
+                lineAdjustX = self.contentBox._size.pix[0] - np.array(_lineWidths)
+            if self.alignment[0] == "center":
+                # Calculate adjust value per line
+                lineAdjustX = (self.contentBox._size.pix[0] - np.array(_lineWidths)) / 2
+            # Get adjust value per vertex
+            adjustX = lineAdjustX[np.repeat(self._lineNs, 4)]
+            # Adjust vertices
+            vertices[:, 0] = vertices[:, 0] + adjustX
 
-            vertices[i * 4:i * 4 + 4] = theseVertices
-            self._texcoords[i * 4:i * 4 + 4] = texcoords
-            self._colors[i*4 : i*4+4, :4] = rgb
-            self._lineNs[i] = lineN
-            current[0] = current[0] + glyph.advance[0] + fakeBold / 2
-            current[1] = current[1] + glyph.advance[1]
-
-            # are we wrapping the line?
-            if charcode == "\n":
-                lineWPix = current[0]
-                current[0] = 0
-                current[1] -= self._lineHeight
-                lineN += 1
-                charsThisLine += 1
-                self._lineLenChars.append(charsThisLine)
-                self._lineWidths.append(getLineWidthFromPix(lineWPix))
-                charsThisLine = 0
-                wordsThisLine = 0
-            elif charcode in wordBreaks:
-                wordLen = 0
-                charsThisLine += 1
-                wordsThisLine += 1
-            elif printable:
-                wordLen += 1
-                charsThisLine += 1
-
-            # end line with auto-wrap on space
-            if current[0] >= lineMax and wordLen > 0 and wordsThisLine:
-                # move the current word to next line
-                lineBreakPt = vertices[(i - wordLen + 1) * 4, 0]
-                wordWidth = current[0] - lineBreakPt
-                # shift all chars of the word left by wordStartX
-                vertices[(i - wordLen + 1) * 4: (i + 1) * 4, 0] -= lineBreakPt
-                vertices[(i - wordLen + 1) * 4: (i + 1) * 4, 1] -= self._lineHeight
-                # update line values
-                self._lineNs[i - wordLen + 1: i + 1] += 1
-                self._lineLenChars.append(charsThisLine - wordLen)
-                self._lineWidths.append(getLineWidthFromPix(lineBreakPt))
-                lineN += 1
-                # and set current to correct location
-                current[0] = wordWidth
-                current[1] -= self._lineHeight
-                charsThisLine = wordLen
-
-            # have we stored the top/bottom of this line yet
-            if lineN + 1 > len(self._lineTops):
-                self._lineBottoms.append(current[1] + font.descender)
-                self._lineTops.append(current[1] + self._lineHeight
-                                      + font.descender/2)
-            
-        # finally add length of this (unfinished) line
-        self._lineWidths.append(getLineWidthFromPix(current[0]))
-        self._lineLenChars.append(charsThisLine)
-
-        # convert the vertices to stimulus units
-        self._rawVerts = vertices / self._pixelScaling
-
-        # thisW = current[0] - glyph.advance[0] + glyph.size[0] * alphaCorrection
-        # calculate final self.size and tightBox
-        if np.isnan(self._requestedSize[0]):
-            self.size[0] = max(self._lineWidths) + self.padding*2
-        if np.isnan(self._requestedSize[1]):
-            self.size[1] = ((lineN + 1) * self._lineHeight / self._pixelScaling
-                            + self.padding * 2)
+        # Convert the vertices to be relative to content box and set
+        self.vertices = vertices / self.contentBox._size.pix + (-0.5, 0.5)
+        if len(_lineBottoms):
+            if self.flipVert:
+                self._lineBottoms = min(self.contentBox._vertices.pix[:, 1]) - np.array(_lineBottoms)
+            else:
+                self._lineBottoms = max(self.contentBox._vertices.pix[:, 1]) + np.array(_lineBottoms)
+            self._lineWidths = min(self.contentBox._vertices.pix[:, 0]) + np.array(_lineWidths)
+        else:
+            self._lineBottoms = np.array(_lineBottoms)
+            self._lineWidths = np.array(_lineWidths)
 
         # if we had to add more glyphs to make possible then 
         if self.glFont._dirty:
@@ -576,32 +986,33 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
             self.glFont._dirty = False
         self._needVertexUpdate = True
 
-    def _getStartingVertices(self):
-        """Returns vertices for a single non-printing char as a proxy
-        (needed to get location for caret when there are no actual chars)"""
-        yTop = self._anchorOffsetY - (self.glFont.height - self.glFont.ascender) * self.lineSpacing
-        yBot = yTop - self._lineHeight
-        x = 0
-        theseVertices = np.array([[x, yTop], [x, yBot], [x, yBot], [x, yTop]])
-        return theseVertices
-
     def draw(self):
         """Draw the text to the back buffer"""
         # Border width
-        self.box.setLineWidth(self.pallette['lineWidth']) # Use 1 as base if border width is none
+        self.box.setLineWidth(self.palette['lineWidth']) # Use 1 as base if border width is none
         #self.borderWidth = self.box.lineWidth
         # Border colour
-        self.box.setLineColor(self.pallette['lineColor'], colorSpace='rgb')
+        self.box.setLineColor(self.palette['lineColor'], colorSpace='rgb')
         #self.borderColor = self.box.lineColor
         # Background
-        self.box.setFillColor(self.pallette['fillColor'], colorSpace='rgb')
+        self.box.setFillColor(self.palette['fillColor'], colorSpace='rgb')
         #self.fillColor = self.box.fillColor
+
+        # Inherit win
+        self.box.win = self.win
+        self.contentBox.win = self.win
+        self.boundingBox.win = self.win
 
         if self._needVertexUpdate:
             #print("Updating vertices...")
             self._updateVertices()
         if self.fillColor is not None or self.borderColor is not None:
             self.box.draw()
+
+        # Draw sub-elements if in debug mode
+        if debug:
+            self.contentBox.draw()
+            self.boundingBox.draw()
 
         # self.boundingBox.draw()  # could draw for debug purposes
         gl.glPushMatrix()
@@ -645,8 +1056,14 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
         gl.glPopMatrix()
 
     def reset(self):
+        """Resets the TextBox2 to hold **whatever it was given on initialisation**"""
         # Reset contents
         self.text = self.startText
+
+    def clear(self):
+        """Resets the TextBox2 to a blank string"""
+        # Clear contents
+        self.text = ""
 
 
     def contains(self, x, y=None, units=None, tight=False):
@@ -709,58 +1126,15 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
         if hasattr(self, 'flipVert') and self.flipVert:
             flip[1] = -1  # True=(-1), False->(+1)
 
-        font = self.glFont
-        # to start with the anchor is bottom left of *first line*
-        if self._anchorY == 'top':
-            self._anchorOffsetY = (-font.ascender / self._pixelScaling
-                                   - self.padding)
-            boxOffsetY = - self.size[1] / 2.0
-        elif self._anchorY == 'center':
-            self._anchorOffsetY = (
-                    self.size[1] / 2
-                    - (font.height / 2 - font.descender) / self._pixelScaling
-                    - self.padding
-            )
-            boxOffsetY = 0
-        elif self._anchorY == 'bottom':
-            self._anchorOffsetY = (
-                    self.size[1]
-                    - (font.height / 2 + font.ascender) / self._pixelScaling
-            )
-            # self._anchorOffsetY = (-font.ascender / self._pixelScaling
-            #                        - self.padding)
-            boxOffsetY = + (self.size[1]) / 2.0
-        else:
-            raise ValueError('Unexpected value for _anchorY')
-
-        # calculate anchor offsets (text begins on left=0, box begins center=0)
-        if self._anchorX == 'right':
-            self._anchorOffsetX = - self.size[0] + self.padding
-            boxOffsetX = - self.size[0] / 2.0
-        elif self._anchorX == 'center':
-            self._anchorOffsetX = - self.size[0] / 2.0 + self.padding
-            boxOffsetX = 0
-        elif self._anchorX == 'left':
-            self._anchorOffsetX = 0 + self.padding
-            boxOffsetX = + self.size[0] / 2.0
-        else:
-            raise ValueError('Unexpected value for _anchorX')
-        self.vertices = self._rawVerts + (self._anchorOffsetX, self._anchorOffsetY)
-
-        vertsPix = convertToPix(vertices=self.vertices,
-                                pos=self.pos,
-                                win=self.win, units=self.units)
-        self.__dict__['verticesPix'] = vertsPix
+        self.__dict__['verticesPix'] = self._vertices.pix
 
         # tight bounding box
-        if self.vertices.shape[0] < 1:  # editable box with no letters?
-            self.boundingBox.size = 0, 0
-            self.boundingBox.pos = self.pos
-        else:
-            L = self.vertices[:, 0].min()
-            R = self.vertices[:, 0].max()
-            B = self.vertices[:, 1].min()
-            T = self.vertices[:, 1].max()
+        if hasattr(self._vertices, self.units) and self.vertices.shape[0] >= 1:
+            verts = self._vertices.pix
+            L = verts[:, 0].min()
+            R = verts[:, 0].max()
+            B = verts[:, 1].min()
+            T = verts[:, 1].max()
             tightW = R-L
             Xmid = (R+L)/2
             tightH = T-B
@@ -768,8 +1142,11 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
             # for the tight box anchor offset is included in vertex calcs
             self.boundingBox.size = tightW, tightH
             self.boundingBox.pos = self.pos + (Xmid, Ymid)
+        else:
+            self.boundingBox.size = 0, 0
+            self.boundingBox.pos = self.pos
         # box (larger than bounding box) needs anchor offest adding
-        self.box.pos = self.pos + (boxOffsetX, boxOffsetY)
+        self.box.pos = self.pos
         self.box.size = self.size  # this might have changed from _requested
 
         self._needVertexUpdate = False
@@ -839,7 +1216,7 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
         return False
 
     def getText(self):
-        """Returns the current text in the box, including formating tokens."""
+        """Returns the current text in the box, including formatting tokens."""
         return self.text
 
     @property
@@ -850,37 +1227,6 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
     def getVisibleText(self):
         """Returns the current visible text in the box"""
         return self.visibleText
-
-    @attributeSetter
-    def pos(self, value):
-        """The position of the center of the TextBox in the stimulus
-        :ref:`units <units>`
-
-        `value` should be an :ref:`x,y-pair <attrib-xy>`.
-        :ref:`Operations <attrib-operations>` are also supported.
-
-        Example::
-
-            stim.pos = (0.5, 0)  # Set slightly to the right of center
-            stim.pos += (0.5, -1)  # Increment pos rightwards and upwards.
-                Is now (1.0, -1.0)
-            stim.pos *= 0.2  # Move stim towards the center.
-                Is now (0.2, -0.2)
-
-        Tip: If you need the position of stim in pixels, you can obtain
-        it like this:
-
-            from psychopy.tools.monitorunittools import posToPix
-            posPix = posToPix(stim)
-        """
-        self.__dict__['pos'] = val2array(value, False, False)
-        try:
-            self.box.pos = (self.__dict__['pos'] +
-                            (self._anchorOffsetX, self._anchorOffsetY))
-        except AttributeError:
-            pass  # may not be created yet, which is fine
-        self._needVertexUpdate = True
-        self._needUpdate = True
 
     def setText(self, text=None, log=None):
         """Usually you can use 'stim.attribute = value' syntax instead,
@@ -898,6 +1244,20 @@ class TextBox2(BaseVisualStim, ContainerMixin, ColorMixin):
         but use this method if you need to suppress the log message.
         """
         setAttribute(self, 'font', font, log)
+
+    # -------- legacy attributes --------
+
+    @property
+    def startText(self):
+        """
+        In v2022.1.4, `.startText` was replaced by `.placeholder` for consistency with PsychoJS. The two attributes
+        are fully interchangeable.
+        """
+        return self.placeholder
+
+    @startText.setter
+    def startText(self, value):
+        self.placeholder = value
 
 
 class Caret(ColorMixin):
@@ -963,6 +1323,7 @@ class Caret(ColorMixin):
             return self.textbox._lineNs[-1]
         else:
             return self.textbox._lineNs[self.index]
+
     @row.setter
     def row(self, value):
         """Use line to index conversion to set index according to row value"""
@@ -1030,27 +1391,40 @@ class Caret(ColorMixin):
             self.index = len(textbox._text)
         if self.index < 0:
             self.index = 0
-        # get the verts of character next to caret (chr is the next one so use
-        # left edge unless last index then use the right of prev chr)
-        # lastChar = [bottLeft, topLeft, **bottRight**, **topRight**]
+        # Get vertices of caret based on characters and index
         ii = self.index
         if textbox.vertices.shape[0] == 0:
-            verts = textbox._getStartingVertices() / textbox._pixelScaling
-            verts[:,1] = verts[:,1]
-            verts[:,0] = verts[:,0] + float(textbox._anchorOffsetX)
+            # If there are no chars, put caret at start position (determined by alignment)
+            if textbox.alignment[1] == "bottom":
+                bottom = min(textbox.contentBox._vertices.pix[:, 1])
+            elif textbox.alignment[1] == "center":
+                bottom = (min(textbox.contentBox._vertices.pix[:, 1]) + max(textbox.contentBox._vertices.pix[:, 1]) - textbox.glFont.ascender - textbox.glFont.descender) / 2
+            else:
+                bottom = max(textbox.contentBox._vertices.pix[:, 1]) - textbox.glFont.ascender
+            if textbox.alignment[0] == "right":
+                x = max(textbox.contentBox._vertices.pix[:, 0])
+            elif textbox.alignment[0] == "center":
+                x = (min(textbox.contentBox._vertices.pix[:, 0]) + max(textbox.contentBox._vertices.pix[:, 0])) / 2
+            else:
+                x = min(textbox.contentBox._vertices.pix[:, 0])
         else:
-            if self.index >= len(textbox._lineNs):  # caret is after last chr
-                chrVerts = textbox.vertices[range((ii-1) * 4, (ii-1) * 4 + 4)]
+            # Otherwise, get caret position from character vertices
+            if self.index >= len(textbox._lineNs):
+                # If the caret is after the last char, position it to the right
+                chrVerts = textbox._vertices.pix[range((ii-1) * 4, (ii-1) * 4 + 4)]
                 x = chrVerts[2, 0]  # x-coord of left edge (of final char)
             else:
-                chrVerts = textbox.vertices[range(ii * 4, ii * 4 + 4)]
+                # Otherwise, position it to the left
+                chrVerts = textbox._vertices.pix[range(ii * 4, ii * 4 + 4)]
                 x = chrVerts[1, 0]  # x-coord of right edge
-            # the y locations are the top and bottom of this line
-            y1 = textbox._lineBottoms[self.row] / textbox._pixelScaling
-            y2 = textbox._lineTops[self.row] / textbox._pixelScaling
-            # char x pos has been corrected for anchor already but lines haven't
-            verts = (np.array([[x, y1], [x, y2]])
-                     + (0, textbox._anchorOffsetY))
-
-        return convertToPix(vertices=verts, pos=textbox.pos,
-                            win=textbox.win, units=textbox.units)
+            # Get top of this line
+            bottom = textbox._lineBottoms[self.row]
+        # Top will always be line bottom + font height
+        if self.textbox.flipVert:
+            top = bottom - self.textbox.glFont.size
+        else:
+            top = bottom + self.textbox.glFont.size
+        return np.array([
+            [x, bottom],
+            [x, top]
+        ])

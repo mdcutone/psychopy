@@ -5,7 +5,7 @@
 #
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 __all__ = ['normalize',
@@ -1373,7 +1373,7 @@ def intersectRaySphere(rayOrig, rayDir, sphereOrig=(0., 0., 0.), sphereRadius=1.
         units from `orig`. Returns `None` if there is no intersection.
 
     """
-    # based off example from http://antongerdelan.net/opengl/raycasting.html
+    # based off example from https://antongerdelan.net/opengl/raycasting.html
     dtype = np.float64 if dtype is None else np.dtype(dtype).type
 
     rayOrig = np.asarray(rayOrig, dtype=dtype)
@@ -1456,7 +1456,7 @@ def intersectRayAABB(rayOrig, rayDir, boundsOffset, boundsExtents, dtype=None):
     extents = np.asarray(boundsExtents, dtype=dtype) + boundsOffset
 
     invDir = 1.0 / rayDir
-    sign = np.zeros((3,), dtype=np.int)
+    sign = np.zeros((3,), dtype=int)
     sign[invDir < 0.0] = 1
 
     tmin = (extents[sign[0], 0] - rayOrig[0]) * invDir[0]
@@ -1539,7 +1539,7 @@ def intersectRayOBB(rayOrig, rayDir, modelMatrix, boundsExtents, dtype=None):
 
     """
     # based off algorithm:
-    # http://www.opengl-tutorial.org/miscellaneous/clicking-on-objects/
+    # https://www.opengl-tutorial.org/miscellaneous/clicking-on-objects/
     # picking-with-custom-ray-obb-function/
     dtype = np.float64 if dtype is None else np.dtype(dtype).type
 
@@ -2220,7 +2220,7 @@ def multQuat(q0, q1, out=None, dtype=None):
 
 
 def invertQuat(q, out=None, dtype=None):
-    """Get tht multiplicative inverse of a quaternion.
+    """Get the multiplicative inverse of a quaternion.
 
     This gives a quaternion which rotates in the opposite direction with equal
     magnitude. Multiplying a quaternion by its inverse returns an identity
@@ -3176,7 +3176,7 @@ def matrixFromEulerAngles(rx, ry, rz, degrees=True, out=None, dtype=None):
     matrices.
 
     """
-    # from http://www.j3d.org/matrix_faq/matrfaq_latest.html
+    # from https://www.j3d.org/matrix_faq/matrfaq_latest.html
     if out is None:
         dtype = np.float64 if dtype is None else np.dtype(dtype).type
         toReturn = np.zeros((4, 4,), dtype=dtype)
@@ -3906,7 +3906,7 @@ def lensCorrectionSpherical(xys, coefK=1.0, aspect=1.0, out=None, dtype=None):
         the output will be rendered to normalized device coordinates where
         points range from -1.0 to 1.0.
     coefK : float
-        Distortion coefficent. Use positive numbers for pincushion distortion
+        Distortion coefficient. Use positive numbers for pincushion distortion
         and negative for barrel distortion.
     aspect : float
         Aspect ratio of the target window or buffer (width / height).

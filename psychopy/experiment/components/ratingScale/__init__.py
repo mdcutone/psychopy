@@ -2,27 +2,16 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-from __future__ import absolute_import, print_function
-from builtins import super  # provides Py3-style super() using python-future
-
-from builtins import str
-from builtins import map
-from os import path
-import re
+from pathlib import Path
+from psychopy.tools.stringtools import getArgs
 from psychopy.experiment.components import BaseComponent, Param, _translate
 from psychopy.localization import _localized as __localized
 _localized = __localized.copy()
 
 __author__ = 'Jeremy Gray'
-
-# the absolute path to the folder containing this path
-thisFolder = path.abspath(path.dirname(__file__))
-iconFile = path.join(thisFolder, 'ratingscale.png')
-tooltip = _translate('Rating scale: obtain numerical or categorical '
-                     'responses')
 
 # only use _localized values for label values, nothing functional:
 _localized.update({'visualAnalogScale': _translate('Visual analog scale'),
@@ -50,6 +39,10 @@ class RatingScaleComponent(BaseComponent):
     """A class for presenting a rating scale as a builder component
     """
     categories = ['Responses']
+    targets = ['PsychoPy']
+    iconFile = Path(__file__).parent / 'ratingscale.png'
+    tooltip = _translate('Rating scale: obtain numerical or categorical '
+                         'responses')
 
     def __init__(self, exp, parentName,
                  name='rating',
@@ -216,10 +209,19 @@ class RatingScaleComponent(BaseComponent):
         _in = "%(name)s = visual.RatingScale(win=win, name='%(name)s'"
         init_str = _in % self.params
         if self.params['customize_everything'].val.strip() != '':
-            # clean it up a little, remove win=*, leading / trailing typos
-            orig = self.params['customize_everything'].val
-            custom = re.sub(r"[\\s,]*win=[^,]*,", '', orig)
-            init_str += ', ' + custom.lstrip('(, ').strip('), ')
+            # Add preamble
+            init_str += ", "
+            # Get arguments
+            args = getArgs(self.params['customize_everything'].val)
+            # Remove anything which would override win or name
+            if 'win' in args:
+                del args['win']
+            if 'name' in args:
+                del args['name']
+            # Convert each argument to a string
+            argList = [f"{key}={val}" for key, val in args.items()]
+            # Recombine these arguments into a (now santized) string
+            init_str += ", ".join(argList)
         else:
             if self.params['marker'].val:
                 init_str += ', marker=%s' % repr(self.params['marker'].val)

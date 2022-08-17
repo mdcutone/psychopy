@@ -2,22 +2,20 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-from __future__ import absolute_import, division, print_function
-
-from builtins import map
 import sys
 import os
 import atexit
 import threading
 from itertools import chain
 from numpy import float64
-from psychopy import prefs, exceptions
+from psychopy import prefs
+from .exceptions import DependencyError
 from psychopy import core, logging
 from psychopy.constants import (STARTED, FINISHED, STOPPED, NOT_STARTED,
-                                FOREVER, PY3)
+                                FOREVER)
 from ._base import _SoundBase
 
 
@@ -27,20 +25,7 @@ try:
 except ImportError as err:
     if not travisCI:
         # convert this import error to our own, pyo probably not installed
-        raise exceptions.DependencyError(repr(err))
-if PY3:
-    from contextlib import redirect_stdout
-    from io import StringIO
-else:
-    from cStringIO import StringIO
-    from contextlib import contextmanager
-    @contextmanager
-    def redirect_stdout(target):
-        original = sys.stdout
-        sys.stdout = target
-        yield
-        sys.stdout = original
-
+        raise DependencyError(repr(err))
 
 pyoSndServer = None
 audioDriver = None
@@ -340,7 +325,16 @@ class SoundPyo(_SoundBase):
         if pyoSndServer is None or pyoSndServer.getIsBooted() == 0:
             init(rate=sampleRate)
 
-        self.sampleRate = pyoSndServer.getSamplingRate()
+        # Check if the user tried to change the sample rate. Since this isn't
+        # possible presently, just warn the user for now.
+        actualSampleRate = pyoSndServer.getSamplingRate()
+        if actualSampleRate != sampleRate:
+            logging.warning(
+                "Cannot change sample rate to {} since audio server has "
+                "already started, using {} instead.".format(
+                    sampleRate, actualSampleRate))
+
+        self.sampleRate = actualSampleRate
         self.format = bits
         self.isStereo = stereo
         self.channels = 1 + int(stereo)

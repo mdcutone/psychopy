@@ -1,4 +1,3 @@
-from __future__ import division, absolute_import
 # pyxhook -- an extension to emulate some of the PyHook library on linux.
 #
 # Copyright (C) 2008 Tim Alexander <dragonfyre13@gmail.com>
@@ -45,7 +44,6 @@ from __future__ import division, absolute_import
 #             - optimized keysym lookup by loading into a dict cache
 #             - started adding support for reporting unicode keys
 
-from builtins import str
 import threading
 import unicodedata
 import ctypes as ct
@@ -242,9 +240,12 @@ class HookManager(threading.Thread):
         self._running = False
         self.local_dpy.record_disable_context(self.ctx)
         self.local_dpy.flush()
-        self._xlib.XCloseDisplay(self._xdisplay)
-        self._xlib = None
-
+        try:
+            self._xlib.XCloseDisplay(self._xdisplay)
+            self._xlib = None
+        except AttributeError:
+            pass
+        
     def printevent(self, event):
         print2err(event)
 
@@ -265,7 +266,7 @@ class HookManager(threading.Thread):
     def isKeyPressed(self, key_str_id):
         """Returns 0 if key is not pressed, otherwise a.
 
-        possitive int, representing the auto repeat count ( return val - 1)
+        positive int, representing the auto repeat count ( return val - 1)
         of key press events that have occurred for the key.
 
         """

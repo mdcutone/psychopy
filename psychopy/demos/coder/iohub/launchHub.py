@@ -11,8 +11,6 @@ printed to stdout.
 Initial Version: May 6th, 2013, Sol Simpson
 """
 
-from __future__ import absolute_import, division, print_function
-
 from psychopy.iohub import launchHubServer
 
 def testWithNoKwargs():
@@ -67,7 +65,7 @@ def testUsingPsychoPyMonitorConfig():
     print('Display Default Eye Distance: ', display.getDefaultEyeDistance())
     print('Display Physical Dimensions: ', display.getPhysicalDimensions())
 
-    # That's it, shut down the ioHub Proicess and exit. ;)
+    # That's it, shut down the ioHub Process and exit. ;)
     io.quit()
 
 def testEnabledDataStore():

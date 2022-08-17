@@ -25,7 +25,7 @@ Commonly used:
 
 * :class:`.ImageStim` to show images
 * :class:`.TextStim` to show text
-* :class:`.TextBox` rewrite of TextStim (faster/better but only monospace fonts)
+* :class:`.TextBox2` rewrite of TextStim (faster, editable with more layout options and formatting)
 
 Shapes (all special classes of :class:`ShapeStim`):
 
@@ -65,6 +65,7 @@ Multiple stimuli:
 Other stimuli:
 
 * :class:`.MovieStim` to show movies
+* :class:`.VlcMovieStim` to show movies using VLC
 * :class:`.Slider` a new improved class to collect ratings
 * :class:`.RatingScale` to collect ratings
 * :class:`.CustomMouse` to change the cursor in windows with GUI. OBS: will be deprecated soon

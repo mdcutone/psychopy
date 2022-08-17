@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from builtins import object
 from collections import OrderedDict
 from psychopy.gui.qtgui import DlgFromDict
 import pytest
 
 
-class TestDlgFromDictQt(object):
+@pytest.mark.needs_qt
+class TestDlgFromDictQt:
     def setup(self):
         self.d = dict(
             participant='000',
@@ -77,5 +77,6 @@ class TestDlgFromDictQt(object):
         assert field.toolTip() == tip['participant']
 
 if __name__ == '__main__':
-    import pytest
-    pytest.main()
+    cls = TestDlgFromDictQt()
+    cls.setup()
+    cls.test_fixed()

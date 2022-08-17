@@ -1,23 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from __future__ import absolute_import, division, print_function
-
-from builtins import str
-from builtins import range
-from past.builtins import basestring
-from past.utils import old_div
 import os
 import sys
-import string
 import copy
-import codecs
 import numpy as np
 import pandas as pd
 
 from psychopy import logging
-from psychopy.constants import PY3
-from psychopy.tools.arraytools import shuffleArray
 from psychopy.tools.filetools import (openOutputFile, genDelimiter,
                                       genFilenameFromDelimiter)
 from .utils import importConditions
@@ -144,7 +134,7 @@ class TrialHandler(_BaseTrialHandler):
             # which corresponds to a list with a single empty entry
             self.trialList = [None]
         # user has hopefully specified a filename
-        elif isinstance(trialList, basestring) and os.path.isfile(trialList):
+        elif isinstance(trialList, str) and os.path.isfile(trialList):
             # import conditions from that file
             self.trialList = importConditions(trialList)
         else:
@@ -205,10 +195,7 @@ class TrialHandler(_BaseTrialHandler):
             strRepres += str('\tdata=')
             strRepres += str(data) + '\n'
 
-        if PY3:
-            method_string = "<class 'method'>"
-        else:
-            method_string = 'instancemethod'
+        method_string = "<class 'method'>"
 
         for thisAttrib in attribs:
             # can handle each attribute differently
@@ -240,13 +227,15 @@ class TrialHandler(_BaseTrialHandler):
         from the user.
 
         The returned sequence has form indices[stimN][repN]
-        Example: sequential with 6 trialtypes (rows), 5 reps (cols), returns:
-            [[0 0 0 0 0]
-             [1 1 1 1 1]
-             [2 2 2 2 2]
-             [3 3 3 3 3]
-             [4 4 4 4 4]
-             [5 5 5 5 5]]
+        Example: sequential with 6 trialtypes (rows), 5 reps (cols), returns::
+
+        [[0 0 0 0 0]
+        [1 1 1 1 1]
+        [2 2 2 2 2]
+        [3 3 3 3 3]
+        [4 4 4 4 4]
+        [5 5 5 5 5]]
+
         These 30 trials will be returned by .next() in the order:
             0, 1, 2, 3, 4, 5,   0, 1, 2, ...  ... 3, 4, 5
 
@@ -260,12 +249,11 @@ class TrialHandler(_BaseTrialHandler):
         # create indices for a single rep
         indices = np.asarray(self._makeIndices(self.trialList), dtype=int)
 
+        rng = np.random.default_rng(seed=self.seed)
         if self.method == 'random':
             sequenceIndices = []
-            seed = self.seed
             for thisRep in range(self.nReps):
-                thisRepSeq = shuffleArray(indices.flat, seed=seed).tolist()
-                seed = None  # so that we only seed the first pass through!
+                thisRepSeq = rng.permutation(indices.flat).tolist()
                 sequenceIndices.append(thisRepSeq)
             sequenceIndices = np.transpose(sequenceIndices)
         elif self.method == 'sequential':
@@ -273,7 +261,7 @@ class TrialHandler(_BaseTrialHandler):
         elif self.method == 'fullRandom':
             # indices*nReps, flatten, shuffle, unflatten; only use seed once
             sequential = np.repeat(indices, self.nReps, 1)  # = sequential
-            randomFlat = shuffleArray(sequential.flat, seed=self.seed)
+            randomFlat = rng.permutation(sequential.flat)
             sequenceIndices = np.reshape(
                 randomFlat, (len(indices), self.nReps))
         if self.autoLog:
@@ -363,6 +351,12 @@ class TrialHandler(_BaseTrialHandler):
         return self.thisTrial
 
     next = __next__  # allows user to call without a loop `val = trials.next()`
+
+    def getCurrentTrial(self):
+        """Returns the condition for the current trial, without
+        advancing the trials.
+        """
+        return self.trialList[self.thisIndex]
 
     def getFutureTrial(self, n=1):
         """Returns the condition for n trials into the future,
@@ -844,7 +838,7 @@ class TrialHandler2(_BaseTrialHandler):
             self.trialList = [None]
             self.columns = []
         # user has hopefully specified a filename
-        elif isinstance(trialList, basestring) and os.path.isfile(trialList):
+        elif isinstance(trialList, str) and os.path.isfile(trialList):
             # import conditions from that file
             self.trialList, self.columns = importConditions(
                 trialList,
@@ -871,7 +865,7 @@ class TrialHandler2(_BaseTrialHandler):
         self.finished = False
         self.extraInfo = extraInfo
         self.seed = seed
-        self._rng = np.random.RandomState(seed=seed)
+        self._rng = np.random.default_rng(seed=seed)
 
         # store a list of dicts, convert to pandas DataFrame on access
         self._data = []
@@ -901,10 +895,7 @@ class TrialHandler2(_BaseTrialHandler):
             strRepres += str('\tdata=')
             strRepres += str(data) + '\n'
 
-        if PY3:
-            method_string = "<class 'method'>"
-        else:
-            method_string = 'instancemethod'
+        method_string = "<class 'method'>"
 
         for thisAttrib in attribs:
             # can handle each attribute differently
@@ -983,16 +974,16 @@ class TrialHandler2(_BaseTrialHandler):
                         self.thisN < (self.nReps * len(self.trialList))):
                 # we've only just started on a fullRandom sequence
                 sequence *= self.nReps
-                self._rng.shuffle(sequence)
-                self.remainingIndices = sequence
+                # NB permutation *returns* a shuffled array
+                self.remainingIndices = list(self._rng.permutation(sequence))
             elif (self.method in ('sequential', 'random') and
                           self.thisRepN < self.nReps):
                 # start a new repetition
                 self.thisTrialN = 0
                 self.thisRepN += 1
                 if self.method == 'random':
-                    self._rng.shuffle(sequence)  # shuffle in-place
-                self.remainingIndices = sequence
+                    self._rng.shuffle(sequence)  # shuffle (is in-place)
+                self.remainingIndices = list(sequence)
             else:
                 # we've finished
                 self.finished = True
@@ -1161,7 +1152,7 @@ class TrialHandler2(_BaseTrialHandler):
 
         """
         self_copy = copy.deepcopy(self)
-        self_copy._rng_state = self_copy._rng.get_state()
+        self_copy._rng_state = self_copy._rng.bit_generator.state
         del self_copy._rng
 
         r = (super(TrialHandler2, self_copy)
@@ -1320,7 +1311,7 @@ class TrialHandlerExt(TrialHandler):
             # which corresponds to a list with a single empty entry
             self.trialList = [None]
         # user has hopefully specified a filename
-        elif isinstance(trialList, basestring) and os.path.isfile(trialList):
+        elif isinstance(trialList, str) and os.path.isfile(trialList):
             # import conditions from that file
             self.trialList = importConditions(trialList)
         else:
@@ -1375,25 +1366,28 @@ class TrialHandlerExt(TrialHandler):
         from the user.
 
         The returned sequence has form indices[stimN][repN]
-        Example: sequential with 6 trialtypes (rows), 5 reps (cols), returns:
-            [[0 0 0 0 0]
-             [1 1 1 1 1]
-             [2 2 2 2 2]
-             [3 3 3 3 3]
-             [4 4 4 4 4]
-             [5 5 5 5 5]]
+        Example: sequential with 6 trialtypes (rows), 5 reps (cols), returns::
+
+        [[0 0 0 0 0]
+        [1 1 1 1 1]
+        [2 2 2 2 2]
+        [3 3 3 3 3]
+        [4 4 4 4 4]
+        [5 5 5 5 5]]
+
         These 30 trials will be returned by .next() in the order:
             0, 1, 2, 3, 4, 5,   0, 1, 2, ...  ... 3, 4, 5
 
         Example: random, with 3 trialtypes, where the weights of
         conditions 0,1, and 2 are 3,2, and 1 respectively,
-        and a rep value of 5, might return:
-            [[0 1 2 0 1]
-             [1 0 1 1 1]
-             [0 2 0 0 0]
-             [0 0 0 1 0]
-             [2 0 1 0 2]
-             [1 1 0 2 0]]
+        and a rep value of 5, might return::
+
+        [[0 1 2 0 1]
+        [1 0 1 1 1]
+        [0 2 0 0 0]
+        [0 0 0 1 0]
+        [2 0 1 0 2]
+        [1 1 0 2 0]]
 
         These 30 trials will be returned by .next() in the order:
             0, 1, 0, 0, 2, 1,   1, 0, 2, 0, 0, 1, ...
@@ -1411,17 +1405,15 @@ class TrialHandlerExt(TrialHandler):
 
         repeat = np.repeat
         reshape = np.reshape
+        rng = np.random.default_rng(seed=self.seed)
         if self.method == 'random':
             seqIndices = []
-            seed = self.seed
+            if self.trialWeights is None:
+                thisRepSeq = indices.flat  # take a fresh copy
+            else:
+                thisRepSeq = repeat(indices, self.trialWeights)
             for thisRep in range(self.nReps):
-                if self.trialWeights is None:
-                    idx = indices.flat
-                else:
-                    idx = repeat(indices, self.trialWeights)
-                thisRepSeq = shuffleArray(idx, seed=seed).tolist()
-                seed = None  # so that we only seed the first pass through!
-                seqIndices.append(thisRepSeq)
+                seqIndices.append(rng.permutation(thisRepSeq))
             seqIndices = np.transpose(seqIndices)
         elif self.method == 'sequential':
             if self.trialWeights is None:
@@ -1433,14 +1425,14 @@ class TrialHandlerExt(TrialHandler):
             if self.trialWeights is None:
                 # indices * nReps, flatten, shuffle, unflatten;
                 # only use seed once
-                sequential = repeat(indices, self.nReps, 1)
-                randomFlat = shuffleArray(sequential.flat, seed=self.seed)
-                seqIndices = reshape(randomFlat,
-                                     (len(indices), self.nReps))
+                sequential = np.repeat(indices, self.nReps, 1)  # = sequential
+                randomFlat = rng.permutation(sequential.flat)
+                seqIndices = np.reshape(
+                    randomFlat, (len(indices), self.nReps))
             else:
                 _base = repeat(indices, self.trialWeights, 0)
                 sequential = repeat(_base, self.nReps, 1)
-                randomFlat = shuffleArray(sequential.flat, seed=self.seed)
+                randomFlat = rng.permutation(sequential.flat)
                 seqIndices = reshape(randomFlat,
                                      (sum(self.trialWeights), self.nReps))
 
@@ -1550,12 +1542,13 @@ class TrialHandlerExt(TrialHandler):
 
             # get the number of the trial presented by summing in ran for the
             # rows above and all columns
-            nThisTrialPresented = np.sum(
-                self.data['ran'][firstRowIndex:lastRowIndex, :])
+            # BF-Sourav-29032021: numpy returns float, so cast to int
+            nThisTrialPresented = int(round(np.sum(
+                self.data['ran'][firstRowIndex:lastRowIndex, :])))
 
             _tw = self.trialWeights[self.thisIndex]
             dataRowThisTrial = firstRowIndex + (nThisTrialPresented - 1) % _tw
-            dataColThisTrial = int(old_div((nThisTrialPresented - 1), _tw))
+            dataColThisTrial = int((nThisTrialPresented - 1) // _tw)
 
             position = [dataRowThisTrial, dataColThisTrial]
 
@@ -1580,12 +1573,13 @@ class TrialHandlerExt(TrialHandler):
 
             # get the number of the trial presented by summing in ran for the
             # rows above and all columns
-            nThisTrialPresented = np.sum(
-                self.data['ran'][firstRowIndex:lastRowIndex, :])
+            # BF-Sourav-29032021: numpy returns float, so cast to int
+            nThisTrialPresented = int(round(np.sum(
+                self.data['ran'][firstRowIndex:lastRowIndex, :])))
 
             _tw = self.trialWeights[self.thisIndex]
             dataRowThisTrial = firstRowIndex + nThisTrialPresented % _tw
-            dataColThisTrial = int(old_div(nThisTrialPresented, _tw))
+            dataColThisTrial = int(nThisTrialPresented // _tw)
 
             position = [dataRowThisTrial, dataColThisTrial]
 
@@ -1871,7 +1865,7 @@ class TrialHandlerExt(TrialHandler):
                             firstRowIndex = sum(self.trialWeights[:tti])
                             _tw = self.trialWeights[tti]
                             row = firstRowIndex + rep % _tw
-                            col = int(old_div(rep, _tw))
+                            col = int(rep // _tw)
                             nextEntry[prmName] = self.data[prmName][row][col]
                     else:
                         # allow a null value if this parameter wasn't

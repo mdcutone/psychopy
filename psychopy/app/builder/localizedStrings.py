@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Part of the PsychoPy library
-# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2021 Open Science Tools Ltd.
+# Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2022 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 """
@@ -10,13 +10,39 @@ Discover all _localized strings from all Builder components, etc.
 
 Mainly used by validators.py -- need access to _translate()d field names.
 """
-from __future__ import absolute_import, print_function
-
 import copy
 import os
 import glob
 from psychopy.localization import _localized as _localizedBase
 from psychopy.localization import _translate
+
+_localizedCategories = {
+    'Basic': _translate('Basic'),
+    'Color': _translate('Color'),
+    'Layout': _translate('Layout'),
+    'Data': _translate('Data'),
+    'Screen': _translate('Screen'),
+    'Input': _translate('Input'),
+    'Dots': _translate('Dots'),
+    'Grating': _translate('Grating'),
+    'Advanced': _translate('Advanced'),
+    'Custom': _translate('Custom'),
+    'Carrier': _translate('Carrier'),
+    'Envelope': _translate('Envelope'),
+    'Appearance': _translate('Appearance'),
+    'Save': _translate('Save'),
+    'Online':_translate('Online'),
+    'Testing':_translate('Testing'),
+    'Audio':_translate('Audio'),
+    'Format':_translate('Format'),
+    'Formatting':_translate('Formatting'),
+    'Eyetracking':_translate('Eyetracking'),
+    'Target':_translate('Target'),
+    'Animation':_translate('Animation'),
+    'Transcription':_translate('Transcription'),
+    'Timing':_translate('Timing'),
+    'Playback':_translate('Playback')
+}
 
 _localizedDialogs = {
     # strings for all allowedVals (from all components) go here:
@@ -59,6 +85,17 @@ _localizedDialogs = {
     # units not translated:
     'pix': 'pix', 'deg': 'deg', 'cm': 'cm',
     'norm': 'norm', 'height': 'height',
+    'degFlat': 'degFlat', 'degFlatPos':'degFlatPos',
+    # anchor
+    'center': _translate('center'),
+    'top-center': _translate('top-center'),
+    'bottom-center': _translate('bottom-center'),
+    'center-left': _translate('center-left'),
+    'center-right': _translate('center-right'),
+    'top-left': _translate('top-left'),
+    'top-right': _translate('top-right'),
+    'bottom-left': _translate('bottom-left'),
+    'bottom-right': _translate('bottom-right'),
     # tex resolution:
     '32': '32', '64': '64', '128': '128', '256': '256', '512': '512',
     'routine': 'Routine',
@@ -86,6 +123,7 @@ _localizedDialogs = {
     # Mouse:
     'any click': _translate('any click'),
     'valid click': _translate('valid click'),
+    'on valid click': _translate('on valid click'),
     'mouse onset':_translate('mouse onset'),
     'Routine': _translate('Routine'),
     # Joystick:
@@ -102,6 +140,7 @@ _localizedDialogs = {
     'cross': _translate('cross'),
     'star': _translate('star'),
     'regular polygon...': _translate('regular polygon...'),
+    'custom polygon...': _translate('custom polygon...'),
     # Form
     'rows': _translate('rows'),
     'columns': _translate('columns'),
@@ -118,10 +157,27 @@ _localizedDialogs = {
     'Builder variable': _translate('Builder variable'),
     'Psychopy module': _translate('Psychopy module'),
     'numpy function': _translate('numpy function'),
-    'python keyword': _translate('python keyword')}
+    'python keyword': _translate('python keyword'),
+    # Eyetracker - ROI
+    'look at': _translate('look at'),
+    'look away': _translate('look away'),
+    'every look': _translate('every look'),
+    'first look': _translate('first look'),
+    'last look': _translate('last look'),
+    'roi onset': _translate('roi onset'),
+    # Eyetracker - Recording
+    'Start and Stop': _translate('Start and Stop'),
+    'Start Only': _translate('Start Only'),
+    'Stop Only': _translate('Stop Only'),
+    # ResourceManager
+    'Start and Check': _translate('Start and Check'),
+    # 'Start Only': _translate('Start Only'),  # defined in Eyetracker - Recording
+    'Check Only': _translate('Check Only')
+}
 
 
 _localized = copy.copy(_localizedBase)
+_localized.update(_localizedCategories)
 _localized.update(_localizedDialogs)
 
 thisDir = os.path.dirname(os.path.abspath(__file__))
