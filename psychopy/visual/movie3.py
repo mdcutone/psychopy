@@ -302,17 +302,21 @@ class MovieStim3(BaseVisualStim, ContainerMixin, TextureMixin):
 
     def stop(self, log=True):
         """Stop the current point in the movie (sound will stop, current frame
-        will not advance). Once stopped the movie cannot be restarted -
-        it must be loaded again. Use pause() if you may need to restart
-        the movie.
+        will not advance). Once stopped the movie is restarted and paused.
+        Calling `play()` will start playback from the beginning of the movie.
+
+        Call `unload()` to stop and unload resources related to the movie.
+
         """
         if self.status != STOPPED:
-            self._unload()
-            self.reset()
-            self.status = STOPPED  # set status to STOPPED after _unload
+            self.pause(log=log)
+            self.seek(0.0)
+
             if log and self.autoLog:
                 self.win.logOnFlip("Set %s stopped" % (self.name),
                                    level=logging.EXP, obj=self)
+
+            self.status = STOPPED  # set status to STOPPED after _unload
 
     def setVolume(self, volume):
         pass  # to do
