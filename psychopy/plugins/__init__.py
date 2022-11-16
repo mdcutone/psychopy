@@ -8,6 +8,7 @@
 
 __all__ = [
     'loadPlugin',
+    'loadPlugins',
     'listPlugins',
     'computeChecksum',
     'startUpPlugins',
@@ -383,7 +384,7 @@ def isStartUpPlugin(plugin):
     return plugin in listPlugins(which='startup')
 
 
-def loadPlugin(plugin, *args, **kwargs):
+def loadPlugin(plugin):
     """Load a plugin to extend PsychoPy.
 
     Plugins are packages which extend upon PsychoPy's existing functionality by
@@ -421,9 +422,6 @@ def loadPlugin(plugin, *args, **kwargs):
     plugin : str
         Name of the plugin package to load. This usually refers to the package
         or project name.
-    *args, **kwargs
-        Optional arguments and keyword arguments to pass to the plugin's
-        `__register__` function.
 
     Returns
     -------
@@ -485,7 +483,7 @@ def loadPlugin(plugin, *args, **kwargs):
             'Specified package `{}` defines no entry points for PsychoPy. '
             'Skipping.'.format(plugin))
 
-        if plugin not in _failed_plugins_.keys():
+        if plugin not in _failed_plugins_:
             _failed_plugins_.append(plugin)
 
         return False  # can't do anything more here, so return
@@ -547,41 +545,45 @@ def loadPlugin(plugin, *args, **kwargs):
 
                     return False
 
-                # call the register function, check if exists and valid
-                if hasattr(imp, '__register__') and imp.__register__ is not None:
-                    if isinstance(imp.__register__, str):
-                        if hasattr(imp, imp.__register__):  # local to module
-                            func = getattr(imp, imp.__register__)
-                        else:  # could be a FQN?
-                            func = resolveObjectFromName(
-                                imp.__register__, error=False)
-                        # check if the reference object is callable
-                        if not callable(func):
-                            logging.error(
-                                "Plugin `{}` module defines `__register__` but "
-                                "the specified object is not a callable type. "
-                                "Skipping.".format(plugin))
-
-                            if plugin not in _failed_plugins_:
-                                _failed_plugins_.append(plugin)
-
-                            return False
-
-                    elif callable(imp.__register__):  # a function was supplied
-                        func = imp.__register__
-                    else:
-                        logging.error(
-                            "Plugin `{}` module defines `__register__` but "
-                            "is not `str` or callable type. Skipping.".format(
-                                plugin))
-
-                        if plugin not in _failed_plugins_:
-                            _failed_plugins_.append(plugin)
-
-                        return False
-
-                    # call the register function with arguments
-                    func(*args, **kwargs)
+                # NB - Removed support for the `__register__` function for now,
+                #      too complex with no use cases. We can add support back in
+                #      by un-commenting this in the future.
+                #
+                # # call the register function, check if exists and valid
+                # if hasattr(imp, '__register__') and imp.__register__ is not None:
+                #     if isinstance(imp.__register__, str):
+                #         if hasattr(imp, imp.__register__):  # local to module
+                #             func = getattr(imp, imp.__register__)
+                #         else:  # could be a FQN?
+                #             func = resolveObjectFromName(
+                #                 imp.__register__, error=False)
+                #         # check if the reference object is callable
+                #         if not callable(func):
+                #             logging.error(
+                #                 "Plugin `{}` module defines `__register__` but "
+                #                 "the specified object is not a callable type. "
+                #                 "Skipping.".format(plugin))
+                #
+                #             if plugin not in _failed_plugins_:
+                #                 _failed_plugins_.append(plugin)
+                #
+                #             return False
+                #
+                #     elif callable(imp.__register__):  # a function was supplied
+                #         func = imp.__register__
+                #     else:
+                #         logging.error(
+                #             "Plugin `{}` module defines `__register__` but "
+                #             "is not `str` or callable type. Skipping.".format(
+                #                 plugin))
+                #
+                #         if plugin not in _failed_plugins_:
+                #             _failed_plugins_.append(plugin)
+                #
+                #         return False
+                #
+                #     # call the register function with arguments
+                #     func(*args, **kwargs)
 
             # Ensure that we are not wholesale replacing an existing module.
             # We want plugins to be explicit about what they are changing.
@@ -695,6 +697,27 @@ def requirePlugin(plugin):
     if not isPluginLoaded(plugin):
         raise RuntimeError('Required plugin `{}` has not been loaded.'.format(
             plugin))
+
+
+def loadPlugins(plugins):
+    """Load plugins.
+
+    Parameters
+    ----------
+    plugins : list, tuple or str
+        List of plugins to load. Plugins will be loaded in the order they appear
+        in the list. A string can be passed to this function to load a single
+        plugin. In that case the behaviour will match that of `loadPlugin`.
+
+    """
+    # This function was created to avoid adding an iteration in `loadPlugin()`
+    if isinstance(plugins, str):  # handle `str` type
+        loadPlugin(plugins)
+        return
+
+    # handle the sequences
+    for plugin in plugins:
+        loadPlugin(plugin)
 
 
 def startUpPlugins(plugins, add=True, verify=True):

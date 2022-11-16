@@ -11,7 +11,7 @@ on this page.
 How plugins work
 ----------------
 
-The plugin system in |PsychoPy| functions as a dynamic importer, which imports
+The plugin system in |PsychoPy| functions as a dynamic importer, that imports
 additional executable code from plugin packages then patches them into an active
 |PsychoPy| session at runtime. This is done by calling the
 ``psychopy.plugins.loadPlugin()`` function and passing the project name of the
@@ -32,7 +32,7 @@ Plugin packages
 ---------------
 
 A plugin has a similar structure to Python package, see the official `Packaging
-Python Projects` (https://packaging.python.org/tutorials/packaging-projects)
+Python Projects <https://packaging.python.org/tutorials/packaging-projects>`_
 guide for details.
 
 Naming plugin packages
@@ -68,8 +68,9 @@ Entry points reference objects in a plugin module that |PsychoPy| will attach
 to itself. Packages advertise their entry points by having them in their
 metadata. How entry points are defined and added to package metadata is
 described in the section
-`Dynamic Discovery of Services and Plugins <https://setuptools.readthedocs.io/en/latest/setuptools.html#dynamic-discovery-of-services-and-plugins>`_
-of the documentation for `setuptools`.
+`Dynamic Discovery of Services and Plugins <https://setuptools.readthedocs.io/
+en/latest/setuptools.html#dynamic-discovery-of-services-and-plugins>`_ of the
+documentation for `setuptools`.
 
 When loading a specified plugin, the plugin loader searches for a distribution
 matching the given project name, then gets the entry point mapping from its
@@ -94,11 +95,16 @@ the plugin project's `setup.py` file::
 
     Plugins can load and assign entry points to names anywhere in PsychoPy's
     namespace. However, plugin developers should place them where they make
-    most sense. In the last example, we put `MyStim` in `psychopy.visual`
+    most sense. In the last example, we put `MyStim` in ``psychopy.visual``
     because that's where users would expect to find it if it was part of the
     base |PsychoPy| installation.
 
-If we have additional classes we'd like to add to `psychopy.visual`, entry
+    Some entry points must be into specific |PsychoPy| sub-packages in order
+    to be correctly registered. For instance, photometer interface classes
+    must be placed in ``psychopy.hardware.photometer`` in order to appear in
+    in the GUI as options.
+
+If we have additional classes we'd like to add to ``psychopy.visual``, entry
 entry points for that group can be given as a list of specifiers::
 
     setup(
@@ -131,51 +137,6 @@ points using the following::
 After calling ``loadPlugin('psychopy-display')``, the user will be able to
 create instances of ``psychopy.hardware.DisplayControl`` and new instances of
 ``psychopy.visual.Window`` will have the modified ``flip()`` method.
-
-The __register__ attribute
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Plugin modules can define a optional attribute named ``__register__`` which
-specifies a callable object. The purpose of ``__register__`` is to allow the
-module to perform tasks before loading entry points based on arguments passed to
-it by the plugin loader. The arguments passed to the target of ``__register__``,
-come from the ``**kwargs`` given to ``loadPlugins()``. The value of this
-attribute can be a string of the name or a reference to a callable object (ie.
-function or method).
-
-.. note::
-
-    The ``__register__`` attribute should only ever be used for running routines
-    pertinent to setting up entry points. The referenced object is only called
-    on a module once per session.
-
-As an example, consider a case where an entry point is defined as ``doThis`` in
-plugin `python-foobar`. There are two possible behaviors which are `foo` and
-`bar` that ``dothis`` can have. We can implement both behaviors in separate
-functions, and use arguments passed to the ``__register__`` target to assign
-which to use to as the entry point::
-
-    __register__ = 'register'
-
-    doThis = None
-
-    def foo():
-        return 'foo'
-
-    def bar():
-        return 'bar'
-
-    def register(**kwargs):
-        global dothis
-        option = kwargs.get('option', 'foo')
-        if option == 'bar':
-            dothis = bar
-        else:
-            dothis = foo
-
-When the user calls ``loadPlugin('python-foobar', option='bar')``, the plugin
-will assign function ``bar()``` to ``doThis``. If `option` is not specified or
-given as 'foo', the behavior of ``doThis`` will be that of ``foo()``.
 
 Plugin example project
 ----------------------
