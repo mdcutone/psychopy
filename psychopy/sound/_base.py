@@ -56,7 +56,7 @@ def apodize(soundArray, sampleRate):
     return soundArray
 
 
-class HammingWindow():
+class HammingWindow:
     def __init__(self, winSecs, soundSecs, sampleRate):
         """
 
@@ -118,7 +118,7 @@ class HammingWindow():
         return block
 
 
-class _SoundBase():
+class _SoundBase:
     """Base class for sound object, from one of many ways.
     """
     # Must be provided by class SoundPygame or SoundPyo:
