@@ -192,14 +192,6 @@ class BaseTranscriber:
     All transcription interfaces are singletons as we usually cannot open
     multiple recognizers in parallel.
 
-    Parameters
-    ----------
-    language : str
-        Language to initialize the recognizer with. This is specified as a
-        BCP-47 language code (eg., 'en-US'). Should match the language which the
-        speaker is using. This value is used when the `language` argument of
-        `transcribe` is specified as `None`.
-
     """
     # Set these values appropriately in sub-classes, they are needed to identify
     # the transcriber whe unbound and give information to the user.
@@ -208,8 +200,12 @@ class BaseTranscriber:
 
     # reference to the singleton instance stored here
     _instance = None
+    _initialized = False  # set to `True` after `setupModel` is called
 
-    def __new__(cls):
+    # internal stuff to keep track of
+    _language = None
+
+    def __new__(cls, *args, **kwargs):
         """Control how this class is initialized to ensure only one instance is
         created per session to avoid overhead in creating recognizers.
         """
@@ -218,8 +214,25 @@ class BaseTranscriber:
 
         return cls._instance
 
-    def __init__(self, language='en-US'):
-        self._language = language
+    def initialize(self, language=None):
+        """Configure the recognizer model.
+
+        This is called automatically on the first call to `transcribe`, but it
+        can be called in advance to avoid doing so in a time-sensitive part of
+        the program.
+
+        """
+        # bare minimum implementation, should set these as such
+        self._language = language or self.language
+        if self._language is None:
+            self._language = TRANSCR_LANG_DEFAULT
+            logging.warning(
+                "Initializing model without specifying `language`. Using "
+                "default value of '{}'.".format(TRANSCR_LANG_DEFAULT))
+
+        # setup the transcriber here ...
+
+        self._initialized = True  # idempotent after the first call
 
     @property
     def engine(self):
@@ -254,9 +267,10 @@ class BaseTranscriber:
         ----------
         audioClip : AudioClip
             Audio clip containing speech samples to transcribe.
-        language : str
+        language : str or None
             BCP-47 language code (eg., 'en-US'). Should match the language which
-            the speaker is using.
+            the speaker is using. If `None`, the value at property `language` is
+            used instead.
         expectedWords : list or None
             List of strings representing expected words or phrases. These are
             passed as speech context metadata which will make the recognizer
@@ -271,26 +285,47 @@ class BaseTranscriber:
             Object containing the transcription result.
 
         """
-        pass
+        # transcribe should always do this check
+        if not self._initialized:
+            self.initialize(language=self.language)
+            logging.warning(
+                "Initializing the recognizer model. If you are experiencing "
+                "timing issues, call `.initialize()` in some other part of "
+                "the program.")
+
+        return NULL_TRANSCRIPTION_RESULT  # dummy object
 
 
 class TranscriberPocketSphinx(BaseTranscriber):
-    """Speech-to-text transcription interface using PocketSphinx.
+    """Speech-to-text transcription interface using CMU PocketSphinx.
 
-    Parameters
-    ----------
-    language : str
-        Language to initialize the recognizer with. This is specified as a
-        BCP-47 language code (eg., 'en-US'). Should match the language which the
-        speaker is using. This value is used when the `language` argument of
-        `transcribe` is specified as `None`.
+    PocketSphinx is a locally hosted service that does speech-to-text
+    transcription for free.
 
     """
     transcriberType = 'sphinx'
     transcriberDesc = "CMU Pocket Sphinx"
 
-    def __init__(self, language='en_US'):
-        super(TranscriberPocketSphinx, self).__init__(language=language)
+    _speechRecognition = None
+    _sphinxModelPath = None
+    _sphinxLangs = None
+    _pocketSphinxRec = None
+
+    def initialize(self, language=None):
+        """Configure the recognizer model.
+
+        This is called automatically on the first call to `transcribe`, but it
+        can be called in advance to avoid doing so in a time-sensitive part of
+        the program.
+
+        """
+        # bare minimum implementation, should set these as such
+        self._language = language or self.language
+        if self._language is None:
+            self._language = TRANSCR_LANG_DEFAULT
+            logging.warning(
+                "Initializing model without specifying `language`. Using "
+                "default value of '{}'.".format(TRANSCR_LANG_DEFAULT))
 
         try:
             import speech_recognition as sr
@@ -314,6 +349,8 @@ class TranscriberPocketSphinx(BaseTranscriber):
         # create the recognizer
         self._pocketSphinxRec = self._speechRecognition.Recognizer()
 
+        self._initialized = True  # idempotent after the first call
+
     def transcribe(self, audioClip=None, language='en-US', expectedWords=None,
                    config=None):
         """Perform speech-to-text conversion on the provided audio samples using
@@ -326,7 +363,7 @@ class TranscriberPocketSphinx(BaseTranscriber):
             microphone). Specify `None` to open a client without performing a
             transcription, this will reduce latency when the transcriber is
             invoked in successive calls.
-        language : str
+        language : str or None
             BCP-47 language code (eg., 'en-US'). Should match the language which
             the speaker is using. Pocket Sphinx requires language packs to be
             installed locally.
@@ -349,9 +386,12 @@ class TranscriberPocketSphinx(BaseTranscriber):
             Transcription result object.
 
         """
-        # warmup the engine, not used here but needed for compatibility
-        if audioClip is None:
-            return NULL_TRANSCRIPTION_RESULT
+        if not self._initialized:
+            self.initialize(language=self.language)
+            logging.warning(
+                "Initializing the recognizer model. If you are experiencing "
+                "timing issues, call `.initialize()` in some other part of "
+                "the program.")
 
         # check if we have a valid audio clip
         if not isinstance(audioClip, AudioClip):
@@ -366,9 +406,12 @@ class TranscriberPocketSphinx(BaseTranscriber):
                 "Invalid type for parameter `config` specified, must be `dict` "
                 "or `None`.")
 
-        if not isinstance(language, str):
+        if language is None:  # use the property
+            language = self.language
+        elif not isinstance(language, str):
             raise TypeError(
-                "Invalid type for parameter `language`, must be type `str`.")
+                "Invalid type for parameter `language`, must be type `str` or "
+                "`NoneType`.")
 
         language = language.lower()
         if language not in self._sphinxLangs:  # missing a language pack error
@@ -412,7 +455,7 @@ class TranscriberPocketSphinx(BaseTranscriber):
             words=result,
             unknownValue=unknownValueError,
             requestFailed=requestError,
-            engine='sphinx',
+            engine=self.engine,
             language=language)
 
         # split only if the user does not want the raw API data
@@ -420,33 +463,45 @@ class TranscriberPocketSphinx(BaseTranscriber):
 
 
 class TranscriberGoogle(BaseTranscriber):
-    """Speech-to-text transcription interface using Google Cloud services
-    (requires internet connection and Google Cloud subscription).
+    """Speech-to-text transcription interface using Google Cloud services.
 
-    Parameters
-    ----------
-    language : str
-        Language to initialize the recognizer with. This is specified as a
-        BCP-47 language code (eg., 'en-US'). Should match the language which the
-        speaker is using. This value is used when the `language` argument of
-        `transcribe` is specified as `None`.
+    This is an online based speech-to-text engine provided by Google as a
+    subscription service, providing exceptional accuracy compared to `built-in`.
+    Requires an API key to use which you must generate and specify prior to
+    using this interface.
 
     """
     transcriberType = 'google'
     transcriberDesc = "Google Cloud"
 
-    def __init__(self, language='en_US'):
-        super(TranscriberGoogle, self).__init__(language=language)
+    # internal class attributes the user doesn't need to see
+    _googleCloudSpeech = None  # ref to speech module
+    _googleCloudErrors = None  # ref to exceptions
+    _googleCloudClient = None  # ref to client
 
-        # initialize the transcriber client
-        self._googleCloudClient = None
-        self._initClient()
+    def initialize(self, language=None):
+        """Configure the recognizer model.
 
-    def _initClient(self):
-        """Initialize the Google API client.
+        This is called automatically on the first call to `transcribe`, but it
+        can be called in advance to avoid doing so in a time-sensitive part of
+        the program.
+
+        Parameters
+        ----------
+        language : str or None
+            Language to initialize the recognizer with. This is specified as a
+            BCP-47 language code (eg., 'en-US'). Should match the language which
+            the speaker is using. This value is used when the `language`
+            argument of `transcribe` is specified as `None`.
+
         """
-        if self._googleCloudClient is not None:
-            return
+        # set model language
+        self._language = language or self.language
+        if self._language is None:
+            self._language = TRANSCR_LANG_DEFAULT
+            logging.warning(
+                "Initializing model without specifying `language`. Using "
+                "default value of '{}'.".format(TRANSCR_LANG_DEFAULT))
 
         # do imports for google
         try:
@@ -484,15 +539,12 @@ class TranscriberGoogle(BaseTranscriber):
                 'Invalid key specified for Google Cloud Services, check if the '
                 'key file is valid and readable.')
 
+        self._initialized = True
+
     def transcribe(self, audioClip=None, language='en-US', expectedWords=None,
                    config=None):
         """Perform speech-to-text conversion on the provided audio clip using
         the Google Cloud API.
-
-        This is an online based speech-to-text engine provided by Google as a
-        subscription service, providing exceptional accuracy compared to
-        `built-in`. Requires an API key to use which you must generate and
-        specify prior to calling this function.
 
         Parameters
         ----------
@@ -534,9 +586,12 @@ class TranscriberGoogle(BaseTranscriber):
                 print("You said: {}".format(results.words[0]))
 
         """
-        # if None, return a null transcription result and just open a client
-        if audioClip is None:
-            return NULL_TRANSCRIPTION_RESULT
+        if not self._initialized:
+            self.initialize(language=language)
+            logging.info(
+                "Initializing the recognizer for the first time. If you are "
+                "experiencing timing issues, call `.initialize()` in some "
+                "other part of the program.")
 
         # check if we have a valid audio clip
         if not isinstance(audioClip, AudioClip):
@@ -544,12 +599,19 @@ class TranscriberGoogle(BaseTranscriber):
                 "Expected parameter `audioClip` to have type "
                 "`psychopy.sound.AudioClip`.")
 
+        if language is None:  # use the property
+            language = self.language
+        elif not isinstance(language, str):
+            raise TypeError(
+                "Invalid type for parameter `language`, must be type `str` or "
+                "`NoneType`.")
+
         # configure the recognizer
         enc = self._googleCloudSpeech.RecognitionConfig.AudioEncoding.LINEAR16
         params = {
             'encoding': enc,
             'sample_rate_hertz': audioClip.sampleRateHz,
-            'language_code': self.language,
+            'language_code': language,
             'model': 'command_and_search',
             'audio_channel_count': audioClip.channels,
             'max_alternatives': 1}
@@ -577,20 +639,9 @@ class TranscriberGoogle(BaseTranscriber):
             unknownValue=False,  # not handled yet
             requestFailed=False,  # not handled yet
             engine=self.engine,
-            language=self.language)
+            language=language)
 
         return toReturn
-
-
-class TranscriberOpenAI(BaseTranscriber):
-    """Speech-to-text transcription interface using OpenAI Whisper.
-
-    """
-    transcriberType = 'whisper'
-    transcriberDesc = "OpenAI Whisper"
-
-    def __init__(self):
-        super(TranscriberOpenAI, self).__init__()
 
 
 def getTranscribers():
