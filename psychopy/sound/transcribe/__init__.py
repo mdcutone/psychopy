@@ -13,11 +13,14 @@ can acquire references to these classes by calling :func:`getTranscribers()`.
 # Distributed under the terms of the GNU General Public License (GPL).
 
 __all__ = [
+    'NULL_TRANSCRIPTION_RESULT',
+    'TRANSCR_LANG_DEFAULT',
     'TranscriptionResult',
     'BaseTranscriber',
+    'TranscriberPocketSphinx',
+    'TranscriberGoogle',
     'getTranscribers',
     'transcribe',
-    'TRANSCR_LANG_DEFAULT',
     'recognizerEngineValues'
 ]
 
