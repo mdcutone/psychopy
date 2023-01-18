@@ -7,16 +7,14 @@
 
 import sys
 
-# fix macOS locale-bug on startup: sets locale to LC_ALL (must be defined!)
-import psychopy.locale_setup  # noqa
-
-
 # NB the PsychoPyApp classes moved to _psychopyApp.py as of version 1.78.00
 # to allow for better upgrading possibilities from the mac app bundle. this
 # file now used solely as a launcher for the app, not as the app itself.
 
 
 def start_app():
+    # fix macOS locale-bug on startup: sets locale to LC_ALL (must be defined!)
+    import psychopy.locale_setup  # noqa
     from psychopy.app import startApp
 
     showSplash = True

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=PsychoPy
+GenericName=UML application
+Comment=PsychoPy is an open-source package for creating experiments in behavioral science
+Exec=psychopy
+Icon=${SNAP}/app/Resources/psychopy.png
+Terminal=false
+Type=Application
+Categories=Development;
+StartupNotify=true
