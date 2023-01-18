@@ -647,15 +647,27 @@ class ForeColorMixin(BaseColorMixin, LegacyForeColorMixin):
     def color(self, value):
         self.foreColor = value
 
+    @property
+    def fontColor(self):
+        """Alternative way of setting `foreColor`."""
+        return self.foreColor
+
+    @fontColor.setter
+    def fontColor(self, value):
+        self.foreColor = value
+
     def setForeColor(self, color, colorSpace=None, operation='', log=None):
         """Hard setter for foreColor, allows suppression of the log message,
         simultaneous colorSpace setting and calls update methods.
         """
-        setColor(obj=self, colorAttrib="foreColor", color=color, colorSpace=colorSpace or self.colorSpace, operation=operation)
+        setColor(obj=self, colorAttrib="foreColor", color=color, colorSpace=colorSpace or self.colorSpace, operation=operation, log=log)
         # Trigger color update for components like Textbox which have different behaviours for a hard setter
         self.updateColors()
 
     def setColor(self, color, colorSpace=None, operation='', log=None):
+        self.setForeColor(color, colorSpace=colorSpace, operation=operation, log=log)
+
+    def setFontColor(self, color, colorSpace=None, operation='', log=None):
         self.setForeColor(color, colorSpace=colorSpace, operation=operation, log=log)
 
 
@@ -694,16 +706,28 @@ class FillColorMixin(BaseColorMixin, LegacyFillColorMixin):
     def backColor(self, value):
         self.fillColor = value
 
+    @property
+    def backgroundColor(self):
+        """Alternative way of setting fillColor"""
+        return self.fillColor
+
+    @backgroundColor.setter
+    def backgroundColor(self, value):
+        self.fillColor = value
+
     def setFillColor(self, color, colorSpace=None, operation='', log=None):
         """Hard setter for fillColor, allows suppression of the log message,
         simultaneous colorSpace setting and calls update methods.
         """
-        setColor(obj=self, colorAttrib="fillColor", color=color, colorSpace=colorSpace or self.colorSpace, operation=operation)
+        setColor(obj=self, colorAttrib="fillColor", color=color, colorSpace=colorSpace or self.colorSpace, operation=operation, log=log)
         # Trigger color update for components like Textbox which have different behaviours for a hard setter
         self.updateColors()
 
     def setBackColor(self, color, colorSpace=None, operation='', log=None):
-        self.setFillColor(color, colorSpace=None, operation='', log=None)
+        self.setFillColor(color, colorSpace=colorSpace, operation=operation, log=log)
+
+    def setBackgroundColor(self, color, colorSpace=None, operation='', log=None):
+        self.setFillColor(color, colorSpace=colorSpace, operation=operation, log=log)
 
 
 class BorderColorMixin(BaseColorMixin, LegacyBorderColorMixin):
@@ -741,7 +765,7 @@ class BorderColorMixin(BaseColorMixin, LegacyBorderColorMixin):
         """Hard setter for `fillColor`, allows suppression of the log message,
         simultaneous colorSpace setting and calls update methods.
         """
-        setColor(obj=self, colorAttrib="borderColor", color=color, colorSpace=colorSpace or self.colorSpace, operation=operation)
+        setColor(obj=self, colorAttrib="borderColor", color=color, colorSpace=colorSpace or self.colorSpace, operation=operation, log=log)
         # Trigger color update for components like Textbox which have different behaviours for a hard setter
         self.updateColors()
 
@@ -949,7 +973,7 @@ class TextureMixin:
         """
 
         # transform all variants of `None` to that, simplifies conditions below
-        if tex in ["none", "None", "color"]:
+        if isinstance(tex, str) and tex in ["none", "None", "color"]:
             tex = None
 
         # Create an intensity texture, ranging -1:1.0

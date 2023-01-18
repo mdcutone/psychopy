@@ -16,26 +16,29 @@ from psychopy.constants import (NOT_STARTED, STARTED, PLAYING, PAUSED, STOPPED, 
 
 __author__ = 'Anthony Haffey & Todd Parsons'
 
-class ButtonStim(TextBox2):
-    """A class for putting a button into your experiment. A button is essentially a TextBox with a Mouse component contained within it, making it easy to check whether it has been clicked on.
 
+class ButtonStim(TextBox2):
+    """
+    A class for putting a button into your experiment. A button is essentially a TextBox with a Mouse component
+    contained within it, making it easy to check whether it has been clicked on.
     """
 
     def __init__(self, win, text, font='Arvo',
                  pos=(0, 0), size=None, padding=None, anchor='center', units=None,
                  color='white', fillColor='darkgrey', borderColor=None, borderWidth=0, colorSpace='rgb', opacity=None,
                  letterHeight=None, bold=True, italic=False,
-                 name="", autoLog=None,
+                 name="", depth=0, autoLog=None,
                  ):
         # Initialise TextBox
         TextBox2.__init__(self, win, text, font, name=name,
                                  pos=pos, size=size, padding=padding, anchor=anchor, units=units,
                                  color=color, fillColor=fillColor, borderColor=borderColor, borderWidth=borderWidth, colorSpace=colorSpace, opacity=opacity,
                                  letterHeight=letterHeight, bold=bold, italic=italic,
-                                 alignment='center', editable=False, autoLog=None)
+                                 alignment='center', editable=False, depth=depth, autoLog=None)
         self.listener = event.Mouse(win=win)
         self.buttonClock = core.Clock()
-        self.wasClicked = False # Attribute to save whether button was previously clicked
+        # Attribute to save whether button was previously clicked
+        self.wasClicked = False
         # Arrays to store times of clicks on and off
         self.timesOn = []
         self.timesOff = []
@@ -65,6 +68,18 @@ class ButtonStim(TextBox2):
             self.buttonClock.reset()  # Reset clock
         # Set status
         self._status = value
+
+    def reset(self):
+        """
+        Clear previously stored times on / off and check current click state.
+
+        In Builder, this is called at the start of each routine.
+        """
+        # Update wasClicked (so continued clicks at routine start are considered)
+        self.wasClicked = self.isClicked
+        # Clear on/off times
+        self.timesOn = []
+        self.timesOff = []
 
 
 class CheckBoxStim(ShapeStim):

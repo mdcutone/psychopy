@@ -9,6 +9,7 @@
 """
 import os
 import shutil
+import subprocess
 import sys
 import atexit
 import codecs
@@ -23,6 +24,25 @@ except ImportError:
 
 from psychopy import logging
 from psychopy.tools.fileerrortools import handleFileCollision
+from pathlib import Path
+
+# Names accepted by stimulus classes & the filename of the default stimulus to use
+defaultStimRoot = Path(__file__).parent.parent / "app" / "Resources"
+defaultStim = {
+    # Image stimuli
+    "default.png": "default.png",
+    "default.jpg": "default.png",
+    "default.jpeg": "default.png",
+    # Movie stimuli
+    "default.mp4": "default.mp4",
+    "default.mov": "default.mp4",
+    "default.mkv": "default.mp4",
+    "default.avi": "default.mp4",
+    "default.wmv": "default.mp4",
+    # Sound stimuli
+    "default.mp3": "default.mp3",
+    "default.wav": "default.mp3",
+}
 
 
 def toFile(filename, data):
@@ -303,3 +323,20 @@ def pathToString(filepath):
     if hasattr(filepath, "__fspath__"):
         return filepath.__fspath__()
     return filepath
+
+
+def openInExplorer(path):
+    """
+    Open a given director path in current operating system's file explorer.
+    """
+    # Choose a command according to OS
+    if sys.platform in ['win32']:
+        comm = "explorer"
+    elif sys.platform in ['darwin']:
+        comm = "open"
+    elif sys.platform in ['linux', 'linux2']:
+        comm = "dolphin"
+    # Use command to open folder
+    ret = subprocess.call(" ".join([comm, path]), shell=True)
+
+    return ret

@@ -16,7 +16,7 @@ import os.path
 from pathlib import Path
 
 from psychopy import prefs
-from psychopy.tools.filetools import pathToString
+from psychopy.tools.filetools import pathToString, defaultStim
 from psychopy.visual.basevisual import BaseVisualStim, ContainerMixin, ColorMixin
 from psychopy.constants import FINISHED, NOT_STARTED, PAUSED, PLAYING, STOPPED
 
@@ -198,8 +198,9 @@ class MovieStim(BaseVisualStim, ColorMixin, ContainerMixin):
         """
         # If given `default.mp4`, sub in full path
         if isinstance(filename, str):
-            if filename == "default.mp4":
-                filename = Path(prefs.paths['resources']) / "default.mp4"
+            # alias default names (so it always points to default.png)
+            if filename in defaultStim:
+                filename = Path(prefs.paths['resources']) / defaultStim[filename]
 
             # check if the file has can be loaded
             if not os.path.isfile(filename):
@@ -385,6 +386,22 @@ class MovieStim(BaseVisualStim, ColorMixin, ContainerMixin):
 
         """
         self._player.pause(log=log)
+
+    def toggle(self, log=True):
+        """Switch between playing and pausing the movie. If the movie is playing,
+        this function will pause it. If the movie is paused, this function will
+        play it.
+
+        Parameters
+        ----------
+        log : bool
+            Log this event.
+
+        """
+        if self.isPlaying:
+            self.pause()
+        else:
+            self.play()
 
     def stop(self, log=True):
         """Stop the current point in the movie (sound will stop, current frame
