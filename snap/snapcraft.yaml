@@ -1,4 +1,4 @@
-name: psychopy
+name: psychopy-gui
 version: git
 summary: 'PsychoPy - create experiments for behavioral science'
 description: |
@@ -10,7 +10,7 @@ base: core22
 
 apps:
     psychopy:
-        command: 'python3 -m psychopy'
+        command: bin/python3 bin/psychopy-gui
         extensions: [gnome]
         plugs: [python, x11, pulseaudio, gsettings, home, network, network-control]
 
@@ -20,7 +20,7 @@ environment:
   LD_LIBRARY_PATH: $SNAP/usr/lib:$SNAP/lib:$SNAP/usr/lib/lib-arch:$SNAP/lib/lib-arch
 
 parts:
-  psychopy:
+  psychopy-gui:
     plugin: python
     source: .
     python-packages:
