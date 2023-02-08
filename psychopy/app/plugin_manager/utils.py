@@ -1,6 +1,8 @@
+import os
 import webbrowser
 import wx
 import wx.richtext
+from psychopy.plugins import getBundleInstallTarget, refreshBundlePaths
 from psychopy.app.themes import handlers, icons, colors
 from psychopy.localization import _translate
 from psychopy.tools import pkgtools
@@ -176,15 +178,23 @@ def installPackage(package):
         parent=None, pipname=package
     )
     dlg.Show()
+
     # Install package
-    retcode, info = pkgtools.installPackage(package)
+    installTarget = getBundleInstallTarget(package)
+    os.mkdir(installTarget)  # make the directory if not present
+    retcode, info = pkgtools.installPackage(
+        package, target=installTarget)
+
     # Write command
     dlg.writeCmd(" ".join(info['cmd']))
+
     # Write output
     dlg.writeStdOut(info['stdout'])
     dlg.writeStdErr(info['stderr'])
+
     # Terminate output
     dlg.writeTerminus()
+
     # Report success
     if retcode:
         dlg.writeStdOut(_translate("Installation complete. See above for info.\n"))
@@ -192,3 +202,7 @@ def installPackage(package):
         dlg.writeStdErr(_translate("Installation failed. See above for info.\n"))
 
     return dlg
+
+
+if __name__ == "__main__":
+    pass
