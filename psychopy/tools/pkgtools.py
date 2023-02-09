@@ -240,7 +240,7 @@ def _getUserPackageTopLevels():
 
 def _isUserPackage(package):
     """Determine if the specified package in installed to the user's PsychoPy
-    package directory.
+    package directory inside a bundle.
 
     Parameters
     ----------
@@ -253,22 +253,21 @@ def _isUserPackage(package):
         `True` if the package is present in the user's PsychoPy directory.
 
     """
-    userPackagePath = getUserPackagesPath()
-    for pkg in pkg_resources.working_set:
-        if pkg_resources.safe_name(package) == pkg.key:
-            thisPkg = pkg_resources.get_distribution(pkg.key)
-            if thisPkg.location == userPackagePath:
-                return True
+    packageSafeName = pkg_resources.safe_name(package)
+    for dirName in os.listdir(getUserPackagesPath()):
+        if packageSafeName == dirName:
+            return True
 
     return False
 
 
 def _uninstallUserPackage(package):
-    """Uninstall packages in PsychoPy package directory.
+    """Uninstall package bundles in PsychoPy package directory.
 
     This function will remove packages from the user's PsychoPy directory since
-    we can't do so using 'pip', yet. This reads the metadata associated with
-    the package and attempts to remove the packages.
+    we can't do so using 'pip', yet. This simply deletes the bundle folder which
+    matches the project name of the package. Rebuilds the package namespace
+    index when done.
 
     Parameters
     ----------
@@ -296,91 +295,25 @@ def _uninstallUserPackage(package):
     logging.info(msg)
     stdout += msg + "\n"
 
-    # figure out he name of the metadata directory
-    pkgName = pkg_resources.safe_name(package)
-    thisPkg = pkg_resources.get_distribution(pkgName)
+    # get the bundle path from project name
+    bundlePath = os.path.join(
+        userPackagePath, pkg_resources.safe_name(package))
 
-    # build path to metadata based on project name
-    pathHead = pkg_resources.to_filename(thisPkg.project_name) + '-'
-    metaDir = pathHead + thisPkg.version
-    metaDir += '' if thisPkg.py_version is None else '.' + thisPkg.py_version
-    metaDir += '.dist-info'
+    # delete the bundle directory
+    try:
+        shutil.rmtree(bundlePath)
+        success = True
+    except OSError:
+        success = False
 
-    # check if that directory exists
-    metaPath = os.path.join(userPackagePath, metaDir)
-    if not os.path.isdir(metaPath):
-        return False, {
-            "cmd": cmd,
-            "stdout": stdout,
-            "stderr": "No package metadata found at {metaPath}"}
-
-    # Get the top-levels for all packages in the user's PsychoPy directory, this
-    # is intended to safely remove packages without deleting common directories
-    # like `bin` which some packages insist on putting in there.
-    allTopLevelPackages = _getUserPackageTopLevels()
-
-    # get the top-levels associated with the package we want to uninstall
-    pkgTopLevelDirs = allTopLevelPackages[metaDir].copy()
-    del allTopLevelPackages[metaDir]  # remove from mapping
-
-    # Check which top-level directories are safe to remove if they are not used
-    # by other packages.
-    toRemove = []
-    for pkgTopLevel in pkgTopLevelDirs:
-        safeToRemove = True
-        for otherPkg, otherTopLevels in allTopLevelPackages.items():
-            if pkgTopLevel in otherTopLevels:
-                # check if another version of this package is sharing the dir
-                if otherPkg.startswith(pathHead):
-                    msg = (
-                        'Found metadata for an older version of package `{}` in '
-                        '`{}`. This will also be removed.'
-                    ).format(pkgName, otherPkg)
-                    logging.warning(msg)
-                    stdout += msg + "\n"
-                    toRemove.append(otherPkg)
-                else:
-                    # unrelated package
-                    msg = (
-                        'Found matching top-level directory `{}` in metadata '
-                        'for `{}`. Can not safely remove this directory since '
-                        'another package appears to use it.'
-                    ).format(pkgTopLevel, otherPkg)
-                    logging.warning(msg)
-                    stdout += msg + "\n"
-                    safeToRemove = False
-                    break
-
-        if safeToRemove:
-            toRemove.append(pkgTopLevel)
-
-    # delete modules from the paths we found
-    for rmDir in toRemove:
-        if os.path.isfile(rmDir):
-            msg = (
-                'Removing file `{}` from user package directory.'
-            ).format(rmDir)
-            logging.info(msg)
-            stdout += msg + "\n"
-            os.remove(rmDir)
-        elif os.path.isdir(rmDir):
-            msg = (
-                'Removing directory `{}` from user package '
-                'directory.'
-            ).format(rmDir)
-            logging.info(msg)
-            stdout += msg + "\n"
-            shutil.rmtree(rmDir)
-
-    # cleanup by also deleting the metadata path
-    shutil.rmtree(metaPath)
+    refreshPackages()  # reindex
 
     msg = 'Uninstalled package `{}`.'.format(package)
     logging.info(msg)
     stdout += msg + "\n"
 
     # Return the return code and a dict of information from the console
-    return True, {
+    return success, {
         "cmd": cmd,
         "stdout": stdout,
         "stderr": ""}
