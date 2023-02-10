@@ -26,11 +26,18 @@ import inspect
 import collections
 import hashlib
 import importlib
-
+import psychopy.tools.pkgtools as pkgtools
 import pkg_resources
-
 from psychopy import logging
 from psychopy.preferences import prefs
+
+# add the plugins folder to as a distribution location
+try:
+    pkgtools.addDistribution(prefs.paths['packages'])
+except KeyError:
+    # this error likely wont happen unless the prefs are missing keys
+    logging.error('Cannot add plugin directory as distribution location. '
+                  'Plugins will be unavailable this session.')
 
 # Keep track of plugins that have been loaded. Keys are plugin names and values
 # are their entry point mappings.
@@ -243,6 +250,11 @@ def scanPlugins():
     global _installed_plugins_
     _installed_plugins_ = {}  # clear installed plugins
 
+    # make sure we have the plugin directory in the working set
+    pluginDir = prefs.paths['packages']
+    if pluginDir not in pkg_resources.working_set.entries:
+        pkg_resources.working_set.add_entry(pluginDir)
+
     # find all packages with entry points defined
     pluginEnv = pkg_resources.Environment()  # supported by the platform
     dists, _ = pkg_resources.working_set.find_plugins(pluginEnv)
@@ -253,6 +265,10 @@ def scanPlugins():
             logging.debug('Found plugin `{}` at location `{}`.'.format(
                 dist.project_name, dist.location))
             _installed_plugins_[dist.project_name] = entryMap
+
+            # try adding the plugin to the working set
+            if dist.location not in pkg_resources.working_set.entries:
+                pkg_resources.working_set.add(dist)
 
     return len(_installed_plugins_)
 
@@ -583,6 +599,25 @@ def loadPlugin(plugin):
                     _failed_plugins_.append(plugin)
 
                 return False
+            except pkg_resources.DistributionNotFound:
+                logging.error(
+                    "Failed to load entry point `{}` of plugin `{}` due to "
+                    "missing distribution required by the application."
+                    "Skipping.".format(str(ep), plugin))
+
+                if plugin not in _failed_plugins_:
+                    _failed_plugins_.append(plugin)
+
+                return False
+            except Exception:  # catch everything else
+                logging.error(
+                    "Failed to load entry point `{}` of plugin `{}` for unknown"
+                    "reasons. Skipping.".format(str(ep), plugin))
+
+                if plugin not in _failed_plugins_:
+                    _failed_plugins_.append(plugin)
+
+                return False
 
             # If we get here, the entry point is valid and we can safely add it
             # to PsychoPy's namespace.
@@ -750,6 +785,7 @@ def startUpPlugins(plugins, add=True, verify=True):
         return
 
     # check if the plugins are installed before adding to `startUpPlugins`
+    scanPlugins()
     installedPlugins = listPlugins()
     if verify:
         notInstalled = [plugin not in installedPlugins for plugin in plugins]
@@ -890,6 +926,7 @@ def getWindowBackends():
         fqn, resolve=(fqn not in sys.modules), error=False)
     # Return winTypes array from backend object
     return backend.winTypes
+
 
 def discoverModuleClasses(nameSpace, classType, includeUnbound=True):
     """Discover classes and sub-classes matching a specific type within a

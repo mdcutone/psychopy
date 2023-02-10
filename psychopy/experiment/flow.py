@@ -13,6 +13,7 @@ from xml.etree.ElementTree import Element
 from psychopy.experiment import getAllStandaloneRoutines
 from psychopy.experiment.routines._base import Routine, BaseStandaloneRoutine
 from psychopy.experiment.loops import LoopTerminator, LoopInitiator
+from psychopy.tools import filetools as ft
 
 
 class Flow(list):
@@ -303,18 +304,20 @@ class Flow(list):
         script.writeIndentedLines(code)
 
         # Write resource list
-        resourceFiles = {}
+        resourceFiles = []
         for resource in self.exp.getResourceFiles():
             if isinstance(resource, dict):
                 # Get name
-                if 'name' in resource:
-                    name = resource['name']
-                elif "https://" in resource:
+                if "https://" in resource:
                     name = resource.split('/')[-1]
                 elif 'surveyId' in resource:
                     name = 'surveyId'
-                else:
+                elif 'name' in resource and resource['name'] in list(ft.defaultStim):
+                    name = resource['name']
+                elif 'rel' in resource:
                     name = resource['rel']
+                else:
+                    name = ""
 
                 # Get resource
                 resourceFile = None
@@ -327,7 +330,7 @@ class Flow(list):
 
                 # If we have a resource, add it
                 if resourceFile is not None:
-                    resourceFiles[name] = resourceFile
+                    resourceFiles.append((name, resourceFile))
         if self.exp.htmlFolder:
             resourceFolderStr = "resources/"
         else:
@@ -353,18 +356,21 @@ class Flow(list):
                     "{'surveyLibrary': true},\n"
                 )
             code = "// resources:\n"
-            for name, resource in resourceFiles.items():
+            for name, resource in resourceFiles:
                 if "sid:" in resource:
                     # Strip sid prefix from survey id
                     resource = resource.replace("sid:", "")
-                elif "https://" in resource:
-                    # URL paths are already fine
-                    pass
+                    # Add this line
+                    code += f"{{'surveyId': '{resource}'}},\n"
                 else:
-                    # Anything else make it relative to resources folder
-                    resource = resourceFolderStr + resource
-                # Add this line
-                code += f"{{'name': '{name}', 'path': '{resource}'}},\n"
+                    if "https://" in resource:
+                        # URL paths are already fine
+                        pass
+                    else:
+                        # Anything else make it relative to resources folder
+                        resource = resourceFolderStr + resource
+                    # Add this line
+                    code += f"{{'name': '{name}', 'path': '{resource}'}},\n"
             script.writeIndentedLines(code)
             script.setIndentLevel(-1, relative=True)
             script.writeIndented("]\n")
