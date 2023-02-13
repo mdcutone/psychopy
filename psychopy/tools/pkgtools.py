@@ -319,7 +319,7 @@ def _uninstallUserPackage(package):
         "stderr": ""}
 
 
-def uninstallPackage(package):
+def uninstallPackage(package, where='bundle'):
     """Uninstall a package from the current distribution.
 
     Parameters
@@ -327,13 +327,19 @@ def uninstallPackage(package):
     package : str
         Package name (e.g., `'psychopy-connect'`, `'scipy'`, etc.) with version
         if needed. You may also specify URLs to Git repositories and such.
+    where : str
+        Which location to uninstall the package. Possible values are `'site'`,
+        `'user'`, or `'bundle'`. Specifying `'site'` or `'user'` will uninstall
+        packages from the main or user `site-packages` folder, respectively.
+        While `'bundle'` will uninstall the package from the `'packages'`
+        directory by deleting the bundle.
 
     Returns
     -------
     tuple
         `True` if the package removed without errors. If `False`, check 'stderr'
         for more information. The package may still have uninstalled correctly,
-        but some other issues may have arose during the process.
+        but some other issues arose during the process.
 
     Notes
     -----
@@ -341,10 +347,15 @@ def uninstallPackage(package):
       requested if the package already exists.
 
     """
-    if _isUserPackage(package):  # delete 'manually' if in package dir
-        return (_uninstallUserPackage(package),
-                {"cmd": '', "stdout": '', "stderr": ''})
-    else:  # use the following if in the main package dir
+    nullInfo = {"cmd": '', "stdout": '', "stderr": ''}
+    if where == 'bundle':  # delete the bundle package
+        if not _isUserPackage(package):
+            logging.error(
+                "Cannot uninstall bundle named '{}', package not found. "
+                "Skipping.".format(package))
+            return False, nullInfo
+        return _uninstallUserPackage(package), nullInfo
+    elif where in ('user', 'site'):  # handle other cases
         # construct the pip command and execute as a subprocess
         cmd = [sys.executable, "-m", "pip", "uninstall", package, "--yes",
                '--no-input', '--no-color']
@@ -363,8 +374,10 @@ def uninstallPackage(package):
         # if any error, return code should be False
         retcode = bool(stderr)
 
-    # Return the return code and a dict of information from the console
-    return retcode, {"cmd": cmd, "stdout": stdout, "stderr": stderr}
+        # Return the return code and a dict of information from the console
+        return retcode, {"cmd": cmd, "stdout": stdout, "stderr": stderr}
+
+    return False, nullInfo
 
 
 def getInstallState(package):
