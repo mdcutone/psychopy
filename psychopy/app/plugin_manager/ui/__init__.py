@@ -21,7 +21,7 @@ class BasePluginDialog(wx.Frame):
 
     def __init__(self, parent):
         wx.Frame.__init__(self, parent, id=wx.ID_ANY, title=u"Plugins & Packages", pos=wx.DefaultPosition,
-                          size=wx.Size(800, 800), style=wx.DEFAULT_FRAME_STYLE | wx.TAB_TRAVERSAL)
+                          size=wx.Size(800, 600), style=wx.DEFAULT_FRAME_STYLE | wx.TAB_TRAVERSAL)
 
         self.SetSizeHints(wx.Size(800, 600), wx.DefaultSize)
         self.SetForegroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_SCROLLBAR))
@@ -50,7 +50,7 @@ class BasePluginDialog(wx.Frame):
         self.txtSearchPlugins = wx.SearchCtrl(self.pnlPluginList, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition,
                                               wx.DefaultSize, wx.TE_PROCESS_ENTER)
         self.txtSearchPlugins.ShowSearchButton(True)
-        self.txtSearchPlugins.ShowCancelButton(False)
+        self.txtSearchPlugins.ShowCancelButton(True)
         szrPluginList.Add(self.txtSearchPlugins, 0, wx.ALL | wx.EXPAND, 10)
 
         self.pnlAvailablePlugins = wx.ScrolledWindow(self.pnlPluginList, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize,
@@ -189,7 +189,7 @@ class BasePluginDialog(wx.Frame):
         self.txtSearchPackages = wx.SearchCtrl(self.pnlPackageList, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition,
                                                wx.DefaultSize, style=wx.TE_PROCESS_ENTER)
         self.txtSearchPackages.ShowSearchButton(True)
-        self.txtSearchPackages.ShowCancelButton(False)
+        self.txtSearchPackages.ShowCancelButton(True)
         szrPackageList.Add(self.txtSearchPackages, 0, wx.ALL | wx.EXPAND, 10)
 
         self.tvwPackageList = wx.dataview.TreeListCtrl(self.pnlPackageList, wx.ID_ANY, wx.DefaultPosition,
@@ -376,8 +376,8 @@ class BasePluginDialog(wx.Frame):
         self.cmdGotoHomepage.Bind(wx.EVT_BUTTON, self.onPluginHomepageClicked)
         self.cmdAuthorGithub.Bind(wx.EVT_BUTTON, self.onPluginAuthorClicked)
         self.cmdAuthorGotoEmail.Bind(wx.EVT_BUTTON, self.onPluginEmailClicked)
-        # self.txtSearchPackages.Bind( wx.EVT_SEARCHCTRL_CANCEL_BTN, self.onPackageSearchCancelClicked )
-        # self.txtSearchPackages.Bind( wx.EVT_SEARCHCTRL_SEARCH_BTN, self.onPackageSearchButtonClicked )
+        self.txtSearchPackages.Bind( wx.EVT_SEARCH_CANCEL, self.onPackageSearchCancelClicked)
+        self.txtSearchPackages.Bind( wx.EVT_SEARCH, self.onPackageSearchButtonClicked )
         # self.txtSearchPackages.Bind( wx.EVT_TEXT, self.onPackageSearchText )
         self.txtSearchPackages.Bind( wx.EVT_SEARCH, self.onPackageSearchEnter )
         # self.tvwPackageList.Bind(wx.dataview.EVT_TREELIST_ITEM_ACTIVATED, self.onPackageListActivated)

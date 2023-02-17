@@ -283,8 +283,8 @@ class EnvironmentManagerDlg(BasePluginDialog):
 
         installedPackages = pkgtools.getInstalledPackages()
 
-        pkgTemp = []
         if subset:  # subset packages for search
+            pkgTemp = []
             for pkgInfo in installedPackages:
                 pkgName, _ = pkgInfo
                 if subset not in pkgName:
@@ -299,14 +299,19 @@ class EnvironmentManagerDlg(BasePluginDialog):
         installedRootText = "{} ({})".format(
             _translate("Installed"), str(installedCount))
 
-        self.tvwPackageList.SetItemText(self.installedRoot, 0, installedRootText)
+        self.tvwPackageList.SetItemText(
+            self.installedRoot, 0, installedRootText)
 
         # create items rto display installed packages
         for pkgInfo in installedPackages:
             pkgName, pkgVersion = pkgInfo
-            newItem = self.tvwPackageList.AppendItem(self.installedRoot, pkgName)
+            newItem = self.tvwPackageList.AppendItem(
+                self.installedRoot, pkgName)
             self.tvwPackageList.SetItemText(newItem, 1, pkgVersion)
-            clientData = {'Name': pkgName, 'Version': pkgVersion, 'Local': True}
+            clientData = {
+                'Name': pkgName,
+                'Version': pkgVersion,
+                'Local': True}
             # clientData = pkgtools.getPackageMetadata(pkgName)
             self.tvwPackageList.SetItemData(newItem, clientData)
 
@@ -323,7 +328,8 @@ class EnvironmentManagerDlg(BasePluginDialog):
         notInstalledRootText = "{} ({})".format(
             _translate("Not Installed"), str(notInstalledCount))
 
-        self.tvwPackageList.SetItemText(self.notInstalledRoot, 0, notInstalledRootText)
+        self.tvwPackageList.SetItemText(
+            self.notInstalledRoot, 0, notInstalledRootText)
 
         # create items to display remote packages
         for pkgInfo in foundPackages:
@@ -331,7 +337,8 @@ class EnvironmentManagerDlg(BasePluginDialog):
             pkgVersion = pkgInfo['version']
             pkgSummary = EnvironmentManagerDlg._truncateText(
                 pkgInfo['description'], 255)
-            newItem = self.tvwPackageList.AppendItem(self.notInstalledRoot, pkgName)
+            newItem = self.tvwPackageList.AppendItem(
+                self.notInstalledRoot, pkgName)
             self.tvwPackageList.SetItemText(newItem, 1, pkgVersion)
             clientData = {
                 'Name': pkgName,
@@ -461,7 +468,17 @@ class EnvironmentManagerDlg(BasePluginDialog):
         """
         self.refreshPackageList(subset=event.GetString(), includeRemotes=True)
 
-        event.Skip()
+    def onPackageSearchCancelClicked(self, event):
+        """Event called when the cancel icon is clicked in the package search
+        field.
+        """
+        self.refreshPackageList()
+
+    def onPackageSearchButtonClicked(self, event):
+        """Event called when the search icon is clicked in the package search
+        field.
+        """
+        self.refreshPackageList(subset=event.GetString(), includeRemotes=True)
 
     # Console ------------------------------------------------------------------
 
