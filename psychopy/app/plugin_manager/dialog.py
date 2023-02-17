@@ -13,6 +13,9 @@ from psychopy.localization import _translate
 import psychopy.tools.pkgtools as pkgtools
 from PIL import Image as pil
 from pypi_search import search as pypi
+import subprocess as sp
+import psychopy.plugins as plugins
+import psychopy.app.jobs as jobs
 
 pkgtools.refreshPackages()  # build initial package cache
 
@@ -42,6 +45,8 @@ class EnvironmentManagerDlg(BasePluginDialog):
 
         self._initPackageListCtrl()
         self.refreshPackageList()
+
+        self.installProcess = None
 
     # --------------------------------------------------------------------------
     # Utilities
@@ -110,6 +115,174 @@ class EnvironmentManagerDlg(BasePluginDialog):
             raise TypeError('Wrong type for parameter `icon` specified.')
 
         return iconBitmap
+
+    @staticmethod
+    def getPackageVersionInfo(packageName):
+        """Query packages for available versions.
+
+        This function invokes the `pip index versions` ins a subprocess and
+        parses the results.
+
+        Parameters
+        ----------
+        packageName : str
+            Name of the package to get available versions of.
+
+        Returns
+        -------
+        dict
+            Mapping of versions information. Keys are `'All'` (`list`),
+            `'Current'` (`str`), and `'Latest'` (`str`).
+
+        """
+        cmd = [sys.executable, "-m", "pip", "index", "versions", packageName,
+               '--no-input', '--no-color']
+        # run command in subprocess
+        output = sp.Popen(
+            cmd,
+            stdout=sp.PIPE,
+            stderr=sp.PIPE,
+            shell=False,
+            universal_newlines=True)
+        stdout, stderr = output.communicate()  # blocks until process exits
+        nullVersion = {'All': [], 'Installed': '', 'Latest': ''}
+
+        # if stderr:  # error pipe has something, give nothing
+        #     return nullVersion
+
+        # parse versions
+        if stdout:
+            allVersions = installedVersion = latestVersion = None
+            for line in stdout.splitlines(keepends=False):
+                line = line.strip()  # remove whitespace
+                if line.startswith("Available versions:"):
+                    allVersions = (line.split(': ')[1]).split(', ')
+                elif line.startswith("LATEST:"):
+                    latestVersion = line.split(': ')[1].strip()
+                elif line.startswith("INSTALLED:"):
+                    installedVersion = line.split(': ')[1].strip()
+
+            if installedVersion is None:  # not present, use first entry
+                installedVersion = allVersions[0]
+            if latestVersion is None:  # ditto
+                latestVersion = allVersions[0]
+
+            toReturn = {
+                'All': allVersions,
+                'Installed': installedVersion,
+                'Latest': latestVersion}
+
+            return toReturn
+
+        return nullVersion
+
+    def _writeOutput(self, text, flush=True):
+        """Write out bytes coming from the current subprocess.
+
+        Parameters
+        ----------
+        text : str or bytes
+            Text to write.
+        flush : bool
+            Flush text so it shows up immediately on the pipe.
+
+        """
+        if isinstance(text, bytes):
+            text = text.decode('utf-8')
+
+        self.txtConsole.AppendText(text)
+
+    def _onInputCallback(self, streamBytes):
+        """Callback to process data from the input stream of the subprocess.
+        This is called when `~psychopy.app.jobs.Jobs.poll` is called and only if
+        there is data in the associated pipe.
+
+        Parameters
+        ----------
+        streamBytes : bytes or str
+            Data from the 'stdin' streams connected to the subprocess.
+
+        """
+        self._writeOutput(streamBytes)
+
+    def _onErrorCallback(self, streamBytes):
+        """Callback to process data from the error stream of the subprocess.
+        This is called when `~psychopy.app.jobs.Jobs.poll` is called and only if
+        there is data in the associated pipe.
+
+        Parameters
+        ----------
+        streamBytes : bytes or str
+            Data from the 'sdterr' streams connected to the subprocess.
+
+        """
+        self._onInputCallback(streamBytes)
+
+    def _onTerminateCallback(self, pid, exitCode):
+        """Callback invoked when the subprocess exits.
+
+        Parameters
+        ----------
+        pid : int
+            Process ID number for the terminated subprocess.
+        exitCode : int
+            Program exit code.
+
+        """
+        # write a close message, shows the exit code
+        closeMsg = "Finished installing package."
+        closeMsg = closeMsg.center(80, '#') + '\n'
+        self._writeOutput(closeMsg)
+
+        pkgtools.refreshPackages()
+
+    def installPackage(self, packageName, version=None):
+        """Install a package.
+
+        Calling this will invoke a `pip` command which will install the
+        specified package. Packages are installed to bundles and added to the
+        system path when done.
+
+        During an installation, the UI will make the console tab visible. It
+        will display any messages coming from the subprocess. No way to cancel
+        and installation midway at this point.
+
+        Parameters
+        ----------
+        packageName : str
+            Name of the package to install. Should be the project name but other
+            formats may work.
+        version : str or None
+            Version of the package to install. If `None`, the latest version
+            will be installed.
+
+        """
+        self.nbMain.SetSelection(2)
+
+        # interpreter path
+        pyExec = sys.executable
+
+        # optional flags for the subprocess
+        execFlags = jobs.EXEC_ASYNC  # all use `EXEC_ASYNC`
+        if sys.platform == 'win32':
+            execFlags |= jobs.EXEC_HIDE_CONSOLE
+        else:
+            execFlags |= jobs.EXEC_MAKE_GROUP_LEADER
+
+        # build the shell command to run the script
+        command = [pyExec, '-m', 'pip', 'install', packageName, '--target',
+                   plugins.getBundleInstallTarget(packageName)]
+
+        # create a new job with the user script
+        self.installProcess = jobs.Job(
+            self,
+            command=command,
+            # flags=execFlags,
+            inputCallback=self._onInputCallback,  # both treated the same
+            errorCallback=self._onErrorCallback,
+            terminateCallback=self._onTerminateCallback
+        )
+        self.installProcess.start()
 
     # --------------------------------------------------------------------------
     # User interface and events
@@ -418,6 +591,32 @@ class EnvironmentManagerDlg(BasePluginDialog):
 
         self.txtPackageDescription.SetValue(summaryText)
 
+    def setPackageVersions(self, currentVersion, allVersions=None):
+        """Populates the combobox which shows available package versions.
+
+        Parameters
+        ----------
+        currentVersion : str
+            Current or installed version.
+        allVersions : list or None
+            All available versions. List must contain `currentVersion`.
+
+        """
+        if allVersions is None:  # single, no cache
+            self.cboPackageVersion.SetItems([currentVersion])
+            self.cboPackageVersion.SetSelection(0)
+            return
+
+        # try:
+        #     currentVersionIndex = allVersions.index(currentVersion)
+        # except ValueError:
+        #     raise ValueError(
+        #         'Value of `allVersions` must contain `currentVersion`.')
+
+        self.cboPackageVersion.SetItems(allVersions)
+        showVersion = self.cboPackageVersion.FindString(currentVersion)
+        self.cboPackageVersion.SetSelection(showVersion)
+
     def setPackageInfo(self, packageInfo):
         """Set package info for display.
 
@@ -433,7 +632,8 @@ class EnvironmentManagerDlg(BasePluginDialog):
             return  # do nothing for now
 
         # get values from metadata, have defaults if not present
-        self.setPackageProjectName(packageInfo.get('Name', 'Unknown'))
+        packageName = packageInfo.get('Name', 'Unknown')
+        self.setPackageProjectName(packageName)
         authorName = packageInfo.get('Author', 'Unknown')
         authorMail = packageInfo.get('Author-email', None)
         self.setPackageAuthorURL(authorName, authorMail)
@@ -441,6 +641,8 @@ class EnvironmentManagerDlg(BasePluginDialog):
         self.setPackageLicense(packageLicense)
         packageSummary = packageInfo.get('Summary', '')
         self.setPackageSummary(packageSummary)
+        packageVersion = packageInfo.get('Version', 'N/A')
+        self.setPackageVersions(packageVersion, None)
 
     def onPackageListSelChanged(self, event):
         """Event generated when the user selects an item in the package list.
@@ -479,6 +681,45 @@ class EnvironmentManagerDlg(BasePluginDialog):
         field.
         """
         self.refreshPackageList(subset=event.GetString(), includeRemotes=True)
+
+    def onVersionChoiceDropdown(self, event):
+        """Event called when the version dropdown is created.
+        """
+        selectedPackage = self.tvwPackageList.GetSelection()
+        if not selectedPackage.IsOk():  # no selection
+            return
+
+        clientData = self.tvwPackageList.GetItemData(selectedPackage)
+        if clientData is None:  # items has not data
+            return
+
+        packageName = clientData['Name']
+
+        # cache version info
+        if 'Version-info' not in clientData.keys():
+            versionData = EnvironmentManagerDlg.getPackageVersionInfo(
+                packageName)
+            clientData.update({'Version-info': versionData})
+            self.tvwPackageList.SetItemData(selectedPackage, clientData)
+
+        packageVersionInfo = clientData['Version-info']
+        self.setPackageVersions(
+            packageVersionInfo['Installed'], packageVersionInfo['All'])
+
+    def onPackageInstallClicked(self, event):
+        """Event called when the package installation button is clicked.
+        """
+        selectedPackage = self.tvwPackageList.GetSelection()
+        if not selectedPackage.IsOk():  # no selection
+            return
+
+        clientData = self.tvwPackageList.GetItemData(selectedPackage)
+        if clientData is None:  # items has not data
+            return
+
+        packageName = clientData['Name']
+
+        wx.CallAfter(self.installPackage, packageName)
 
     # Console ------------------------------------------------------------------
 

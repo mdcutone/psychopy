@@ -275,11 +275,13 @@ class BasePluginDialog(wx.Frame):
 
         szrPackageInstallButtons.Add(self.lblPackageInfoVersion, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 5)
 
-        chcPackageVersionChoices = [u"0.0.1"]
-        self.chcPackageVersion = wx.Choice(self.pnlPackageInfo, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize,
-                                           chcPackageVersionChoices, wx.CB_SORT)
-        self.chcPackageVersion.SetSelection(0)
-        szrPackageInstallButtons.Add(self.chcPackageVersion, 0, wx.ALIGN_CENTER_VERTICAL, 5)
+        cboPackageVersionChoices = [u"Not Specified"]
+        self.cboPackageVersion = wx.ComboBox(self.pnlPackageInfo, wx.ID_ANY, u"Not Specified", wx.DefaultPosition,
+                                             wx.DefaultSize, cboPackageVersionChoices,
+                                             wx.CB_DROPDOWN | wx.CB_READONLY | wx.CB_SORT)
+        self.cboPackageVersion.SetSelection(0)
+        self.cboPackageVersion.SetMinSize(wx.Size(180, -1))
+        szrPackageInstallButtons.Add(self.cboPackageVersion, 0, wx.ALIGN_CENTER_VERTICAL, 5)
 
         szrPackageInstallButtons.Add((0, 0), 1, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
 
@@ -387,7 +389,8 @@ class BasePluginDialog(wx.Frame):
         self.cmdInstallFromFile.Bind(wx.EVT_BUTTON, self.onInstallFromFileClicked)
         self.hypAuthorLink.Bind(wx.adv.EVT_HYPERLINK, self.onPackageAuthorURLClicked)
         self.cmdInstallPackage.Bind(wx.EVT_BUTTON, self.onPackageInstallClicked)
-        self.chcPackageVersion.Bind(wx.EVT_CHOICE, self.onVersionChoice)
+        self.cboPackageVersion.Bind(wx.EVT_COMBOBOX, self.onVersionChoice)
+        self.cboPackageVersion.Bind(wx.EVT_COMBOBOX_DROPDOWN, self.onVersionChoiceDropdown)
         self.cmdUninstallPackage.Bind(wx.EVT_BUTTON, self.onPackageUninstallClicked)
         self.cmdCopyConsole.Bind(wx.EVT_BUTTON, self.onConsoleCopy)
         self.cmdClearConsole.Bind(wx.EVT_BUTTON, self.onConsoleClear)
@@ -468,6 +471,9 @@ class BasePluginDialog(wx.Frame):
         event.Skip()
 
     def onVersionChoice(self, event):
+        event.Skip()
+
+    def onVersionChoiceDropdown(self, event):
         event.Skip()
 
     def onPackageUninstallClicked(self, event):
