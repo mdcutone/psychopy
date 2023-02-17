@@ -266,7 +266,8 @@ class Job:
 
         # bind the event called when the process ends
         # self._process.Bind(wx.EVT_END_PROCESS, self.onTerminate)
-        self.parent.Bind(wx.EVT_IDLE, self.poll)
+        if self.parent is not None:
+            self.parent.Bind(wx.EVT_IDLE, self.poll)
 
         return self._pid
 
@@ -284,7 +285,8 @@ class Job:
         if not self.isRunning:
             return False  # nop
 
-        self.parent.Unbind(wx.EVT_IDLE)
+        if self.parent is not None:
+            self.parent.Unbind(wx.EVT_IDLE)
 
         # isOk = wx.Process.Kill(self._pid, signal, flags) is wx.KILL_OK
         self._process.kill()  # kill the process
@@ -572,7 +574,8 @@ class Job:
         retCode = self._process.poll()
         if retCode is not None:  # process has exited?
             # unbind the idle loop used to poll the subprocess
-            self.parent.Bind(wx.EVT_IDLE, None)
+            if self.parent is not None:
+                self.parent.Bind(wx.EVT_IDLE, None)
             time.sleep(0.1)  # give time for pipes to flush
             wx.CallAfter(self.onTerminate, retCode)
 

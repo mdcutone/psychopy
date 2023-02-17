@@ -329,10 +329,9 @@ def uninstallPackage(package, where='bundle'):
         if needed. You may also specify URLs to Git repositories and such.
     where : str
         Which location to uninstall the package. Possible values are `'site'`,
-        `'user'`, or `'bundle'`. Specifying `'site'` or `'user'` will uninstall
-        packages from the main or user `site-packages` folder, respectively.
-        While `'bundle'` will uninstall the package from the `'packages'`
-        directory by deleting the bundle.
+        or `'bundle'`. Specifying `'site'` will uninstall packages from the main
+        or user `site-packages` folder. While `'bundle'` will uninstall the
+        package from the `'packages'` directory by deleting the bundle.
 
     Returns
     -------
@@ -355,7 +354,7 @@ def uninstallPackage(package, where='bundle'):
                 "Skipping.".format(package))
             return False, nullInfo
         return _uninstallUserPackage(package), nullInfo
-    elif where in ('user', 'site'):  # handle other cases
+    elif where == 'site':  # handle other cases
         # construct the pip command and execute as a subprocess
         cmd = [sys.executable, "-m", "pip", "uninstall", package, "--yes",
                '--no-input', '--no-color']
