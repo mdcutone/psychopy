@@ -34,6 +34,11 @@ class EnvironmentManagerDlg(BasePluginDialog):
         not have a parent assigned to it.
 
     """
+    # page indices for the dialog
+    PLUGINS_PAGE_IDX = 0
+    PACKAGES_PAGE_IDX = 1
+    CONSOLE_PAGE_IDX = 2
+
     def __init__(self, parent):
         BasePluginDialog.__init__(self, parent=parent)
 
@@ -46,7 +51,7 @@ class EnvironmentManagerDlg(BasePluginDialog):
         self._initPackageListCtrl()
         self.refreshPackageList()
 
-        self.installProcess = None
+        self.pipProcess = None
 
     # --------------------------------------------------------------------------
     # Utilities
@@ -230,11 +235,77 @@ class EnvironmentManagerDlg(BasePluginDialog):
 
         """
         # write a close message, shows the exit code
-        closeMsg = "Finished installing package."
+        closeMsg = " Package installation complete "
         closeMsg = closeMsg.center(80, '#') + '\n'
         self._writeOutput(closeMsg)
 
+        self.pipProcess = None  # clear Job object
+
         pkgtools.refreshPackages()
+
+    @property
+    def isBusy(self):
+        """`True` if there is currently a `pip` subprocess running.
+        """
+        return self.pipProcess is not None
+
+    def uninstallPackage(self, packageName):
+        """Uninstall a package.
+
+        This deletes any bundles in the user's package directory, or uninstalls
+        packages from `site-packages`.
+
+        Parameters
+        ----------
+        packageName : str
+            Name of the package to install. Should be the project name but other
+            formats may work.
+
+        """
+        if self.isBusy:
+            msg = wx.MessageDialog(
+                self,
+                ("Cannot remove package. Wait for the installation already in "
+                 "progress to complete first."),
+                "Uninstallation Failed", wx.OK | wx.ICON_WARNING
+            )
+            msg.ShowModal()
+            return
+
+        self.nbMain.SetSelection(self.CONSOLE_PAGE_IDX)  # go to console page
+
+        if pkgtools._isUserPackage(packageName):
+            msg = 'Uninstalling package bundle for `{}` ...\n'.format(
+                packageName)
+            self._writeOutput(msg)
+
+            success = pkgtools._uninstallUserPackage(packageName)
+            if success:
+                msg = 'Successfully removed package `{}`.\n'.format(
+                    packageName)
+            else:
+                msg = ('Failed to remove package `{}`, check log for '
+                       'details.\n').format(packageName)
+
+            self._writeOutput(msg)
+            return
+
+        # interpreter path
+        pyExec = sys.executable
+
+        # build the shell command to run the script
+        command = [pyExec, '-m', 'pip', 'uninstall', packageName]
+
+        # create a new job with the user script
+        self.pipProcess = jobs.Job(
+            self,
+            command=command,
+            # flags=execFlags,
+            inputCallback=self._onInputCallback,  # both treated the same
+            errorCallback=self._onErrorCallback,
+            terminateCallback=self._onTerminateCallback
+        )
+        self.pipProcess.start()
 
     def installPackage(self, packageName, version=None):
         """Install a package.
@@ -257,24 +328,27 @@ class EnvironmentManagerDlg(BasePluginDialog):
             will be installed.
 
         """
-        self.nbMain.SetSelection(2)
+        if self.isBusy:
+            msg = wx.MessageDialog(
+                self,
+                ("Cannot install package. Wait for the installation already in "
+                 "progress to complete first."),
+                "Installation Failed", wx.OK | wx.ICON_WARNING
+            )
+            msg.ShowModal()
+            return
+
+        self.nbMain.SetSelection(self.CONSOLE_PAGE_IDX)  # go to console page
 
         # interpreter path
         pyExec = sys.executable
-
-        # optional flags for the subprocess
-        execFlags = jobs.EXEC_ASYNC  # all use `EXEC_ASYNC`
-        if sys.platform == 'win32':
-            execFlags |= jobs.EXEC_HIDE_CONSOLE
-        else:
-            execFlags |= jobs.EXEC_MAKE_GROUP_LEADER
 
         # build the shell command to run the script
         command = [pyExec, '-m', 'pip', 'install', packageName, '--target',
                    plugins.getBundleInstallTarget(packageName)]
 
         # create a new job with the user script
-        self.installProcess = jobs.Job(
+        self.pipProcess = jobs.Job(
             self,
             command=command,
             # flags=execFlags,
@@ -282,7 +356,7 @@ class EnvironmentManagerDlg(BasePluginDialog):
             errorCallback=self._onErrorCallback,
             terminateCallback=self._onTerminateCallback
         )
-        self.installProcess.start()
+        self.pipProcess.start()
 
     # --------------------------------------------------------------------------
     # User interface and events
@@ -718,8 +792,23 @@ class EnvironmentManagerDlg(BasePluginDialog):
             return
 
         packageName = clientData['Name']
-
+        # todo - handle version
         wx.CallAfter(self.installPackage, packageName)
+
+    def onPackageUninstallClicked(self, event):
+        """Event called when the package uninstallation button is clicked.
+        """
+        selectedPackage = self.tvwPackageList.GetSelection()
+        if not selectedPackage.IsOk():  # no selection
+            return
+
+        clientData = self.tvwPackageList.GetItemData(selectedPackage)
+        if clientData is None:  # items has not data
+            return
+
+        packageName = clientData['Name']
+
+        wx.CallAfter(self.uninstallPackage, packageName)
 
     # Console ------------------------------------------------------------------
 
