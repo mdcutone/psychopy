@@ -5,10 +5,11 @@ This dialog allows the user to make changes to the packages associated with the
 current environment.
 
 """
-
+import os
 import sys
 import wx
-from psychopy.app.plugin_manager.ui import BasePluginDialog
+import pkg_resources
+from psychopy.app.plugin_manager.ui import BasePluginDialog, BasePluginInfoCard
 from psychopy.localization import _translate
 import psychopy.tools.pkgtools as pkgtools
 from PIL import Image as pil
@@ -16,8 +17,284 @@ from pypi_search import search as pypi
 import subprocess as sp
 import psychopy.plugins as plugins
 import psychopy.app.jobs as jobs
+from psychopy.app.utils import ImageData
+from psychopy.app.plugin_manager import utils
 
 pkgtools.refreshPackages()  # build initial package cache
+
+
+class PluginInfoCard(BasePluginInfoCard):
+    """Class representing information 'cards' which are displayed in the plugin
+    list panel.
+    """
+    def __init__(self, parent):
+        BasePluginInfoCard.__init__(self, parent=parent)
+
+        # plugin information associated with instances of this class
+        self._info = {}
+
+        # avatar graphics used in various places on the interface
+        self._avatarGraphics = wx.Bitmap()
+        self._avatarImage = None
+        self._avatarImageLarge = None
+        self._requestedAuthorImage = None
+        self._authorImage = None
+
+        # package state information
+        self._installed = False
+
+        # search and indexing
+        self._searchValue = ''
+
+    def setCardInfo(self, cardInfo):
+        """Set the information the card is displaying.
+
+        Parameters
+        ----------
+        cardInfo : dict
+            Mapping of card information extracted from the `plugins.json` file.
+
+        """
+        self._info = cardInfo  # update info
+
+        # set labels
+        self.lblPluginTitle.SetLabelText(self.name)
+        self.txtPluginExtraInfo.SetLabelText(self.summary)
+        projectWebsite = self._info.get('homepage', None)
+
+        # author information
+        authorDesc = self._info.get('author', None)
+        if authorDesc is not None:
+            authorName = authorDesc.get('name', 'Not Specified')
+            self._requestedAuthorImage = authorDesc.get('avatar', None)
+        else:
+            authorName = 'Not Specified'
+            self._requestedAuthorImage = None
+
+        # set author name and homepage
+        self.hypLink.SetLabelText(authorName)
+        if projectWebsite is not None:  # set website URL
+            self.hypLink.SetURL(projectWebsite)
+
+        # handle avatar graphics
+        avatar = self._info.get('icon', None)
+        if avatar is not None:
+            self._avatarGraphics = ImageData(avatar)
+            self._avatarImage = EnvironmentManagerDlg._createIconBitmap(
+                self._avatarGraphics, (48, 48))
+            self.bmpPluginIcon.SetBitmap(self._avatarImage)
+
+        # generate searchable string
+        searchables = [self.name, self.pipname] + self.keywords
+        self._searchValue = " ".join([item.lower() for item in searchables])
+
+        self.Refresh()
+
+    def _setPluginInfo(self):
+        """Set the window plugin information to match this selection.
+        """
+        win = self.GetTopLevelParent()
+        win.setPluginInfoFromCard(self)  # pass self to window
+
+    @property
+    def searchValue(self):
+        """String which contains all the values needed for search (`str`).
+
+        Example
+        -------
+        Search for a keyword::
+
+            match = 'hardware' in self.searchValue
+
+        Search for by (partial) project name::
+
+            match = 'psychopy-' in self.searchValue
+
+        """
+        return self._searchValue
+
+    @property
+    def authorImage(self):
+        """Small avatar image used for the author details on the main plugin
+        information panel.
+
+        Returns
+        -------
+        wx.Bitmap
+            Author graphics downloaded from the internet sized to 48x48.
+
+        """
+        if self._authorImage is None:
+            if self._requestedAuthorImage is not None:
+                self._authorImage = EnvironmentManagerDlg._createIconBitmap(
+                    ImageData(self._requestedAuthorImage), (64, 64))
+            else:
+                self._authorImage = wx.Bitmap()
+
+        return self._authorImage
+
+    @property
+    def avatarImage(self):
+        """Small avatar image used by the widget.
+
+        Returns
+        -------
+        wx.Bitmap
+            Avatar graphics downloaded from the internet sized to 48x48.
+
+        """
+        return self._avatarImage  # loaded during set info
+
+    @property
+    def avatarImageLarge(self):
+        """Large avatar image used in the plugin information field.
+
+        Returns
+        -------
+        wx.Bitmap
+            Avatar graphics downloaded from the internet sized to 128x128.
+
+        """
+        if self._avatarImageLarge is None:  # memoize graphics
+            if self._avatarGraphics is not None:
+                self._avatarImageLarge = \
+                        EnvironmentManagerDlg._createIconBitmap(
+                            self._avatarGraphics, (128, 128))
+            else:
+                self._avatarImageLarge = wx.Bitmap()  # empty or default
+
+        return self._avatarImageLarge
+
+    def getInfo(self):
+        """Get information contained by this object.
+
+        Returns
+        -------
+        dict or None
+            Mapping of plugin information extracted from the `plugin.json` file
+            associated with the plugin represented by this object. If `None`,
+            no data has been set yet.
+
+        """
+        return self._info
+
+    @property
+    def name(self):
+        """Name of the plugin (`str`). Returns 'Unspecified' if the name field
+        is missing.
+        """
+        return self._info.get('name', 'Unspecified')
+
+    @property
+    def pipname(self):
+        """Project (or PyPI) package name for the plugin (`str`) or empty string
+        if the field missing.
+        """
+        return self._info.get('pipname', '')
+
+    @property
+    def authorName(self):
+        """The primary author name (`str`). Returns 'Unspecified' if the author
+        name is missing.
+        """
+        return self._info['author'].get('name', 'Unspecified')
+
+    @property
+    def authorEmail(self):
+        """Contact email of the primary author (`str`). Returns empty
+        string if the author name is missing.
+        """
+        return self._info['author'].get('email', '')
+
+    @property
+    def projectWebsite(self):
+        """Personal or organizational homepage of the project maintainer
+        (`str`). This value can point to a lab, business, etc. website that the
+        author is affiliated with. Returns empty string if the author name is
+        missing.
+        """
+        return self._info.get('projectWebsite', '')
+
+    @property
+    def homepage(self):
+        """Project homepage for the plugin (`str`) or `None` if the field is
+        missing.
+        """
+        return self._info.get('homepage', None)
+
+    @property
+    def codeRepo(self):
+        """Online code repository for the plugin (`str`), if available. `None`
+        if the field is missing.
+        """
+        return self._info.get('repo', None)
+
+    @property
+    def summary(self):
+        """Project summary text for the plugin (`str`) or empty string if the
+        field missing.
+        """
+        return self._info.get('description', '')
+
+    @property
+    def keywords(self):
+        """List (`list`) of keywords (`str`) associated with this project. Empty
+        list is returned if there are no keywords.
+        """
+        return self._info.get('keywords', [])
+
+    def setInstallationState(self, installed):
+        """Set whether the package is installed or not.
+
+        Parameters
+        ----------
+        installed : bool
+            Show as installed if `True`. If not installed or remote, set as
+            `False` instead.
+
+        """
+        self._installed = bool(installed)
+        self.cmdChangeInstall.SetLabelText(
+            'Remove' if self._installed else 'Install')
+        self.cmdChangeInstall.Refresh()
+        self.Refresh()
+
+    def showSelected(self):
+        """Change the background color to indicate that this control has been
+        selected in the plugin list.
+        """
+        self.SetBackgroundColour(
+            wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHT))
+        self.Refresh()
+
+    def showDeselected(self):
+        """Change the background color to indicate that this control has been
+        deselected in the plugin list.
+        """
+        self.SetBackgroundColour(wx.Colour(255, 255, 255))
+        self.Refresh()
+
+    def onChangeInstall(self, event):
+        """Event called when the 'Install' or 'Remove' button on the item is
+        clicked. This will initiate an installation or uninstallation.
+        """
+        win = self.GetTopLevelParent()
+        if not self._installed:
+            wx.CallAfter(win.installPackage, self.pipname)
+        else:
+            wx.CallAfter(win.uninstallPackage, self.pipname)
+
+    def onPluginExtraInfoLeftUp(self, event):
+        self._setPluginInfo()
+
+    def onPluginIconLeftUp(self, event):
+        self._setPluginInfo()
+
+    def onPluginTitleLeftUp(self, event):
+        self._setPluginInfo()
+
+    def onLeftUp(self, event):
+        self._setPluginInfo()
 
 
 class EnvironmentManagerDlg(BasePluginDialog):
@@ -47,9 +324,14 @@ class EnvironmentManagerDlg(BasePluginDialog):
 
         # default icons
         # self._defaultIcon =
-
         self._initPackageListCtrl()
         self.refreshPackageList()
+
+        # info cards for the plugins list, these are displayed on the panel
+        self.pluginInfoCards = []
+        self.populatePluginList()
+
+        self.currentPlugin = None
 
         self.pipProcess = None
 
@@ -243,6 +525,12 @@ class EnvironmentManagerDlg(BasePluginDialog):
 
         pkgtools.refreshPackages()
 
+        # make sure plugin list installation states match
+        pluginListItems = self.getAllPluginListItems()
+        for pluginItem in pluginListItems:
+            pkgName = pkg_resources.safe_name(pluginItem.pipname)
+            pluginItem.setInstallationState(pkgtools.isInstalled(pkgName))
+
     @property
     def isBusy(self):
         """`True` if there is currently a `pip` subprocess running.
@@ -294,7 +582,7 @@ class EnvironmentManagerDlg(BasePluginDialog):
         pyExec = sys.executable
 
         # build the shell command to run the script
-        command = [pyExec, '-m', 'pip', 'uninstall', packageName]
+        command = [pyExec, '-m', 'pip', 'uninstall', packageName, '--yes']
 
         # create a new job with the user script
         self.pipProcess = jobs.Job(
@@ -343,9 +631,25 @@ class EnvironmentManagerDlg(BasePluginDialog):
         # interpreter path
         pyExec = sys.executable
 
+        # determine installation path for bundle, create it if needed
+        bundlePath = plugins.getBundleInstallTarget(packageName)
+        if not os.path.exists(bundlePath):
+            self._writeOutput(
+                "Creating bundle path `{}` for package `{}`.\n".format(
+                    bundlePath, packageName))
+            os.mkdir(bundlePath)  # make the directory
+        else:
+            self._writeOutput(
+                "Using existing bundle path `{}` for package `{}`.\n".format(
+                    bundlePath, packageName))
+
+        # add the bundle to path, refresh makes it discoverable after install
+        if bundlePath not in sys.path:
+            sys.path.insert(0, bundlePath)
+
         # build the shell command to run the script
         command = [pyExec, '-m', 'pip', 'install', packageName, '--target',
-                   plugins.getBundleInstallTarget(packageName)]
+                   bundlePath]
 
         # create a new job with the user script
         self.pipProcess = jobs.Job(
@@ -385,7 +689,6 @@ class EnvironmentManagerDlg(BasePluginDialog):
             Bitmap to display as the plugin icon.
 
         """
-        icon = EnvironmentManagerDlg._createIconBitmap(icon)
         self.bmpPluginAuthorAvatar.SetBitmap(icon)
 
     def setPluginKeywordsList(self, keywordsList):
@@ -444,7 +747,7 @@ class EnvironmentManagerDlg(BasePluginDialog):
         if not isinstance(summaryText, str):
             raise TypeError("Parameter `summaryText` must be type `str`.")
 
-        self.txtPluginInfoDescription.SetLabelText(summaryText)
+        self.txtPluginInfoDescription.SetValue(summaryText)
 
     def setPluginIcon(self, icon):
         """Set the graphic representing the plugin icon.
@@ -455,7 +758,6 @@ class EnvironmentManagerDlg(BasePluginDialog):
             Bitmap to display as the plugin icon.
 
         """
-        icon = EnvironmentManagerDlg._createIconBitmap(icon)
         self.bmpPluginInfoPicture.SetBitmap(icon)
 
     def setPluginInfo(self, pluginInfo):
@@ -471,7 +773,7 @@ class EnvironmentManagerDlg(BasePluginDialog):
         pluginTitle = pluginInfo.get('pluginTitle', 'Unknown')
         projectName = pluginInfo.get('projectName', 'Unknown')
         summary = pluginInfo.get('description', '')
-        keywords = pluginInfo.get('keywords', '')
+        keywords = pluginInfo.get('keywords', [])
         authorName = pluginInfo.get('authorName', 'Unknown')
 
         self.setPluginTitle(pluginTitle)
@@ -480,13 +782,109 @@ class EnvironmentManagerDlg(BasePluginDialog):
         self.setPluginKeywordsList(keywords)
         self.setPluginAuthorCardName(authorName)
 
+    def setPluginInfoFromCard(self, infoCard):
+        """Set plugin info from an info card object. This sets the current
+        selection for the dialog.
+
+        Parameters
+        ----------
+        infoCard : PluginInfoCard or None
+            Plugin info card which has been selected, either by the user
+            clicking on it or done programmatically. If `None`, no selection
+            will be made and the plugin info panel should display a placeholder.
+
+        """
+        # do deselection of old selection
+        if self.currentPlugin is not None:
+            self.currentPlugin.showDeselected()
+
+        cardCtrl = self.currentPlugin = infoCard
+
+        # handle empty or wrong object
+        if infoCard is None or not isinstance(infoCard, PluginInfoCard):
+            return
+
+        self.setPluginTitle(cardCtrl.name)
+        self.setPluginProjectName(cardCtrl.pipname)
+        self.setPluginSummary(cardCtrl.summary)
+        self.setPluginKeywordsList(cardCtrl.keywords)
+        self.setPluginAuthorCardName(cardCtrl.authorName)
+
+        # set project image, if available
+        if self.currentPlugin.avatarImageLarge is not None:
+            self.setPluginIcon(self.currentPlugin.avatarImageLarge)
+
+        # set author image, if available
+        if self.currentPlugin.authorImage is not None:
+            self.setPluginAuthorCardAvatar(self.currentPlugin.authorImage)
+
+        self.currentPlugin.showSelected()
+
+    def getAllPluginListItems(self):
+        """Get a list of all plugin list items in the order they appear.
+
+        Returns
+        -------
+        `list` of `wx.Panel` or `PluginInfoCard`
+            List of widgets currently present in the plugin panel.
+
+        """
+        sizer = self.pnlAvailablePlugins.GetSizer()
+        sizerItems = sizer.GetChildren()
+        toReturn = [item.GetWindow() for item in sizerItems]
+
+        return toReturn
+
+    def populatePluginList(self, subset=''):
+        """Populate the plugin list panel.
+
+        This generates info cards and presents them on the panel. The order
+        which items appear is the same as they appear in the `plugins.json`
+        file.
+
+        Parameters
+        ----------
+        subset : str
+            Subset plugin list based on string. This will reduce the number of
+            options available to those where `PluginInfoCard.searchValue`
+            contains a match. However, items are only hidden.
+
+        """
+        pluginListSizer = self.pnlAvailablePlugins.GetSizer()
+
+        # get curated plugins list for `plugins.json`
+        pluginInfo = utils.getAllPluginDetails()
+
+        # generate widgets
+        if not self.pluginInfoCards:
+            for info in pluginInfo:
+                newInfoCard = PluginInfoCard(self.pnlAvailablePlugins)
+                newInfoCard.setCardInfo(info)
+
+                if pkgtools.isInstalled(info['pipname']):
+                    newInfoCard.setInstallationState(True)
+
+                self.pluginInfoCards.append(newInfoCard)
+
+        for infoCard in self.pluginInfoCards:
+            pluginListSizer.Add(infoCard, 0, wx.EXPAND, 1)
+
+        pluginListSizer.Layout()
+
+        self.pnlAvailablePlugins.Refresh()
+
+    def onPluginListSize(self, event):
+        """Handle when the plugin list is resized.
+        """
+        pass
+
     # Packages -----------------------------------------------------------------
 
     def _initPackageListCtrl(self):
         """Initialize the package list control. This clears it and creates the
         required columns.
         """
-        self.tvwPackageList.AppendColumn(_translate("Name"), 150)
+        self.tvwPackageList.AppendColumn(_translate("Name"), 220)
         self.tvwPackageList.AppendColumn(_translate("Version"), -1)
 
         self.installedRoot = self.tvwPackageList.AppendItem(
@@ -717,6 +1115,12 @@ class EnvironmentManagerDlg(BasePluginDialog):
         self.setPackageSummary(packageSummary)
         packageVersion = packageInfo.get('Version', 'N/A')
         self.setPackageVersions(packageVersion, None)
+
+        isLocal = packageInfo.get('Local', False)  # check if local/installed
+
+        # set button status based on installation status
+        self.cmdInstallPackage.Enable(not isLocal)
+        self.cmdUninstallPackage.Enable(isLocal)
 
     def onPackageListSelChanged(self, event):
         """Event generated when the user selects an item in the package list.

@@ -21,7 +21,7 @@ class BasePluginDialog(wx.Frame):
 
     def __init__(self, parent):
         wx.Frame.__init__(self, parent, id=wx.ID_ANY, title=u"Plugins & Packages", pos=wx.DefaultPosition,
-                          size=wx.Size(800, 600), style=wx.DEFAULT_FRAME_STYLE | wx.TAB_TRAVERSAL)
+                          size=wx.Size(1024, 600), style=wx.DEFAULT_FRAME_STYLE | wx.TAB_TRAVERSAL)
 
         self.SetSizeHints(wx.Size(800, 600), wx.DefaultSize)
         self.SetForegroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_SCROLLBAR))
@@ -54,7 +54,7 @@ class BasePluginDialog(wx.Frame):
         szrPluginList.Add(self.txtSearchPlugins, 0, wx.ALL | wx.EXPAND, 10)
 
         self.pnlAvailablePlugins = wx.ScrolledWindow(self.pnlPluginList, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize,
-                                                     wx.HSCROLL | wx.VSCROLL)
+                                                     wx.VSCROLL)
         self.pnlAvailablePlugins.SetScrollRate(5, 5)
         szrAvailablePluginList = wx.BoxSizer(wx.VERTICAL)
 
@@ -351,8 +351,8 @@ class BasePluginDialog(wx.Frame):
         self.nbMain.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGED, self.onNotebookPageChanged)
         # self.txtSearchPlugins.Bind( wx.EVT_SEARCHCTRL_CANCEL_BTN, self.onPluginCancelButtonClicked )
         # self.txtSearchPlugins.Bind( wx.EVT_SEARCHCTRL_SEARCH_BTN, self.onPluginSearchButtonClicked )
-        self.txtSearchPlugins.Bind( wx.EVT_TEXT, self.onPluginSearchText )
-        self.txtSearchPlugins.Bind( wx.EVT_TEXT_ENTER, self.onPluginSearchEnter )
+        self.txtSearchPlugins.Bind(wx.EVT_TEXT, self.onPluginSearchText)
+        self.txtSearchPlugins.Bind(wx.EVT_TEXT_ENTER, self.onPluginSearchEnter)
         self.pnlAvailablePlugins.Bind(wx.EVT_LEFT_UP, self.onPluginListClicked)
         self.pnlAvailablePlugins.Bind(wx.EVT_LEFT_DOWN, self.onPluginListMouseEvents)
         self.pnlAvailablePlugins.Bind(wx.EVT_LEFT_UP, self.onPluginListMouseEvents)
@@ -374,14 +374,15 @@ class BasePluginDialog(wx.Frame):
         self.pnlAvailablePlugins.Bind(wx.EVT_ENTER_WINDOW, self.onPluginListMouseEvents)
         self.pnlAvailablePlugins.Bind(wx.EVT_MOUSEWHEEL, self.onPluginListMouseEvents)
         self.pnlAvailablePlugins.Bind(wx.EVT_MOUSEWHEEL, self.onPluginListMouseWheel)
+        self.pnlAvailablePlugins.Bind(wx.EVT_SIZE, self.onPluginListSize)
         self.cmdInstallPlugin.Bind(wx.EVT_BUTTON, self.onPluginInstallClicked)
         self.cmdGotoHomepage.Bind(wx.EVT_BUTTON, self.onPluginHomepageClicked)
         self.cmdAuthorGithub.Bind(wx.EVT_BUTTON, self.onPluginAuthorClicked)
         self.cmdAuthorGotoEmail.Bind(wx.EVT_BUTTON, self.onPluginEmailClicked)
-        self.txtSearchPackages.Bind( wx.EVT_SEARCH_CANCEL, self.onPackageSearchCancelClicked)
-        self.txtSearchPackages.Bind( wx.EVT_SEARCH, self.onPackageSearchButtonClicked )
+        self.txtSearchPackages.Bind(wx.EVT_SEARCH_CANCEL, self.onPackageSearchCancelClicked)
+        self.txtSearchPackages.Bind(wx.EVT_SEARCH, self.onPackageSearchButtonClicked)
         # self.txtSearchPackages.Bind( wx.EVT_TEXT, self.onPackageSearchText )
-        self.txtSearchPackages.Bind( wx.EVT_SEARCH, self.onPackageSearchEnter )
+        self.txtSearchPackages.Bind(wx.EVT_SEARCH, self.onPackageSearchEnter)
         # self.tvwPackageList.Bind(wx.dataview.EVT_TREELIST_ITEM_ACTIVATED, self.onPackageListActivated)
         # self.tvwPackageList.Bind(wx.dataview.EVT_TREELIST_ITEM_CONTEXT_MENU, self.onPackageListContextMenu)
         self.tvwPackageList.Bind(wx.dataview.EVT_TREELIST_SELECTION_CHANGED, self.onPackageListSelChanged)
@@ -423,6 +424,9 @@ class BasePluginDialog(wx.Frame):
         event.Skip()
 
     def onPluginListMouseWheel(self, event):
+        event.Skip()
+
+    def onPluginListSize(self, event):
         event.Skip()
 
     def onPluginInstallClicked(self, event):
@@ -492,9 +496,88 @@ class BasePluginDialog(wx.Frame):
         event.Skip()
 
     def splPluginsOnIdle(self, event):
-        self.splPlugins.SetSashPosition(250)
+        self.splPlugins.SetSashPosition(380)
         self.splPlugins.Unbind(wx.EVT_IDLE)
 
     def splPackagesOnIdle(self, event):
-        self.splPackages.SetSashPosition(250)
+        self.splPackages.SetSashPosition(380)
         self.splPackages.Unbind(wx.EVT_IDLE)
+
+
+class BasePluginInfoCard(wx.Panel):
+    def __init__(self, parent, id=wx.ID_ANY, pos=wx.DefaultPosition, size=wx.Size(320, 80),
+                 style=wx.BORDER_NONE | wx.TAB_TRAVERSAL, name=wx.EmptyString):
+        wx.Panel.__init__(self, parent, id=id, pos=pos, size=size, style=style, name=name)
+
+        self.SetBackgroundColour(wx.Colour(255, 255, 255))
+
+        szrMain = wx.BoxSizer(wx.HORIZONTAL)
+
+        self.bmpPluginIcon = wx.StaticBitmap(self, wx.ID_ANY, wx.NullBitmap, wx.DefaultPosition, wx.Size(48, 48), 0)
+        self.bmpPluginIcon.SetMinSize(wx.Size(48, 48))
+
+        szrMain.Add(self.bmpPluginIcon, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 2)
+
+        szrInfoText = wx.BoxSizer(wx.VERTICAL)
+
+        self.lblPluginTitle = wx.StaticText(self, wx.ID_ANY, u"", wx.DefaultPosition,
+                                            wx.DefaultSize, wx.ST_NO_AUTORESIZE)
+        self.lblPluginTitle.Wrap(-1)
+
+        self.lblPluginTitle.SetFont(
+            wx.Font(wx.NORMAL_FONT.GetPointSize(), wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD,
+                    False, wx.EmptyString))
+
+        szrInfoText.Add(self.lblPluginTitle, 0, wx.ALL | wx.EXPAND, 1)
+
+        self.txtPluginExtraInfo = wx.StaticText(self, wx.ID_ANY, u"",
+                                                wx.DefaultPosition, wx.DefaultSize, wx.ST_NO_AUTORESIZE)
+        self.txtPluginExtraInfo.Wrap(-1)
+
+        szrInfoText.Add(self.txtPluginExtraInfo, 0, wx.ALL | wx.EXPAND, 1)
+
+        szrBottomRow = wx.BoxSizer(wx.HORIZONTAL)
+
+        self.hypLink = wx.adv.HyperlinkCtrl(self, wx.ID_ANY, u"Author", u"http://www.wxformbuilder.org",
+                                            wx.DefaultPosition, wx.DefaultSize, wx.adv.HL_ALIGN_LEFT)
+        szrBottomRow.Add(self.hypLink, 1, wx.EXPAND | wx.LEFT, 3)
+
+        self.cmdChangeInstall = wx.Button(self, wx.ID_ANY, u"Install", wx.DefaultPosition, wx.DefaultSize,
+                                          wx.BU_EXACTFIT)
+        self.cmdChangeInstall.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW))
+
+        szrBottomRow.Add(self.cmdChangeInstall, 0, wx.ALL, 2)
+
+        szrInfoText.Add(szrBottomRow, 0, wx.EXPAND, 5)
+
+        szrMain.Add(szrInfoText, 1, wx.ALL | wx.EXPAND, 5)
+
+        self.SetSizer(szrMain)
+        self.Layout()
+
+        # Connect Events
+        self.Bind(wx.EVT_LEFT_UP, self.onLeftUp)
+        self.bmpPluginIcon.Bind(wx.EVT_LEFT_UP, self.onPluginIconLeftUp)
+        self.lblPluginTitle.Bind(wx.EVT_LEFT_UP, self.onPluginTitleLeftUp)
+        self.txtPluginExtraInfo.Bind(wx.EVT_LEFT_UP, self.onPluginExtraInfoLeftUp)
+        self.cmdChangeInstall.Bind(wx.EVT_BUTTON, self.onChangeInstall)
+
+    def __del__(self):
+        pass
+
+    # Virtual event handlers, override them in your derived class
+    def onLeftUp(self, event):
+        event.Skip()
+
+    def onPluginIconLeftUp(self, event):
+        event.Skip()
+
+    def onPluginTitleLeftUp(self, event):
+        event.Skip()
+
+    def onPluginExtraInfoLeftUp(self, event):
+        event.Skip()
+
+    def onChangeInstall(self, event):
+        event.Skip()
+
