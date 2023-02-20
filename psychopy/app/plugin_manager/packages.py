@@ -6,15 +6,14 @@ import sys
 import subprocess as sp
 from pypi_search import search as pypi
 
-from psychopy.app import utils
+from psychopy.app import utils, jobs
 from psychopy.app.themes import handlers, icons
 from psychopy.localization import _translate
-from psychopy.tools import filetools as ft
+from psychopy.plugins import getBundleInstallTarget
 
 from psychopy.tools.pkgtools import (
     getInstalledPackages, getPackageMetadata, getPypiInfo, isInstalled, _isUserPackage, getInstallState
 )
-from .utils import uninstallPackage, installPackage
 
 
 class PackageManagerPanel(wx.Panel):
@@ -442,11 +441,41 @@ class PackageDetailsPanel(wx.Panel):
     def onInstall(self, evt=None):
         name = self.package
         version = self.versionCtrl.GetStringSelection()
+
+        # callback functions for the subprocess
+        def _stdoutCallback(streamBytes):
+            """Called when standard output is received from the subprocess. This
+            writes the response to the output window.
+            """
+            self.dlg.output.write(streamBytes)
+
+        def _stderrCallback(streamBytes):
+            """Called when standard error is received from the subprocess. This
+            writes the response to the output window.
+            """
+            self.dlg.output.write(streamBytes)
+
+        def _terminateCallback(pid, exitCode):
+            """Called when the subprocess exits.
+            """
+            pass
+
         # Append version if given
         if version is not None:
             name += f"=={version}"
         # Install package then disable the button to indicate it's installed
-        installPackage(name, stream=self.dlg.output)
+        # do installation
+        cmd = [sys.executable, "-m", "pip", "install", name, "--target",
+               getBundleInstallTarget(name)]
+        installJob = jobs.Job(
+            self,
+            cmd,
+            inputCallback=_stdoutCallback,
+            errorCallback=_stderrCallback,
+            terminateCallback=_terminateCallback
+        )
+        installJob.start()
+
         # Refresh view
         self.refresh()
 
@@ -460,7 +489,7 @@ class PackageDetailsPanel(wx.Panel):
 
         # if user selects NO, exit the routine
         if msg.ShowModal() == wx.ID_YES:
-            uninstallPackage(self.package)
+            uninstallPackage(self.package, self.dlg.output)
         # Refresh view
         self.refresh()
 

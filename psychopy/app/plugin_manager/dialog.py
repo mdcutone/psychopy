@@ -179,6 +179,12 @@ class PluginInfoCard(BasePluginInfoCard):
         return self._info
 
     @property
+    def isInstalled(self):
+        """Is this package marked as installed (`bool`)?
+        """
+        return self._installed
+
+    @property
     def name(self):
         """Name of the plugin (`str`). Returns 'Unspecified' if the name field
         is missing.
@@ -525,11 +531,19 @@ class EnvironmentManagerDlg(BasePluginDialog):
 
         pkgtools.refreshPackages()
 
+        # refresh package list
+        self.refreshPackageList(
+            subset=self.txtSearchPackages.GetValue(), includeRemotes=True)
+
         # make sure plugin list installation states match
         pluginListItems = self.getAllPluginListItems()
         for pluginItem in pluginListItems:
             pkgName = pkg_resources.safe_name(pluginItem.pipname)
             pluginItem.setInstallationState(pkgtools.isInstalled(pkgName))
+
+        if self.currentPlugin is not None:
+            self.cmdInstallPlugin.SetLabelText(
+                'Remove' if self.currentPlugin.isInstalled else 'Add')
 
     @property
     def isBusy(self):
@@ -576,6 +590,20 @@ class EnvironmentManagerDlg(BasePluginDialog):
                        'details.\n').format(packageName)
 
             self._writeOutput(msg)
+
+            self.refreshPackageList(
+                subset=self.txtSearchPackages.GetValue(), includeRemotes=True)
+
+            # make sure plugin list installation states match
+            pluginListItems = self.getAllPluginListItems()
+            for pluginItem in pluginListItems:
+                pkgName = pkg_resources.safe_name(pluginItem.pipname)
+                pluginItem.setInstallationState(pkgtools.isInstalled(pkgName))
+
+            if self.currentPlugin is not None:
+                self.cmdInstallPlugin.SetLabelText(
+                    'Remove' if self.currentPlugin.isInstalled else 'Install')
+
             return
 
         # interpreter path
@@ -818,6 +846,10 @@ class EnvironmentManagerDlg(BasePluginDialog):
         if self.currentPlugin.authorImage is not None:
             self.setPluginAuthorCardAvatar(self.currentPlugin.authorImage)
 
+        # enable/disable buttons
+        self.cmdInstallPlugin.SetLabelText(
+            'Remove' if cardCtrl.isInstalled else 'Install')
+
         self.currentPlugin.showSelected()
 
     def getAllPluginListItems(self):
@@ -861,8 +893,8 @@ class EnvironmentManagerDlg(BasePluginDialog):
                 newInfoCard = PluginInfoCard(self.pnlAvailablePlugins)
                 newInfoCard.setCardInfo(info)
 
-                if pkgtools.isInstalled(info['pipname']):
-                    newInfoCard.setInstallationState(True)
+                newInfoCard.setInstallationState(
+                    pkgtools.isInstalled(info['pipname']))
 
                 self.pluginInfoCards.append(newInfoCard)
 
@@ -877,6 +909,23 @@ class EnvironmentManagerDlg(BasePluginDialog):
         """Handle when the plugin list is resized.
         """
         pass
+
+    def onPluginHomepageClicked(self, event):
+        pass
+
+    def onPluginEmailClicked(self, event):
+        pass
+
+    def onPluginInstallClicked(self, event):
+        """Event called when the plugin installation button in the info panel is
+        clicked.
+        """
+        if self.currentPlugin is not None:
+            packageName = self.currentPlugin.pipname
+            if pkgtools.isInstalled(packageName):
+                self.uninstallPackage(packageName)
+            else:
+                self.installPackage(packageName)
 
     # Packages -----------------------------------------------------------------
 

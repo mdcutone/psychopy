@@ -3,7 +3,8 @@ from wx.lib import scrolledpanel
 import webbrowser
 from PIL import Image as pil
 
-from .utils import uninstallPackage, installPackage
+import sys
+
 from psychopy.tools import pkgtools
 from psychopy.app.themes import theme, handlers, colors, icons
 from psychopy.app import utils
@@ -11,6 +12,12 @@ from psychopy.localization import _translate
 from psychopy import plugins
 from psychopy.preferences import prefs
 from psychopy.experiment import getAllElements
+from psychopy.app.jobs import Job
+from psychopy.plugins import getBundleInstallTarget
+
+from psychopy.tools.pkgtools import (
+    getInstalledPackages, getPackageMetadata, getPypiInfo, isInstalled, _isUserPackage, getInstallState
+)
 import requests
 
 
@@ -138,46 +145,12 @@ class PluginInfo:
         plugins.startUpPlugins(current, add=False, verify=False)
 
     def install(self, stream):
-        stream = installPackage(self.pipname, stream=stream)
+        stream = installPackage(self.pipname, stream)
         # Refresh and enable
         plugins.scanPlugins()
-        try:
-            self.activate()
-            plugins.loadPlugin(self.pipname)
-        except RuntimeError:
-            prefs.general['startUpPlugins'].append(self.pipname)
-            stream.writeStdErr(_translate(
-                "[Warning] Could not activate plugin. PsychoPy may need to restart for plugin to take effect."
-            ))
-        # Show list of components/routines now available
-        emts = []
-        for name, emt in getAllElements().items():
-            if hasattr(emt, "plugin") and emt.plugin == self.pipname:
-                cats = ", ".join(emt.categories)
-                emts.append(f"{name} ({cats})")
-        if len(emts):
-            msg = _translate(
-                "The following components/routines should now be visible in the Components panel:\n"
-            )
-            for emt in emts:
-                msg += (
-                    f"    - {emt}\n"
-                )
-            stream.write(msg)
-        # Show info link
-        if self.docs:
-            msg = _translate(
-                "\n"
-                "\n"
-                "For more information about the %s plugin, read the documentation at:\n"
-            ) % self.name
-            stream.write(msg)
-            stream.writeLink(self.docs, link=self.docs)
-        # Finish
-        stream.writeTerminus()
 
-    def uninstall(self):
-        uninstallPackage(self.pipname)
+    def uninstall(self, stream):
+        uninstallPackage(self.pipname, stream)
         pkgtools.refreshPackages()
         plugins.scanPlugins()
 
@@ -708,14 +681,50 @@ class PluginDetailsPanel(wx.Panel, handlers.ThemeMixin):
         # Mark as pending
         self.markInstalled(None)
         # Do install
-        self.info.install(stream=self.stream)
+        name = self.package
+        version = self.versionCtrl.GetStringSelection()
+
+        # callback functions for the subprocess
+        def _stdoutCallback(streamBytes):
+            """Called when standard output is received from the subprocess. This
+            writes the response to the output window.
+            """
+            self.dlg.output.write(streamBytes)
+
+        def _stderrCallback(streamBytes):
+            """Called when standard error is received from the subprocess. This
+            writes the response to the output window.
+            """
+            self.dlg.output.write(streamBytes)
+
+        def _terminateCallback(pid, exitCode):
+            """Called when the subprocess exits.
+            """
+            pass
+
+        # Append version if given
+        if version is not None:
+            name += f"=={version}"
+        # Install package then disable the button to indicate it's installed
+        # do installation
+        cmd = [sys.executable, "-m", "pip", "install", name, "--target",
+               getBundleInstallTarget(name)]
+        installJob = Job(
+            self,
+            cmd,
+            inputCallback=_stdoutCallback,
+            errorCallback=_stderrCallback,
+            terminateCallback=_terminateCallback
+        )
+        installJob.start()
+
         # Mark according to install success
         self.markInstalled(self.info.installed)
 
     def onInstall(self, evt=None):
         """Event called when the install button is clicked.
         """
-        wx.CallAfter(self._doInstall)  # call after processing button events
+        self._doInstall()  # call after processing button events
         if evt is not None and hasattr(evt, 'Skip'):
             evt.Skip()
 

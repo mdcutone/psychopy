@@ -97,7 +97,7 @@ class BasePluginDialog(wx.Frame):
 
         gbPluginInfoCard.Add(self.lblPluginInfoPackageName, wx.GBPosition(1, 1), wx.GBSpan(1, 2), wx.EXPAND, 5)
 
-        self.cmdInstallPlugin = wx.Button(self.pnlPluginInfo, wx.ID_ANY, u"Add", wx.DefaultPosition, wx.DefaultSize, 0)
+        self.cmdInstallPlugin = wx.Button(self.pnlPluginInfo, wx.ID_ANY, u"Install", wx.DefaultPosition, wx.DefaultSize, 0)
         gbPluginInfoCard.Add(self.cmdInstallPlugin, wx.GBPosition(3, 1), wx.GBSpan(1, 1),
                              wx.ALIGN_BOTTOM | wx.BOTTOM | wx.RIGHT | wx.TOP, 5)
 
@@ -542,8 +542,7 @@ class BasePluginInfoCard(wx.Panel):
                                             wx.DefaultPosition, wx.DefaultSize, wx.adv.HL_ALIGN_LEFT)
         szrBottomRow.Add(self.hypLink, 1, wx.EXPAND | wx.LEFT, 3)
 
-        self.cmdChangeInstall = wx.Button(self, wx.ID_ANY, u"Install", wx.DefaultPosition, wx.DefaultSize,
-                                          wx.BU_EXACTFIT)
+        self.cmdChangeInstall = wx.Button(self, wx.ID_ANY, u"Install", wx.DefaultPosition, wx.DefaultSize, 0)
         self.cmdChangeInstall.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW))
 
         szrBottomRow.Add(self.cmdChangeInstall, 0, wx.ALL, 2)
