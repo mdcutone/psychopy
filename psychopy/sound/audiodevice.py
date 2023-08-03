@@ -181,8 +181,8 @@ class AudioDeviceInfo:
 
     def __repr__(self):
         return (f"AudioDeviceInfo(deviceIndex={self.deviceIndex}, "
-                f"deviceName={self.deviceName}, "
-                f"hostAPIName={self.hostAPIName}, "
+                f"deviceName={repr(self.deviceName)}, "
+                f"hostAPIName={repr(self.hostAPIName)}, "
                 f"outputChannels={self.outputChannels}, "
                 f"outputLatency={repr(self.outputLatency)}, "
                 f"inputChannels={self.inputChannels}, "
