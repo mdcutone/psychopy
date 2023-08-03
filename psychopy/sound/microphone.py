@@ -410,7 +410,7 @@ class Microphone:
         elif isinstance(device, (int, float)):
             devicesByIndex = {d.deviceIndex: d for d in devices}
             if device in devicesByIndex:
-                self._device = devicesByIndex[int(device)]
+                self._device = devicesByIndex[device]
             else:
                 raise AudioInvalidCaptureDeviceError(
                     'No suitable audio recording devices found matching index '
@@ -887,7 +887,8 @@ class Microphone:
         """
         if not self.isStarted:
             raise AudioStreamError(
-                "Cannot poll samples from audio device, not started.")
+                "Cannot poll samples from audio device, not started. "
+                "Have you called `Microphone.start` or `Microphone.record`?")
 
         # figure out what to do with this other information
         audioData, absRecPosition, overflow, cStartTime = \
