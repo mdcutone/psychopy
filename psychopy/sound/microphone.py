@@ -410,7 +410,7 @@ class Microphone:
         elif isinstance(device, (int, float)):
             devicesByIndex = {d.deviceIndex: d for d in devices}
             if device in devicesByIndex:
-                self._device = devicesByIndex[device]
+                self._device = devicesByIndex[int(device)]
             else:
                 raise AudioInvalidCaptureDeviceError(
                     'No suitable audio recording devices found matching index '
