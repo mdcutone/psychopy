@@ -17,6 +17,8 @@ __all__ = [
     'closeAllParallelPorts'
 ]
 
+import sys
+from psychopy import logging
 from .base import BaseTriggerBox
 
 # used to keep track of open parallel ports to avoid multiple objects accessing
@@ -30,20 +32,33 @@ WIN_PPORT_ADDRESSES = {
     'LPT3': 0x0278
 }
 
+# platform specific defualt
+DEFAULT_PPORT_ADDRESS = None
+if sys.platform.startswith('linux'):
+    DEFAULT_PPORT_ADDRESS = '/dev/parport0'
+elif sys.platform == 'win32':
+    DEFAULT_PPORT_ADDRESS = WIN_PPORT_ADDRESSES['LPT1']
+
+
 
 class ParallelPortTrigger(BaseTriggerBox):
     """Class for using the computer's parallel port as a trigger interface.
 
     Parameters
     ----------
-    portAddress : int
-        Address of the parallel port.
+    port : int, str, None
+        Address of the parallel port. On Windows, this value is usually an 
+        integer i.e. 0x0378 specifying the base address of the port. On Linux, 
+        this value is usually a string specifying the path to the port, or an 
+        integer representing the port number. On Mac, this value is ignored as 
+        the is no parallel port support. Specify `None` if you plan to open the 
+        port later using :func:`open`.
 
     """
     _deviceName = u"Parallel Port"
     _deviceVendor = u"Open Science Tools Ltd."
 
-    def __init__(self, portAddress=0x378, **kwargs):
+    def __init__(self, port=DEFAULT_PPORT_ADDRESS, **kwargs):
         """Initialize the parallel port trigger interface.
 
         Parameters
@@ -54,10 +69,10 @@ class ParallelPortTrigger(BaseTriggerBox):
 
         """
         super().__init__(**kwargs)
-        self._portAddress = portAddress
+        self._portAddress = port
         self._parallelPort = None  # raw interface to parallel port
 
-        if portAddress is not None:
+        if port is not None:
             self.open()
 
     @staticmethod
@@ -220,21 +235,33 @@ class ParallelPortTrigger(BaseTriggerBox):
         platform. If the parallel port is already open, this method will do
         nothing. You must set the port address using :func:`setPortAddress`
         or the constructor before opening the port.
-        
+
+        If you are encountering problems opening the parallel port on Linux, 
+        try doing the following steps:
+
+        1. Makes sure `/dev/parportN` exists and has read/write permission where 
+           N is a number (usually 0).
+        2. Run `sudo modprobe -r ppdev` or `sudo modprobe -r lp`
+
         """
         if self._parallelPort is None:
             self._parallelPort = _openParallelPorts.get(self.portAddress, None)
             if self._parallelPort is None:
                 parallelInterface = ParallelPortTrigger._setupPort()
-                self._parallelPort = parallelInterface(self.portAddress)
+                try:
+                    self._parallelPort = parallelInterface(self.portAddress)
+                except OSError:
+                    raise RuntimeError(
+                        "Failed to open the parallel port at address `{}`."
+                            .format(self.portAddress))
                 _openParallelPorts[self.portAddress] = self._parallelPort
         
     def close(self):
         """Close the parallel port.
         """
-        if self._port is not None:
+        if self._parallelPort is not None:
             del _openParallelPorts[self.portAddress]
-            self._port = None
+            self._parallelPort = None
 
     @property
     def isOpen(self):
@@ -246,7 +273,7 @@ class ParallelPortTrigger(BaseTriggerBox):
             True if the parallel port is open, False otherwise.
 
         """
-        return self._port is not None
+        return self._parallelPort is not None
 
     def setData(self, data):
         """Set the data to be presented on the parallel port (one ubyte).
@@ -283,6 +310,20 @@ class ParallelPortTrigger(BaseTriggerBox):
             raise RuntimeError("The parallel port is not open.")
 
         self._parallelPort.setData(0)
+
+    def readData(self):
+        """Return the value currently set on the data pins (2-9).
+
+        Returns
+        -------
+        int
+            Data value (0-255).
+
+        """
+        if not self.isOpen:
+            raise RuntimeError("The parallel port is not open.")
+
+        return self._parallelPort.readData()
 
     def setPin(self, pinNumber, state):
         """Set a desired pin to be high (1) or low (0).
