@@ -67,6 +67,8 @@ from psychopy.sound.microphone import Microphone
 import psychopy.tools.movietools as movietools
 import psychopy.logging as logging
 from psychopy.localization import _translate
+from psychopy.hardware.base import BaseDevice
+from psychopy.hardware.manager import getDeviceManager
 
 
 # ------------------------------------------------------------------------------
@@ -1417,6 +1419,490 @@ class CameraInterfaceOpenCV(CameraInterface):
 _openCameras = {}
 
 
+class CameraDevice(BaseDevice):
+    """Camera interface class.
+
+    This class serves as a common interface for camera interfaces. It handles 
+    opening and closing camera streams, and accssing the most recent frame from
+    the camera.
+
+    Parameters
+    ----------
+    device : CameraInfo
+        Camera device to open a stream with. Calling `start()` will open a
+        stream with this device. Afterwards, `getRecentFrame()` can be called
+        to get the most recent frame from the camera.
+    mic : MicrophoneInterface or None
+        Microphone interface to use for audio recording. If `None`, no audio
+        recording is performed.
+    cameraLib : str
+        Interface library (backend) to use for accessing the camera. May either
+        be `ffpyplayer` or `opencv`. If `None`, the default library for the
+        recommended by the PsychoPy developers will be used. Switching camera 
+        libraries could help resolve issues with camera compatibility. More 
+        camera libraries may be installed via extension packages.
+    frameRate : int or None
+        Frame rate to record the camera stream at. If `None`, the camera's
+        default frame rate will be used.
+    frameSize : tuple or None
+        Size (width, height) of the camera stream frames to record. If `None`,
+        the camera's default frame size will be used.
+    pixelFormat : str or None
+        Pixel format to use for the camera stream. If `None`, the camera's
+        default pixel format will be used.
+    codecFormat : str or None
+        Codec format to use for the camera stream. If `None`, the camera's
+        default codec format will be used.
+    bufferSecs : float
+        Size of the real-time camera stream buffer specified in seconds (only
+        valid on Windows and MacOS). This is not the same as the recording
+        buffer size. This option might not be available for all camera
+        libraries.
+    
+    """
+    def __init__(self, device=0, mic=None, cameraLib=u'ffpyplayer',
+                 frameRate=None, frameSize=None, pixelFormat=None, 
+                 codecFormat=None, bufferSecs=4):
+        super().__init__()
+
+        self._cameraLib = cameraLib  # camera library to use
+
+        if isinstance(device, str):
+            # parse as mode string
+            self._setDeviceFromModeString(device)
+
+        self._device = device  # camera device to open
+        self._mic = mic  # microphone interface
+        self._frameRate = frameRate  # frame rate to record at
+        self._frameSize = frameSize  # frame size to record at
+        self._codecFormat = None  # codec format to use
+        self._pixelFormat = None  # pixel format to use
+        self._captureThread = None  # thread where the camera stream is read
+        self._cameraInfo = device
+
+        # current camera frame since the start of recording
+        self._player = None  # media player instance
+        self._status = NOT_STARTED
+        self._isRecording = False
+        self._bufferSecs = float(bufferSecs)
+        self._lastFrame = None  # use None to avoid imports for ImageStim
+
+        # microphone instance, this is controlled by the camera interface and
+        # is not meant to be used by the user
+        self.mic = mic
+        self.name = name
+        self._streamTime = 0.0
+        
+        # movie writer instance, this runs in a separate thread
+        self._movieWriter = None
+        self._captureThread = None
+        self._captureFrames = []  # array for storing frames
+        self._audioTrack = None  # audio track from the recent recording
+        self._syncBarrier = None
+        self._bufferSecs = bufferSecs  # real-time buffer size in seconds
+
+    def _setDeviceFromModeString(self, modeString):
+        """Parse the mode string and set the camera parameters.
+
+        Camera device configuration can be specified using a mode string. The
+        mode string has the following format:
+
+            '[Live! Cam Sync 1080p] 160x120@30fps, mjpeg'
+
+        Where the first part is the camera name or device index, and the second
+        part is the frame size and frame rate. The frame size and frame rate
+        are separated by an `@` symbol, and the frame size is separated by an
+        `x` symbol. The last part is the pixel format or codec, depending on the
+        camera API being used.
+
+        Parameters
+        ----------
+        modeString : str
+            Mode string to parse.
+
+        """
+        # parse the mode string
+        modeString = modeString.strip()
+        if not modeString:
+            raise ValueError("Invalid mode string, empty string.")
+
+        # split the mode string into the camera name and the frame size and
+        # frame rate
+        modeStringParts = modeString.split(']')
+        if len(modeStringParts) != 2:
+            raise ValueError(
+                "Invalid mode string, expected two parts separated by a ']' "
+                "symbol.")
+
+        # parse the camera name
+        cameraName = modeStringParts[0].strip()
+        if not cameraName:
+            raise ValueError(
+                "Invalid mode string, camera name is empty.")
+
+        # parse the frame size and frame rate
+        frameSizeAndFrameRate = modeStringParts[1].strip()
+        if not frameSizeAndFrameRate:
+            raise ValueError(
+                "Invalid mode string, frame size and frame rate are empty.")
+
+        # split the frame size and frame rate
+        frameSizeAndFrameRateParts = frameSizeAndFrameRate.split('@')
+        if len(frameSizeAndFrameRateParts) != 2:
+            raise ValueError(
+                "Invalid mode string, expected two parts separated by an '@' "
+                "symbol.")
+
+        # parse the frame size
+        frameSize = frameSizeAndFrameRateParts[0].strip()
+        if not frameSize:
+            raise ValueError(
+                "Invalid mode string, frame size is empty.")
+
+        # parse the frame rate
+        frameRate = frameSizeAndFrameRateParts[1].strip()
+        if not frameRate:
+            raise ValueError(
+                "Invalid mode string, frame rate is empty.")
+
+        # parse the frame size
+        frameSizeParts = frameSize.split('x')
+        if len(frameSizeParts) != 2:
+            raise ValueError(
+                "Invalid mode string, expected two parts separated by an 'x' "
+                "symbol.")
+
+        # parse the pixel format or codec
+        codecFormat = None
+        pixelFormat = None
+        codecFormatOrPixelFormat = frameRate
+        if codecFormatOrPixelFormat:
+            codecFormatOrPixelFormat = codecFormatOrPixelFormat.strip()
+            if codecFormatOrPixelFormat:
+                if codecFormatOrPixelFormat.startswith('mjpeg'):
+                    codecFormat = codecFormatOrPixelFormat
+                else:
+                    pixelFormat = codecFormatOrPixelFormat
+
+        self._device = cameraName
+        self._frameSize = (int(frameSizeParts[0]), int(frameSizeParts[1]))
+        self._frameRate = float(frameRate)
+
+        if pixelFormat is not None:
+            self._pixelFormat = pixelFormat
+        if codecFormat is not None:
+            self._codecFormat = codecFormat
+            
+    def setMicrophone(self, mic):
+        """Set the microphone to use for audio capture.
+
+        This cannot be set after the microphone has been opened. If the
+        microphone is already opened, it must be closed before passing the
+        handle to this function.
+
+        Parameters
+        ----------
+        mic : Microphone or None
+            Microphone interface to use for audio capture. If `None`, no audio
+            will be captured.
+
+        """
+        if self.isOpen():
+            raise RuntimeError(
+                "Cannot set microphone, camera is already opened.")
+
+        if not isinstance(mic, Microphone) and mic is not None:
+            raise TypeError(
+                "Expected a `Microphone` object or `None`.")
+
+        # check if the microphone is open, if so raise an error
+        if mic.isOpen():
+            raise RuntimeError(
+                "Cannot set microphone, it is already opened.")
+
+        self._mic = mic
+
+    @property
+    def mic(self):
+        """Get the microphone interface used for audio capture.
+        """
+        return self._mic
+
+    @mic.setter
+    def mic(self, value):   
+        self.setMicrophone(value)
+
+    def authorize(self):
+        """Get permission to access the camera. Not implemented locally yet.
+        """
+        pass  # NOP
+
+    @property
+    def isReady(self):
+        """Is the camera ready (`bool`)?
+
+        The camera is ready when the following conditions are met. First, we've
+        created a player interface and opened it. Second, we have received
+        metadata about the stream. At this point we can assume that the camera
+        is 'hot' and the stream is being read.
+
+        This is a legacy property used to support older versions of PsychoPy. 
+        The `isOpened` property should be used instead.
+
+        """
+        return self.isStarted
+
+    @property
+    def frameSize(self):
+        """Size of the video frame obtained from recent metadata (`float` or
+        `None`).
+
+        Only valid after an `open()` and successive `_enqueueFrame()` call as
+        metadata needs to be obtained from the stream. Returns `None` if not
+        valid.
+        """
+        if self._cameraInfo is None:
+            return None
+
+        return self._cameraInfo.frameSize
+
+    @property
+    def frameRate(self):
+        """Frame rate of the video stream (`float` or `None`).
+
+        Only valid after an `open()` and successive `_enqueueFrame()` call as
+        metadata needs to be obtained from the stream. Returns `None` if not
+        valid.
+
+        """
+        if self._cameraInfo is None:
+            return None
+
+        return self._cameraInfo.frameRate
+
+    def _assertCameraReady(self):
+        """Assert that the camera is ready. Raises a `CameraNotReadyError` if
+        the camera is not ready.
+        """
+        if not self.isReady:
+            raise CameraNotReadyError("Camera is not ready.")
+
+    @property
+    def isRecording(self):
+        """`True` if the video is presently recording (`bool`)."""
+        # Status flags as properties are pretty useful for users since they are
+        # self documenting and prevent the user from touching the status flag
+        # attribute directly.
+        #
+        return self._isRecording
+    
+    @property
+    def isStarted(self):
+        """`True` if the stream has started (`bool`). This status is given after
+        `open()` has been called on this object.
+        """
+        if self._captureThread is None:
+            return False
+
+        return self._captureThread.isOpen()
+
+    @property
+    def isNotStarted(self):
+        """`True` if the stream may not have started yet (`bool`). This status
+        is given before `open()` or after `close()` has been called on this
+        object.
+        """
+        return not self.isStarted
+
+    @property
+    def isStopped(self):
+        """`True` if the recording has stopped (`bool`). This does not mean that
+        the stream has stopped, `getVideoFrame()` will still yield frames until
+        `close()` is called.
+        """
+        return not self._isRecording
+
+    @property
+    def metadata(self):
+        """Video metadata retrieved during the last frame update
+        (`MovieMetadata`).
+        """
+        return self.getMetadata()
+
+    def getMetadata(self):
+        """Get stream metadata.
+
+        Returns
+        -------
+        MovieMetadata
+            Metadata about the video stream, retrieved during the last frame
+            update (`_enqueueFrame` call).
+
+        """
+        return self._recentMetadata
+        
+    def open(self):
+        """Open the camera stream and begin decoding frames (if available).
+
+        This function returns when the camera is ready to start getting
+        frames.
+
+        Call `record()` to start recording frames to memory. Captured frames
+        came be saved to disk using `save()`.
+
+        """
+        if self._hasPlayer:
+            raise RuntimeError('Cannot open `MediaPlayer`, already opened.')
+
+        # Camera interface to use, these are hard coded but support for each is
+        # provided by an extension.
+        desc = self._cameraInfo.description()
+        if self._cameraLib == u'ffpyplayer':
+            logging.debug(
+                "Opening camera stream using FFmpeg. (device={})".format(desc))
+            self._captureThread = CameraInterfaceFFmpeg(
+                device=self._cameraInfo, 
+                mic=self._mic)
+        elif self._cameraLib == u'opencv':
+            logging.debug(
+                "Opening camera stream using OpenCV. (device={})".format(desc))
+            self._captureThread = CameraInterfaceOpenCV(
+                device=self._cameraInfo, 
+                mic=self._mic)
+        else:
+            raise ValueError(
+                "Invalid value for parameter `cameraLib`, expected one of "
+                "`'ffpyplayer'` or `'opencv'`.")
+        
+        self._captureThread.open()
+
+    def close(self):
+        """Close the camera.
+
+        This will close the camera stream and free up any resources used by the
+        device. If the camera is currently recording, this will stop the 
+        recording, but will not discard any frames. You may still call `save()`
+        to save the frames to disk.
+
+        """
+        if not self._captureThread.isOpen():
+            raise RuntimeError("Cannot close stream, stream is not open.")
+        
+        if self._isRecording:
+            logging.warning(
+                "Closing camera stream while recording, stopping recording "
+                "first.")
+            self.stop()
+
+        self._captureThread.close()
+        self._captureThread = None
+
+    def record(self):
+        """Start recording frames.
+
+        This function will start recording frames and audio (if available). The
+        value of `lastFrame` will be updated as new frames arrive and the
+        `frameCount` will increase. You can access image data for the most 
+        recent frame to be captured using `lastFrame`.
+
+        If this is called before `open()` the camera stream will be opened
+        automatically. This is not recommended as it may incur a longer than
+        expected delay in the recording start time.
+
+        Warnings
+        --------
+        If a recording has been previously made without calling `save()` it will
+        be discarded if `record()` is called again.
+
+        """
+        if self.isNotStarted:
+            self.open()   # open the camera stream if we call record() first
+            logging.warning(
+                "Called `Camera.record()` before opening the camera stream, "
+                "opening now. This is not recommended as it may incur a longer "
+                "than expected delay in the recording start time."
+            )
+        
+        self._audioTrack = None
+        self._lastFrame = None
+
+        # start recording audio if available
+        if self._mic is not None:
+            logging.debug(
+                "Microphone interface available, starting audio recording.")
+        else:
+            logging.debug(
+                "No microphone interface provided, not recording audio.")
+
+        self._captureThread.enable()  # start passing frames to queue
+        self._enqueueFrame()
+
+        self._isRecording = True
+
+    def stop(self):
+        """Stop recording frames and audio (if available).
+        """
+        if not self._captureThread.isOpen():
+            raise RuntimeError("Cannot stop recording, stream is not open.")
+
+        self._captureThread.disable()  # stop passing frames to queue
+        self._enqueueFrame()
+
+        # # stop audio recording if `mic` is available
+        if self._mic is not None:
+            self._audioTrack = self._mic.getRecording()
+
+        self._isRecording = False
+
+    @property
+    def lastFrame(self):
+        """Most recent frame pulled from the camera (`VideoFrame`) since the
+        last call of `getVideoFrame`.
+        """
+        return self._lastFrame
+    
+    def update(self):
+        """Acquire the newest data from the camera stream. If the `Camera`
+        object is not being monitored by a `ImageStim`, this must be explicitly
+        called.
+        """
+        self._assertMediaPlayer()
+        self._enqueueFrame()
+
+    def getVideoFrame(self):
+        """Pull the most recent frame from the stream (if available).
+
+        Returns
+        -------
+        MovieFrame
+            Most recent video frame. Returns `NULL_MOVIE_FRAME_INFO` if no
+            frame was available, or we timed out.
+
+        """
+        self.update()
+
+        return self._lastFrame
+
+    def __del__(self):
+        """Try to cleanly close the camera and output file.
+        """
+
+        if hasattr(self, '_captureThread'):
+            if self._captureDevice is not None:
+                try:
+                    self._captureThread.close()
+                except AttributeError:
+                    pass
+
+        # close the microphone during teardown too
+        if hasattr(self, '_mic'):
+            if self._mic is not None:
+                try:
+                    self._mic.close()
+                except AttributeError:
+                    pass
+
+
 class Camera:
     """Class for displaying and recording video from a USB/PCI connected camera.
 
@@ -1515,7 +2001,7 @@ class Camera:
         # add attributes for setters
         self.__dict__.update(
             {'_device': None,
-             '_captureThread': None,
+             '_captureDevice': None,
              '_mic': None,
              '_outFile': None,
              '_mode': u'video',
@@ -1530,7 +2016,9 @@ class Camera:
 
         # camera library in use
         self._cameraLib = cameraLib
-        
+
+        # set the camera device
+
         if self._cameraLib == u'opencv':
             if device in (None, "None", "none", "Default", "default"):
                 device = 0  # use the first enumerated camera
@@ -1731,7 +2219,7 @@ class Camera:
         # movie writer instance, this runs in a separate thread
         self._movieWriter = None
         # if we begin receiving frames, change this flag to `True`
-        self._captureThread = None
+        # self._captureThread = None
         # self._audioThread = None
         self._captureFrames = []  # array for storing frames
         # thread for polling the microphone
@@ -1740,6 +2228,9 @@ class Camera:
         self._syncBarrier = None
         # keep track of the last video file saved
         self._lastVideoFile = None
+
+        # interface for accessing the camera
+        self._captureDevice = None  # camera device
 
     def authorize(self):
         """Get permission to access the camera. Not implemented locally yet.
@@ -1803,17 +2294,17 @@ class Camera:
         # self documenting and prevent the user from touching the status flag
         # attribute directly.
         #
-        return self._isRecording
+        return self._captureDevice.isRecording
     
     @property
     def isStarted(self):
         """`True` if the stream has started (`bool`). This status is given after
         `open()` has been called on this object.
         """
-        if self._captureThread is None:
-            return False
+        # if self._captureThread is None:
+        #     return False
 
-        return self._captureThread.isOpen()
+        return self._captureDevice.isOpen()
 
     @property
     def isNotStarted(self):
@@ -1836,7 +2327,7 @@ class Camera:
         """Video metadata retrieved during the last frame update
         (`MovieMetadata`).
         """
-        return self.getMetadata()
+        return self._captureDevice.getMetadata()
 
     def getMetadata(self):
         """Get stream metadata.
@@ -1999,7 +2490,7 @@ class Camera:
             return 0
 
         totalFramesBuffered = (
-            len(self._captureFrames) + self._captureThread.framesWaiting)
+            len(self._captureFrames) + self._captureDevice.framesWaiting)
         
         return totalFramesBuffered
 
@@ -2012,8 +2503,8 @@ class Camera:
         does not support this feature.
 
         """
-        if self.isStarted and hasattr(self._captureThread, "streamTime"):
-            return self._captureThread.streamTime
+        if self.isStarted and hasattr(self._captureDevice, "streamTime"):
+            return self._captureDevice.streamTime
         
         return -1.0
 
@@ -2031,7 +2522,7 @@ class Camera:
         if not self._isRecording:
             return 0.0
 
-        frameInterval = 1.0 / float(self._captureThread.frameRate)
+        frameInterval = 1.0 / float(self._captureDevice.frameRate)
 
         return self.frameCount * frameInterval
 
@@ -2042,7 +2533,7 @@ class Camera:
         if not self._isRecording:
             return 0
 
-        return self._captureThread.recordingBytes
+        return self._captureDevice.recordingBytes
 
     def _assertMediaPlayer(self):
         """Assert that we have a media player instance open.
@@ -2051,7 +2542,7 @@ class Camera:
         function to ensure that a player is present before running subsequent
         code.
         """
-        if self._captureThread is not None:
+        if self._captureDevice is not None:
             return
 
         raise PlayerNotAvailableError('Media player not initialized.')
@@ -2070,20 +2561,10 @@ class Camera:
             is not ready or if the stream was closed.
 
         """
-        if self._captureThread is None:
+        if self._captureDevice is None:
             return False
 
-        newFrames = self._captureThread.getFrames()
-        if not newFrames:
-            return False
-        
-        # add frames the the buffer
-        self._captureFrames.extend(newFrames)
-        
-        # set the last frame in the buffer as the most recent
-        self._lastFrame = self._captureFrames[-1]
-
-        return True
+        return self._captureDevice.getFrames()
 
     def open(self):
         """Open the camera stream and begin decoding frames (if available).
@@ -2101,24 +2582,16 @@ class Camera:
         # Camera interface to use, these are hard coded but support for each is
         # provided by an extension.
         desc = self._cameraInfo.description()
-        if self._cameraLib == u'ffpyplayer':
-            logging.debug(
-                "Opening camera stream using FFmpeg. (device={})".format(desc))
-            self._captureThread = CameraInterfaceFFmpeg(
-                device=self._cameraInfo, 
-                mic=self._mic)
-        elif self._cameraLib == u'opencv':
-            logging.debug(
-                "Opening camera stream using OpenCV. (device={})".format(desc))
-            self._captureThread = CameraInterfaceOpenCV(
-                device=self._cameraInfo, 
-                mic=self._mic)
-        else:
+        if self._cameraLib not in (u'ffpyplayer', u'opencv'):
             raise ValueError(
                 "Invalid value for parameter `cameraLib`, expected one of "
                 "`'ffpyplayer'` or `'opencv'`.")
-        
-        self._captureThread.open()
+
+        # needs to be set with a string if possible
+        self._captureDevice = CameraDevice(
+            device=self._cameraInfo, 
+            mic=self._mic,
+            cameraLib=self._cameraLib)
 
     # def snapshot(self):
     #     """Take a photo with the camera. The camera must be in `'photo'` mode
@@ -2144,44 +2617,12 @@ class Camera:
         be discarded if `record()` is called again.
 
         """
-        if self.isNotStarted:
-            self.open()   # open the camera stream if we call record() first
-            logging.warning(
-                "Called `Camera.record()` before opening the camera stream, "
-                "opening now. This is not recommended as it may incur a longer "
-                "than expected delay in the recording start time."
-            )
-        
-        self._audioTrack = None
-        self._lastFrame = None
-
-        # start recording audio if available
-        if self._mic is not None:
-            logging.debug(
-                "Microphone interface available, starting audio recording.")
-        else:
-            logging.debug(
-                "No microphone interface provided, not recording audio.")
-
-        self._captureThread.enable()  # start passing frames to queue
-        self._enqueueFrame()
-
-        self._isRecording = True
+        self._captureDevice.record()
 
     def stop(self):
         """Stop recording frames and audio (if available).
         """
-        if not self._captureThread.isOpen():
-            raise RuntimeError("Cannot stop recording, stream is not open.")
-
-        self._captureThread.disable()  # stop passing frames to queue
-        self._enqueueFrame()
-
-        # # stop audio recording if `mic` is available
-        if self._mic is not None:
-            self._audioTrack = self._mic.getRecording()
-
-        self._isRecording = False
+        self._captureDevice.stop()
 
     def close(self):
         """Close the camera.
@@ -2192,17 +2633,7 @@ class Camera:
         to save the frames to disk.
 
         """
-        if not self._captureThread.isOpen():
-            raise RuntimeError("Cannot close stream, stream is not open.")
-        
-        if self._isRecording:
-            logging.warning(
-                "Closing camera stream while recording, stopping recording "
-                "first.")
-            self.stop()
-
-        self._captureThread.close()
-        self._captureThread = None
+        self._captureDevice.close()
 
     def save(self, filename, useThreads=True, mergeAudio=True, 
              encoderLib=None, encoderOpts=None):
@@ -2375,8 +2806,7 @@ class Camera:
         object is not being monitored by a `ImageStim`, this must be explicitly
         called.
         """
-        self._assertMediaPlayer()
-        self._enqueueFrame()
+        self._captureDevice.update()
 
     def getVideoFrame(self):
         """Pull the most recent frame from the stream (if available).
@@ -2396,18 +2826,10 @@ class Camera:
         """Try to cleanly close the camera and output file.
         """
 
-        if hasattr(self, '_captureThread'):
-            if self._captureThread is not None:
+        if hasattr(self, '_captureDevice'):
+            if self._captureDevice is not None:
                 try:
-                    self._captureThread.close()
-                except AttributeError:
-                    pass
-
-        # close the microphone during teardown too
-        if hasattr(self, '_mic'):
-            if self._mic is not None:
-                try:
-                    self._mic.close()
+                    self._captureDevice.close()
                 except AttributeError:
                     pass
 
