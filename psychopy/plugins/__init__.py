@@ -257,6 +257,72 @@ def getBundleInstallTarget(projectName):
         prefs.paths['packages'], pkg_resources.safe_name(projectName))
 
 
+def _createPluginCacheDir():
+    """Create the plugin cache directory if it doesn't exist.
+
+    This is used to store cached plugin data, such as the plugin registry.
+
+    Returns
+    -------
+    str
+        Path to the plugin cache directory.
+
+    """
+    # check if the local `plugins.json` file exists and is up to date
+    appPluginCacheDir = os.path.join(
+        prefs.paths['userCacheDir'], 'appCache', 'plugins')
+
+    # create the cache directory if it doesn't exist
+    if not os.path.exists(appPluginCacheDir):
+        try:
+            os.makedirs(appPluginCacheDir)
+        except OSError:
+            pass
+
+    return appPluginCacheDir
+
+
+def getPluginRegistry():
+    """Get the contents of the plugin registry.
+    
+    The plugin registry is a JSON file that contains information about plugins 
+    which are curated by PsychoPy.
+
+    Returns
+    -------
+    dict
+        Contents of the plugin registry file as a dictionary.
+
+    """
+    appPluginCacheDir = _createPluginCacheDir()  # ensure cache directory exists
+
+    # where the database is expected to be
+    pluginDatabaseFile = os.path.join(appPluginCacheDir, 'plugins.json')
+    
+    # if the file doesn't exist, download it
+    if not os.path.exists(pluginDatabaseFile):
+        logging.warning(
+            'Plugin database file does not exist at `{}`. '
+            'Downloading ...'.format(pluginDatabaseFile))
+        # download the plugin database
+        import urllib.request
+        url = 'https://psychopy.org/plugins.json'
+        try:
+            urllib.request.urlretrieve(url, pluginDatabaseFile)
+        except Exception as e:
+            logging.warning(
+                'Failed to download plugin database from `{}`. '
+                'Reason: `{}`.'.format(url, e))
+            return {}
+
+    # load the file
+    import json
+    with open(pluginDatabaseFile, 'r') as f:
+        pluginRegistry = json.load(f)
+
+    return pluginRegistry
+
+
 def refreshBundlePaths():
     """Find package bundles within the PsychoPy user plugin directory.
 
@@ -271,6 +337,10 @@ def refreshBundlePaths():
     will not be appended to `sys.path`.
 
     This is called implicitly when :func:`scanPlugins()` is called.
+
+    Deprecated: This function is deprecated and will be removed in a future
+    release. Bundles are no longer used for plugins, instead they are installed
+    in a custom user site directory.
 
     Returns
     -------
@@ -356,6 +426,7 @@ def scanPlugins():
     global _installed_plugins_
     _installed_plugins_ = {}  # clear installed plugins
 
+    # this is done for legacy support only now
     refreshBundlePaths()  # refresh plugin bundles directory
 
     # make sure we have the plugin directory in the working set
