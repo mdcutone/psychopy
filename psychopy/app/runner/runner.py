@@ -92,7 +92,10 @@ class RunnerFrame(wx.Frame, handlers.ThemeMixin):
 
         # hide alerts to begin with, more room for std while also making alerts more noticeable
         self.Layout()
-        self.SetSize(wx.Size(1024, 640))
+        if self.isRetina:
+            self.SetSize(wx.Size(920, 640))
+        else:
+            self.SetSize(wx.Size(1080, 920))
 
         self.theme = app.theme
 
@@ -296,6 +299,7 @@ class RunnerFrame(wx.Frame, handlers.ThemeMixin):
                     fileOk = False
 
                 if fileOk:
+                    self.panel.entries = {}
                     self.panel.expCtrl.DeleteAllItems()
                     for exp in experiments:
                         self.panel.addTask(
@@ -1138,18 +1142,20 @@ class RunnerRibbon(ribbon.FrameRibbon):
             "browser", label=_translate("Browser"), icon="browser"
         )
         # pilot JS
-        self.addButton(
+        btn = self.addButton(
             section="browser", name="jspilot", label=_translate("Pilot in browser"),
             icon='jsPilot',
             tooltip=_translate("Pilot experiment locally in your browser"),
             callback=parent.runOnlineDebug
         )
+        btn.Hide()
         # run JS
-        self.addButton(
+        btn = self.addButton(
             section="browser", name="jsrun", label=_translate("Run on Pavlovia"), icon='jsRun',
             tooltip=_translate("Run experiment on Pavlovia"),
             callback=parent.runOnline
         )
+        btn.Hide()
 
         self.addSeparator()
 
