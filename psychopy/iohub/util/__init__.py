@@ -16,6 +16,7 @@ import collections.abc
 import pathlib
 import psychopy.logging as logging
 import psychopy.plugins as plugins
+import psychopy.tools.pkgtools as pkgtools
 
 ########################
 #
@@ -251,6 +252,7 @@ def getDevicePaths(device_name=""):
 
     scs_yaml_paths = []  # stores the paths to the device config files
     plugins.refreshBundlePaths()  # make sure eyetracker external plugins are reachable
+    pkgtools.refreshPackages()  # make sure eyetracker external plugins are reachable
 
     # get device paths for extant extensions
     try:  # tobii eyetrackers

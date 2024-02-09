@@ -408,7 +408,9 @@ class EyeTracker(EyeTrackerDevice):
         cal_run = calibration.runCalibration()
         calibration.window.close()
 
-        calibration._unregisterEventMonitors()
+        # NOTE - we removed this line to ensure keyboard monitoring is not 
+        # stopped when the calibration window is closed. 
+        # calibration._unregisterEventMonitors()
         calibration.clearAllEventBuffers()
 
         if cal_run:
