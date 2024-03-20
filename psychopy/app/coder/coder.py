@@ -50,6 +50,7 @@ from psychopy.app.themes import handlers, colors
 from psychopy.app.coder.folding import CodeEditorFoldingMixin
 from psychopy.app.stdout.stdOutRich import ScriptOutputPanel
 from psychopy.app.coder.repl import PythonREPLCtrl
+from psychopy.app.coder.dataEditor import DataEditor
 # from ..plugin_manager import PluginManagerFrame
 
 try:
@@ -503,7 +504,11 @@ class UnitTestFrame(wx.Frame):
 
 
 class CodeEditor(BaseCodeEditor, CodeEditorFoldingMixin, handlers.ThemeMixin):
-    """Code editor class for the Coder GUI.
+    """Code document class for the Coder GUI.
+
+    This is the main class for the styled text control used in the Coder for 
+    editing text files. 
+
     """
     def __init__(self, parent, ID, frame,
                  # set the viewer to be small, then it will increase with aui
@@ -1083,7 +1088,11 @@ class CodeEditor(BaseCodeEditor, CodeEditorFoldingMixin, handlers.ThemeMixin):
 
 
 class CoderFrame(BaseAuiFrame, handlers.ThemeMixin):
+    """The main frame for the Coder GUI.
 
+    This is the main class for the Coder GUI.
+
+    """
     def __init__(self, parent, ID, title, files=(), app=None):
         self.app = app  # type: psychopy.app.PsychoPyApp
         self.frameType = 'coder'
@@ -2245,17 +2254,27 @@ class CoderFrame(BaseAuiFrame, handlers.ThemeMixin):
 
             # load text from document
             if os.path.isfile(filename):
-                try:
-                    with io.open(filename, 'r', encoding='utf-8-sig') as f:
-                        fileText = f.read()
-                        newlines = f.newlines
-                except UnicodeDecodeError:
-                    dlg = dialogs.MessageDialog(self, message=_translate(
-                        'Failed to open `{}`. Make sure that encoding of '
-                        'the file is utf-8.').format(filename), type='Info')
-                    dlg.ShowModal()
-                    dlg.Destroy()
+                isDataFile = filename.lower().endswith('.csv')
+                if isDataFile:
+                    # create an editor window to put the text in
+                    p = self.currentDoc = DataEditor(
+                            self.notebook, self, -1)
+                    p.loadFile(filename)
+                    p.fileModTime = os.path.getmtime(filename)
+                    self.notebook.AddPage(p, shortName)
                     return
+                else:
+                    try:
+                        with io.open(filename, 'r', encoding='utf-8-sig') as f:
+                            fileText = f.read()
+                            newlines = f.newlines
+                    except UnicodeDecodeError:
+                        dlg = dialogs.MessageDialog(self, message=_translate(
+                            'Failed to open `{}`. Make sure that encoding of '
+                            'the file is utf-8.').format(filename), type='Info')
+                        dlg.ShowModal()
+                        dlg.Destroy()
+                        return
             elif filename == '':
                 pass  # user requested a new document
             else:
@@ -2344,6 +2363,10 @@ class CoderFrame(BaseAuiFrame, handlers.ThemeMixin):
         self.project = pavlovia.getProject(self.currentDoc.filename)
         self.ribbon.buttons['pavproject'].updateInfo()
 
+    def openDataFile(self, filename):
+        """Open a data file in the data viewer."""
+        self.setCurrentDoc(filename)
+
     def fileOpen(self, event=None, filename=None):
         if not filename:
             # get path of current file (empty if current file is '')
@@ -2366,6 +2389,8 @@ class CoderFrame(BaseAuiFrame, handlers.ThemeMixin):
         if filename and os.path.isfile(filename):
             if filename.lower().endswith('.psyexp'):
                 self.app.newBuilderFrame(fileName=filename)
+            elif filename.lower().endswith('.csv'):
+                self.openDataFile(filename)
             else:
                 self.setCurrentDoc(filename)
                 # don't do the next step if no file was opened (hack!!)
@@ -2383,17 +2408,21 @@ class CoderFrame(BaseAuiFrame, handlers.ThemeMixin):
         # mtime-stamps
         if doc is None:
             return True  # we have no file loaded
-        # files that don't exist DO have the expected mod-time
-        filename = Path(doc.filename)
-        if not filename.is_file():
-            return True
-        actualModTime = os.path.getmtime(filename)
-        expectedModTime = doc.fileModTime
-        if abs(float(actualModTime) - float(expectedModTime)) > 1:
-            msg = 'File %s modified outside of the Coder (IDE).' % filename
-            print(msg)
-            return False
-        return True
+
+        return doc.checkChangesOnDisk()
+
+        # # files that don't exist DO have the expected mod-time
+        # filename = Path(doc.filename)
+        # if not filename.is_file():
+        #     return True
+        # actualModTime = os.path.getmtime(filename)
+        # expectedModTime = doc.fileModTime
+        # if abs(float(actualModTime) - float(expectedModTime)) > 1:
+        #     msg = 'File %s modified outside of the Coder (IDE).' % filename
+        #     print(msg)
+        #     return False
+
+        # return True
 
     def fileSave(self, event=None, filename=None, doc=None):
         """Save a ``doc`` with a particular ``filename``.

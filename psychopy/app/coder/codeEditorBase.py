@@ -14,10 +14,11 @@ import wx
 import wx.stc
 from ..themes import handlers
 
+from psychopy.app.coder.document import BaseEditorDocument
 from psychopy.localization import _translate
 
 
-class BaseCodeEditor(wx.stc.StyledTextCtrl, handlers.ThemeMixin):
+class BaseCodeEditor(BaseEditorDocument, wx.stc.StyledTextCtrl, handlers.ThemeMixin):
     """Provides base class for code editors
        See the wxPython demo styledTextCtrl 2.
     """

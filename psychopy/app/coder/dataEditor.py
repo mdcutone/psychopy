@@ -9,16 +9,16 @@ import wx
 import wx.xrc
 import wx.grid
 import csv
+import psychopy.app.coder.document as document
 
 # Constants for the data editor actions
-
 DV_ACTION_INSERT_COL = 101
 DV_ACTION_DELETE_COL = 102
 DV_ACTION_RENAME_COL = 103
 DV_ACTION_FILL_COL = 104
 
 
-class BaseDataEditor(wx.Panel):
+class BaseDataEditor(document.BaseEditorDocument, wx.Panel):
     """Base class for the DataEditor panel in the Coder view. 
 
     This class is a wx.Panel that contains a wx.grid.Grid object for editing
@@ -147,13 +147,17 @@ class DataEditor(BaseDataEditor):
         The name of the DataEditor panel.
 
     """
-    def __init__(self, parent, id = wx.ID_ANY, pos = wx.DefaultPosition, 
+    UNSAVED = False
+    fileModTime = 0
+    def __init__(self, parent, frame, id = wx.ID_ANY, pos = wx.DefaultPosition, 
             size = wx.Size( 500,300 ), style = wx.TAB_TRAVERSAL, 
             name = wx.EmptyString):
         super(DataEditor, self).__init__(parent, id, pos, size, style, name)
 
         self._readOnly = False
         self._data = []  # store the data in a 2D list
+        self._frame = frame # reference to the parent Coder object
+        self._filename = ''  # the filename of the data being edited
 
         # undo and redo stacks
         self._undoStack = []
@@ -178,6 +182,15 @@ class DataEditor(BaseDataEditor):
         """Show dialog to provide options on how to save the file."""
         pass
 
+    def createTable(self, numRows, numCols):
+        """Create and initialize a new table in the DataEditor grid."""
+        # clear the grid
+        self.grdDataEditor.ClearGrid()
+        # set the grid size to match the data
+        self.grdDataEditor.CreateGrid(numRows, numCols)
+        # resize all the columns to fit the data
+        self.grdDataEditor.AutoSizeColumns()
+
     def loadFile(self, filename, header=True, delimiter=','):
         """Load a CSV file into the DataEditor grid.
 
@@ -188,13 +201,17 @@ class DataEditor(BaseDataEditor):
 
         """
         # load a CSV file into the grid, replacing the current data
-        with open(filename, 'r') as f:
-            reader = csv.reader(f)
-            self._data = list(reader)
+        try:
+            with open(filename, 'r') as f:
+                reader = csv.reader(f)
+                self._data = list(reader)
+        except FileNotFoundError:
+            return
+        
+        self._filename = filename
 
         # clear the grid
         self.grdDataEditor.ClearGrid()
-
         # set the grid size to match the data
         self.grdDataEditor.CreateGrid(len(self._data), len(self._data[0]))
 

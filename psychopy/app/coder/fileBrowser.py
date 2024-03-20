@@ -544,6 +544,7 @@ class FileBrowserPanel(wx.Panel, handlers.ThemeMixin):
                 mimetypes.add_type("text/config", ".cfg")
                 mimetypes.add_type("text/plain", ".log")
                 mimetypes.add_type("text/plain", ".yaml")
+                mimetypes.add_type("text/plain", ".csv") # make optional via prefs
                 # try to guess data type
                 dataType = mimetypes.guess_type(self.selectedItem.abspath)[0]
 
