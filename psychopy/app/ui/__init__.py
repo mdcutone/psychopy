@@ -1147,9 +1147,7 @@ class BaseAuiPropertyPanel(wx.Panel):
         """
         if name is None:
             name = label
-
-        print(label, name, choices, value)
-
+        
         valData = wx.propgrid.PGChoices(choices)
         prop = pg.EnumProperty(label, name, valData, value)
         self._setPropAttributes(prop, hint, readOnly, visible)
