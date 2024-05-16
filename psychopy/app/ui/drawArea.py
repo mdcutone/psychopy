@@ -211,6 +211,213 @@ class BaseCustomDrawArea(wx.Panel):
         """
         self._dc = None
 
+    def setClippingRegion(self, x, y, width, height):
+        """Set a clipping region.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        x : int
+            X-coordinate of the top-left corner.
+        y : int
+            Y-coordinate of the top-left corner.
+        width : int
+            Width of the clipping region.
+        height : int
+            Height of the clipping region.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.SetClippingRegion(x, y, width, height)
+
+    def destroyClippingRegion(self):
+        """Destroy the clipping region.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.DestroyClippingRegion()
+
+    def getDeviceScale(self):
+        """Get the device scale.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Returns
+        -------
+        Tuple[float, float]
+            X and Y scale factors.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        return self._dc.GetDeviceScale()
+
+    def setDeviceScale(self, x, y):
+        """Set the device scale.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        x : float
+            X-scale factor.
+        y : float
+            Y-scale factor.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.SetDeviceScale(x, y)
+
+    def setUserScale(self, x, y):
+        """Set the user scale.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        x : float
+            X-scale factor.
+        y : float
+            Y-scale factor.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.SetUserScale(x, y)
+
+    def getLogicalScale(self):
+        """Get the logical scale.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Returns
+        -------
+        Tuple[float, float]
+            X and Y scale factors.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        return self._dc.GetLogicalScale()
+
+    def setLogicalScale(self, x, y):
+        """Set the logical scale.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        x : float
+            X-scale factor.
+        y : float
+            Y-scale factor.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.SetLogicalScale(x, y)
+    
+    def getLogicalOrigin(self):
+        """Get the logical origin.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Returns
+        -------
+        Tuple[int, int]
+            X and Y coordinates of the origin.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        return self._dc.GetLogicalOrigin()
+
+    def setLogicalOrigin(self, x, y):
+        """Set the logical origin.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        x : int
+            X-coordinate of the origin.
+        y : int
+            Y-coordinate of the origin.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.SetLogicalOrigin(x, y)
+
+    def getDeviceOrigin(self):
+        """Get the device origin.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Returns
+        -------
+        Tuple[int, int]
+            X and Y coordinates of the origin.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        return self._dc.GetDeviceOrigin()
+
+    def setDeviceOrigin(self, x, y):
+        """Set the device origin.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        x : int
+            X-coordinate of the origin.
+        y : int
+            Y-coordinate of the origin.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.SetDeviceOrigin(x, y)
+
+    def logicalToDevice(self, x, y):
+        """Convert logical coordinates to device coordinates.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        x : int
+            X-coordinate in logical units.
+        y : int
+            Y-coordinate in logical units.
+
+        Returns
+        -------
+        Tuple[int, int]
+            X and Y coordinates in device units.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        return self._dc.DeviceToLogical(x, y)
+
+    def deviceToLogical(self, x, y):
+        """Convert device coordinates to logical coordinates.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        x : int
+            X-coordinate in device units.
+        y : int
+            Y-coordinate in device units.
+
+        Returns
+        -------
+        Tuple[int, int]
+            X and Y coordinates in logical units.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        return self._dc.LogicalToDevice(x, y)
+
     def clear(self):
         """Clear the drawing area.
 
@@ -538,22 +745,6 @@ class BaseCustomDrawArea(wx.Panel):
         """
         assert self._dc is not None, "Must call `beginDrawing` before drawing."
         self._dc.DrawBitmap(bitmap, x, y)
-
-    def setUserScale(self, x, y):
-        """Set the user scale.
-
-        Must be called after `beginDrawing` and before `endDrawing`.
-
-        Parameters
-        ----------
-        x : float
-            X-scale factor.
-        y : float
-            Y-scale factor.
-
-        """
-        assert self._dc is not None, "Must call `beginDrawing` before drawing."
-        self._dc.SetUserScale(x, y)
 
     # utilites
     def getTextExtent(self, text):
