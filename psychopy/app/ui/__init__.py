@@ -217,48 +217,48 @@ class BaseAuiNotebookPanel(wx.Panel):
                            style=style, name=name)
 
         # sizer for the panel
-        szPropertyPanel = wx.BoxSizer(wx.VERTICAL)
-        self.nbPropertyView = wx.aui.AuiNotebook(
+        szNotebookPanel = wx.BoxSizer(wx.VERTICAL)
+        self.nbMain = wx.aui.AuiNotebook(
             self, 
             wx.ID_ANY, 
             wx.DefaultPosition, 
             wx.DefaultSize,
             wx.aui.AUI_NB_SCROLL_BUTTONS|wx.aui.AUI_NB_TOP|
                 wx.aui.AUI_NB_WINDOWLIST_BUTTON)
-        szPropertyPanel.Add(self.nbPropertyView, 1, wx.EXPAND|wx.ALL, 5)
-        self.SetSizer(szPropertyPanel)
+        szNotebookPanel.Add(self.nbMain, 1, wx.EXPAND|wx.ALL, 5)
+        self.SetSizer(szNotebookPanel)
         self.Layout()
 
         # events for the notebook
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_ALLOW_DND, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_ALLOW_DND, 
             self.OnNotebookAllowDND)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_BG_DCLICK, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_BG_DCLICK, 
             self.OnNotebookBGDClick)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_BEGIN_DRAG, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_BEGIN_DRAG, 
             self.OnNotebookBeginDrag)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_BUTTON, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_BUTTON, 
             self.OnNotebookButton)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_DRAG_DONE, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_DRAG_DONE, 
             self.OnNotebookDragDone)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_DRAG_MOTION, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_DRAG_MOTION, 
             self.OnNotebookDragMotion)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_END_DRAG, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_END_DRAG, 
             self.OnNotebookEndDrag)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_PAGE_CHANGED, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_PAGE_CHANGED, 
             self.OnNotebookPageChanged)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_PAGE_CHANGING, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_PAGE_CHANGING, 
             self.OnNotebookPageChanging)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_PAGE_CLOSE, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_PAGE_CLOSE, 
             self.OnNotebookPageClose)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_PAGE_CLOSED, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_PAGE_CLOSED, 
             self.OnNotebookPageClosed)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_TAB_MIDDLE_DOWN, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_TAB_MIDDLE_DOWN, 
             self.OnNotebookTabMiddleDown)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_TAB_MIDDLE_UP, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_TAB_MIDDLE_UP, 
             self.OnNotebookTabMiddleUp)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_TAB_RIGHT_DOWN, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_TAB_RIGHT_DOWN, 
             self.OnNotebookTabRightDown)
-        self.nbPropertyView.Bind(wx.aui.EVT_AUINOTEBOOK_TAB_RIGHT_UP, 
+        self.nbMain.Bind(wx.aui.EVT_AUINOTEBOOK_TAB_RIGHT_UP, 
             self.OnNotebookTabRightUp)
 
     def __del__( self ):
@@ -337,7 +337,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             raise TypeError(
                 "`artProvider` must be an instance of wx.aui.AuiTabArt")
 
-        self.nbPropertyView.SetArtProvider(artProvider)
+        self.nbMain.SetArtProvider(artProvider)
 
     def getNotebook(self):
         """Get the AUI notebook instance for this panel.
@@ -348,7 +348,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Handle for the AUI notebook instance associated with this panel.
 
         """
-        return self.nbPropertyView
+        return self.nbMain
 
     def addPage(self, page, caption, select=False, imageIndex=-1):
         """Add a new page to the notebook.
@@ -366,14 +366,14 @@ class BaseAuiNotebookPanel(wx.Panel):
             image in tab.
 
         """
-        self.nbPropertyView.AddPage(page, caption, select)
+        self.nbMain.AddPage(page, caption, select)
 
         # image for the page if art provider available
         if imageIndex >= 0:
-            imageList = self.nbPropertyView.GetImageList()
+            imageList = self.nbMain.GetImageList()
             if imageIndex < imageList.GetImageCount():
-                self.nbPropertyView.SetPageImage(
-                    self.nbPropertyView.GetPageCount() - 1, 
+                self.nbMain.SetPageImage(
+                    self.nbMain.GetPageCount() - 1, 
                     imageIndex)
 
     def removePage(self, page):
@@ -385,7 +385,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Page to remove from the notebook.
 
         """
-        self.nbPropertyView.RemovePage(page)
+        self.nbMain.RemovePage(page)
 
     def getPage(self, index):
         """Get the page at the specified index.
@@ -401,7 +401,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Page at the specified index.
 
         """
-        return self.nbPropertyView.GetPage(index)
+        return self.nbMain.GetPage(index)
     
     def getCurrentPage(self):
         """Get the currently selected page.
@@ -412,7 +412,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Currently selected page.
 
         """
-        return self.nbPropertyView.GetCurrentPage()
+        return self.nbMain.GetCurrentPage()
 
     def getCurrentPageIdx(self):
         """Get the index of the currently selected page.
@@ -423,7 +423,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Index of the currently selected page.
 
         """
-        return self.nbPropertyView.GetSelection()
+        return self.nbMain.GetSelection()
     
     def getPageCount(self):
         """Get the number of pages in the notebook.
@@ -434,7 +434,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Number of pages in the notebook.
 
         """
-        return self.nbPropertyView.GetPageCount()
+        return self.nbMain.GetPageCount()
     
     def getPageText(self, index):
         """Get the caption of the page at the specified index.
@@ -450,7 +450,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Caption of the page at the specified index.
 
         """
-        return self.nbPropertyView.GetPageText(index)
+        return self.nbMain.GetPageText(index)
 
     def setPageText(self, index, caption):
         """Set the caption of the page at the specified index.
@@ -463,7 +463,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Caption to set for the page.
 
         """
-        self.nbPropertyView.SetPageText(index, caption)
+        self.nbMain.SetPageText(index, caption)
     
     def setPageToolTip(self, index, tooltip):
         """Set the tooltip for the page at the specified index.
@@ -476,7 +476,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Tooltip to set for the page.
 
         """
-        self.nbPropertyView.SetPageToolTip(index, tooltip)
+        self.nbMain.SetPageToolTip(index, tooltip)
 
     def setPageImage(self, index, imageIndex):
         """Set the image for the page at the specified index.
@@ -489,7 +489,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Index of the image to set for the page.
 
         """
-        self.nbPropertyView.SetPageImage(index, imageIndex)
+        self.nbMain.SetPageImage(index, imageIndex)
     
     def setPageBitmap(self, index, bitmap):
         """Set the bitmap for the page at the specified index.
@@ -502,7 +502,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Bitmap to set for the page.
 
         """
-        self.nbPropertyView.SetPageBitmap(index, bitmap)
+        self.nbMain.SetPageBitmap(index, bitmap)
 
     def advanceSelection(self, forward=True):
         """Advance the selection to the next page.
@@ -513,7 +513,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Advance the selection forward. Default is `True`.
 
         """
-        self.nbPropertyView.AdvanceSelection(forward)
+        self.nbMain.AdvanceSelection(forward)
 
     def setSelection(self, index):
         """Set the selection to the page at the specified index.
@@ -524,7 +524,7 @@ class BaseAuiNotebookPanel(wx.Panel):
             Index of the page to select.
 
         """
-        self.nbPropertyView.SetSelection(index)
+        self.nbMain.SetSelection(index)
 
     def changeSelection(self, index):
         """Change the selection to the page at the specified index.
@@ -540,12 +540,12 @@ class BaseAuiNotebookPanel(wx.Panel):
             Index of the page that was selected before changing.
 
         """
-        return self.nbPropertyView.ChangeSelection(index)
+        return self.nbMain.ChangeSelection(index)
     
     def clearPages(self):
         """Remove all pages from the notebook.
         """
-        self.nbPropertyView.DeleteAllPages() 
+        self.nbMain.DeleteAllPages() 
 
 
 
