@@ -29,6 +29,12 @@ class BaseCustomDrawArea(wx.Panel):
     drawing methods must be called between `beginDrawing` and `endDrawing` 
     calls.
 
+    Pens and brushes can be added to memory for later use. The `addPen` and
+    `addBrush` methods add associate a pen or brush with a name that can be
+    used by calling the `setPen` and `setBrush` methods. Keeping track of pens
+    and brushes in memory allows for them to be shared between different
+    draw areas by copying them, so they do not need to be defined again.
+
     Parameters
     ----------
     parent : wx.Window or None
@@ -45,6 +51,9 @@ class BaseCustomDrawArea(wx.Panel):
         `wx.TAB_TRAVERSAL`.
     name : str
         Window name.
+    clearColor : wx.Colour
+        Background color for the window when the `clear` method is called. 
+        Default is `wx.WHITE`.
 
     Examples
     --------
@@ -90,20 +99,49 @@ class BaseCustomDrawArea(wx.Panel):
                  pos=wx.DefaultPosition, 
                  size=wx.DefaultSize, 
                  style=wx.TAB_TRAVERSAL, 
-                 name=wx.EmptyString):
+                 name=wx.EmptyString,
+                 clearColor=wx.WHITE):
         wx.Panel.__init__ (self, parent, id=id, pos=pos, size=size, style=style, 
                 name=name)
 
         self._dc = None
 
         # pens and brushes
+        self._pens = {}
+        self._brushes = {}
+
+        # clear color and brush
+        if isinstance(clearColor, wx.Colour):
+            self._clearColor = clearColor
+        else:
+            self._clearColor = wx.Color(clearColor)
+        self._clearBrush = wx.Brush(self._clearColor)
+
+        # call these to allow for overrides in subclasses
+        self._configureDrawing()
+        self._bindEvents()
+
+    def __del__(self):
+        pass
+
+    @property
+    def dc(self):
+        """The device context (`wx.DC` or `None`).
+        """
+        return self._dc
+
+    def _configureDrawing(self):
+        """Configure the device context for drawing.
+        """
         self._pens = {'default': wx.Pen(wx.BLACK, 1, wx.SOLID)}
         self._brushes = {'default': wx.Brush(wx.WHITE, wx.SOLID)}
 
         # settings for drawing
         self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
 
-        # events
+    def _bindEvents(self):
+        """Bind events to the panel.
+        """
         self.Bind(aui.EVT_AUI_RENDER, self.OnAuiRender)
         self.Bind(wx.EVT_CHAR, self.OnChar)
         self.Bind(wx.EVT_CHAR_HOOK, self.OnCharHook)
@@ -129,9 +167,213 @@ class BaseCustomDrawArea(wx.Panel):
         self.Bind(wx.EVT_SET_FOCUS, self.OnSetFocus)
         self.Bind(wx.EVT_SIZE, self.OnSize)
         self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateUI)
+    
+    def addBBox(self, name, x, y, width, height):
+        """Add a bounding box to memory for later use in drawing.
 
-    def __del__(self):
-        pass
+        This adds a bounding box to memory which can be used for hit testing
+        and other purposes. For instance, a bounding box can be used to define
+        a region of interest for mouse events. These are defined in logical 
+        coordinates.
+
+        Parameters
+        ----------
+        name : str
+            Name of the bounding box.
+        x : int
+            X-coordinate of the top-left corner.
+        y : int
+            Y-coordinate of the top-left corner.
+        width : int
+            Width of the bounding box.
+        height : int
+            Height of the bounding box.
+
+        """
+        self._boundingBoxes[name] = (x, y, width, height)
+
+    def removeBBox(self, name):
+        """Remove a bounding box from memory.
+
+        Parameters
+        ----------
+        name : str
+            Name of the bounding box to remove.
+
+        """
+        if name in self._boundingBoxes:
+            del self._boundingBoxes[name]
+
+    def pointInBBox(self, name, x, y):
+        """Check if a point is inside a bounding box.
+
+        Parameters
+        ----------
+        name : str
+            Name of the bounding box.
+        x : int
+            X-coordinate of the point.
+        y : int
+            Y-coordinate of the point.
+
+        Returns
+        -------
+        bool
+            `True` if the point is inside the bounding box, otherwise `False`.
+
+        """
+        # tranform the bounding boxes to device coordinates
+        x, y = self.logicalToDevice(x, y)
+
+        if name in self._boundingBoxes:
+            x1, y1, width, height = self._boundingBoxes[name]
+            x2 = x1 + width
+            y2 = y1 + height
+            return x1 <= x <= x2 and y1 <= y <= y2
+
+        return False
+
+    def getContainingBBoxes(self, x, y):
+        """Get the bounding boxes containing a point.
+
+        Parameters
+        ----------
+        x : int
+            X-coordinate of the point.
+        y : int
+            Y-coordinate of the point.
+
+        Returns
+        -------
+        List[str]
+            List of bounding box names containing the point.
+
+        """
+        bboxes = []
+        for name in self._boundingBoxes:
+            if self.pointInBBox(name, x, y):
+                bboxes.append(name)
+
+        return bboxes
+
+    def setContentScaleFactor(self, factor):
+        """Set the content scale factor.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        factor : float
+            Content scale factor.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.SetContentScaleFactor(factor)
+
+    def getContentScaleFactor(self):
+        """Get the content scale factor.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Returns
+        -------
+        float
+            Content scale factor.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        return self._dc.GetContentScaleFactor()
+
+    def setMappingMode(self, mode):
+        """Set the mapping mode.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        mode : int
+            Mapping mode.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+
+        modeMapping = {
+            'text': wx.MM_TEXT,
+            'metric': wx.MM_METRIC,
+            'lometric': wx.MM_LOMETRIC,
+            'twips': wx.MM_TWIPS,
+            'points': wx.MM_POINTS
+        }
+
+        if mode in modeMapping:
+            mode = modeMapping[mode]
+        else:
+            raise ValueError("Invalid mapping mode.")
+
+        self._dc.SetMappingMode(mode)
+
+    def getMappingMode(self):
+        """Get the mapping mode.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Returns
+        -------
+        int
+            Mapping mode.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+
+        modeMapping = {
+            wx.MM_TEXT: 'text',
+            wx.MM_METRIC: 'metric',
+            wx.MM_LOMETRIC: 'lometric',
+            wx.MM_TWIPS: 'twips',
+            wx.MM_POINTS: 'points'
+        }
+
+        try:
+            return modeMapping[self._dc.GetMappingMode()]
+        except KeyError:
+            return None
+
+    def setAffineMatrix(self, matrix):
+        """Set the affine matrix.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        matrix : wx.GraphicsMatrix
+            Affine matrix.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.SetAffineMatrix(matrix)
+
+    def getAffineMatrix(self):
+        """Get the affine matrix.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Returns
+        -------
+        wx.GraphicsMatrix
+            Affine matrix.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        return self._dc.GetAffineMatrix()
+
+    def resetAffineMatrix(self):
+        """Reset the affine matrix.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.ResetAffineMatrix()
 
     def addPen(self, name, color, width=1, style=wx.SOLID):
         """Add a pen to memory for later use in drawing.
@@ -425,6 +667,7 @@ class BaseCustomDrawArea(wx.Panel):
 
         """
         assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.SetBackground(wx.Brush(self._clearColor))
         self._dc.Clear()
 
     def setPen(self, name='default'):
