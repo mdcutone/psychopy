@@ -260,6 +260,9 @@ class BaseScrollableArea(wx.Panel):
     def getScrollArea(self):
         """Get a reference to the scrollable area.
 
+        This should be the parent of any widgets that are added to the 
+        scrollable area.
+
         Returns
         -------
         wx.ScrolledWindow
@@ -270,6 +273,9 @@ class BaseScrollableArea(wx.Panel):
 
     def addWidget(self, widget, proportion=0, expand=True, border=0):
         """Add a widget to the scrollable area.
+
+        Widgets should have the scrollable area as their parent. This method
+        will reparent the widget if necessary.
 
         Parameters
         ----------
@@ -289,6 +295,9 @@ class BaseScrollableArea(wx.Panel):
 
         if border > 0:
             flags = flags | wx.ALL
+
+        if widget.GetParent() is not self.pnlScrollArea:
+            widget.Reparent(self.pnlScrollArea)
 
         szr = self._getScrollAreaSizer()
         szr.Add(widget, proportion, flags, border)
@@ -313,6 +322,18 @@ class BaseScrollableArea(wx.Panel):
         szr = self._getScrollAreaSizer()
         szr.Clear()
         szr.Layout()
+
+    def getAllWidgets(self):
+        """Get all widgets in the scrollable area.
+
+        Returns
+        -------
+        list
+            List of widgets in the scrollable area.
+
+        """
+        szr = self._getScrollAreaSizer()
+        return szr.GetChildren()
 
     # event handlers
 
@@ -400,7 +421,7 @@ if __name__ == "__main__":
     # scrollArea = BaseScrollableArea(frame)
 
     # # add text boxes, must be children of the scrollable area
-    # widgetParent = scrollArea.getScrollArea()
+    # widgetParent = scrollArea
     # for i in range(100):
     #     txt = wx.TextCtrl(widgetParent, wx.ID_ANY, "Text Box %d" % i)
     #     scrollArea.addWidget(txt)
