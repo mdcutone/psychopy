@@ -107,6 +107,149 @@ except ImportError:
     AUDIO_SUPPORTED_CODECS = []
 
 
+class AudioFileWriter:
+    """Class for writing audio samples to a file on disk.
+
+    This class provides a simple interface for writing audio samples to a file
+    on disk. It does so asyncronously with a background thread to avoid blocking
+    the main thread. Simply sumbit samples to the writer and it will handle the
+    rest.
+
+    Parameters
+    ----------
+    filename : str
+        File name for the output.
+    freq : int or float
+        Sampling frequency used to capture the audio samples in Hertz (Hz).
+        Default is 48kHz (specified as `48000`) which is considered DVD quality
+        audio.
+    channels : int
+        Number of audio channels. Default is `1` which is mono audio.
+    inputFormat : str
+        Format of the audio samples. Default is `float32` which is the typical
+        format used in PsychoPy for audio samples.
+    codec : str
+        Audio codec to use for saving the file. Default is `wav` which is
+        uncompressed audio. Other supported formats include `mp3`, `flac`,
+        `ogg`, and `m4a` among others. See `AUDIO_SUPPORTED_CODECS` for a list
+        of supported formats.
+    encoderLib : str
+        Audio library to use for saving the file. Default is `soundfile` which
+        is a wrapper around `libsndfile`. Other supported libraries include
+        `pydub` and `scipy.io.wavfile`. See `AUDIO_SUPPORTED_CODECS` for a list
+        of supported libraries.
+    encoderOpts : dict
+        Additional options to pass to the encoder library. Default is `None`.
+
+    """
+    def __init__(self, filename, freq=SAMPLE_RATE_48kHz, channels=1, 
+            inputFormat='float32', codec='wav', encoderLib='soundfile', 
+            encoderOpts=None):
+
+        self._filename = filename  # file name for the output
+        self.freq = freq  # sampling frequency
+        self.inputFormat = inputFormat
+        self.codec = codec  # audio codec to use
+        self.encoderLib = encoderLib
+        self.encoderOpts = encoderOpts
+
+        self._writerThread = None  # thread for writing the movie file
+        self._sampleQueue = queue.Queue()  # queue for frames to be written
+        self._dataLock = threading.Lock()  # lock for accessing shared data
+        self._lastAudioFile = None  # last audio file we wrote to
+
+    def __hash__(self):
+        """Use the absolute file path as the hash value since we only allow one 
+        instance per file.
+        """
+        return hash(self._filename)
+
+    def _openSoundFile(self):
+        """Open the sound file for writing.
+
+        This method will open the sound file for writing and prepare it for
+        writing audio samples.
+
+        """
+        import soundfile as sf
+
+        def _writeSamplesAsync(filename, freq, inputFormat, codec, encoderOpts):
+            """Write audio samples to the file.
+
+            This function will write audio samples to the file in a background
+            thread to avoid blocking the main thread.
+
+            Parameters
+            ----------
+            samples : ArrayLike
+                Nx1 or Nx2 array of audio samples with values ranging between -1
+                and 1.
+
+            """
+            _fileWriter = sf.SoundFile(  # open the file for writing
+                filename, 
+                mode='w', 
+                samplerate=freq,
+                channels=1,
+                subtype=inputFormat, 
+                format=codec, 
+                **encoderOpts)
+
+            # wait on a barrier
+            if readyBarrier is not None:
+                readyBarrier.wait()
+
+            while True:
+                samples = self._sampleQueue.get()
+                if samples is None:
+                    break
+
+                _fileWriter.write(samples)
+
+            _fileWriter.close()
+
+    def open(self):
+        """Open the audio file for writing.
+
+        This method will open the audio file for writing and prepare it for
+        writing audio samples.
+
+        """
+        if self._writerThread is not None:
+            raise RuntimeError("Audio file is already open for writing.")
+
+        # open the sound file
+        if self.encoderLib == 'soundfile':
+            self._openSoundFile()
+
+    def close(self):
+        """Close the audio file after writing.
+
+        This method will close the audio file after writing audio samples.
+
+        """
+        pass
+
+    def addSamples(self, samples, inputFormat='float32'):
+        """Add audio samples to the file.
+
+        This method will add audio samples to the file for writing. The samples
+        will be written to the file in a background thread to avoid blocking the
+        main thread.
+
+        This method is thread-safe and can be called from any thread. One must 
+        call `open` before adding samples.
+
+        Parameters
+        ----------
+        samples : ArrayLike
+            Nx1 or Nx2 array of audio samples with values ranging between -1 
+            and 1.
+
+        """
+        self._sampleQueue.put(samples)
+
+
 def array2wav(filename, samples, freq=48000):
     """Write audio samples stored in an array to WAV file.
 
