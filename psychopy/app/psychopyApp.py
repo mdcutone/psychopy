@@ -212,7 +212,9 @@ def main():
         # run command in a subprocess and block until it finishes
         try:
             psychopyProc = subprocess.Popen(
-                startCmd, 
+                startCmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 env=env)
         except KeyboardInterrupt:
             print("PsychoPy: Application interrupted.")
