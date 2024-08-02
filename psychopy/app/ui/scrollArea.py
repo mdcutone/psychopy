@@ -59,14 +59,6 @@ class BaseScrollableArea(wx.Panel):
             txt = wx.TextCtrl(widgetParent, wx.ID_ANY, "Text Box %d" % i)
             scrollArea.addWidget(txt)
 
-        # set the header as a static label
-        header = wx.StaticText(scrollArea, wx.ID_ANY, "Header")
-        scrollArea.setPanelHeader(header)
-
-        # set the footer as a static label
-        footer = wx.StaticText(scrollArea, wx.ID_ANY, "Footer")
-        scrollArea.setPanelFooter(footer)
-
     """
     def __init__(self, 
                  parent, 
@@ -123,10 +115,6 @@ class BaseScrollableArea(wx.Panel):
         self.szrMain.Add(self.pnlScrollArea, 1, wx.EXPAND, 0)
         self.SetSizer(self.szrMain)
         self.Layout()
-
-        # keep track if header and footer are present
-        self._hasHeader = False
-        self._hasFooter = False
         
         # set events this way to allow for subclassing
         self._bindEvents()
@@ -197,66 +185,6 @@ class BaseScrollableArea(wx.Panel):
         """
         return self.pnlScrollArea.GetSizer()
 
-    def setPanelHeader(self, panelHeader):
-        """Set the panel header.
-
-        This can be used to add a header to the scrollable area which remains 
-        static at the top of the area when scrolling.
-
-        Parameters
-        ----------
-        panelHeader : wx.Window
-            Panel header to set.
-
-        """
-        self._getPanelSizer().Prepend(panelHeader, 0, wx.EXPAND, 0)
-        self.Layout()
-        self._hasHeader = True
-
-    def setPanelFooter(self, panelFooter):
-        """Set the panel footer.
-
-        This can be used to add a footer to the scrollable area which remains
-        static at the bottom of the area when scrolling. This can be used to 
-        add buttons or other controls that should always be visible.
-
-        Parameters
-        ----------
-        panelFooter : wx.Window
-            Panel footer to set.
-
-        """
-        self._getPanelSizer().Add(panelFooter, 0, wx.EXPAND, 0)
-        self.Layout()
-        self._hasFooter = True
-    
-    def showHeader(self, show=True):
-        """Show or hide the panel header.
-
-        Parameters
-        ----------
-        show : bool, optional
-            Show or hide the panel header. Default is `True`.
-
-        """
-        if self._hasHeader:
-            self._getPanelSizer().Show(0, show)
-            self.Layout()
-
-    def showFooter(self, show=True):
-        """Show or hide the panel footer.
-
-        Parameters
-        ----------
-        show : bool, optional
-            Show or hide the panel footer. Default is `True`.
-
-        """
-        if self._hasFooter:
-            szr = self._getPanelSizer()
-            szr.Show(szr.GetItemCount()-1, show)
-            self.Layout()
-
     def getScrollArea(self):
         """Get a reference to the scrollable area.
 
@@ -302,6 +230,49 @@ class BaseScrollableArea(wx.Panel):
         szr = self._getScrollAreaSizer()
         szr.Add(widget, proportion, flags, border)
         szr.Layout()
+
+    def moveWidget(self, widget, newPos):
+        """Move a widget to a new position in the scrollable area.
+
+        Parameters
+        ----------
+        widget : wx.Window
+            Widget to move.
+        newPos : int
+            New position for the widget.
+
+        """
+        szr = self._getScrollAreaSizer()
+        szr.Detach(widget)
+        szr.Insert(newPos, widget)
+        szr.Layout()
+
+    def insertWidget(self, widget, pos, proportion=0, expand=True, border=0):
+        """Insert a widget at a specific position in the scrollable area.
+
+        Parameters
+        ----------
+        widget : wx.Window
+            Widget to insert into the scrollable area.
+        pos : int
+            Position to insert the widget.
+        proportion : int, optional
+            Proportion for the widget. Default is 0.
+        expand : bool, optional
+            Expand the widget. Default is `True`.
+        border : int, optional
+            Border size. Default is 0.
+
+        """
+        flags = 0
+        if expand:
+            flags = wx.EXPAND
+
+        if border > 0:
+            flags = flags | wx.ALL
+
+        szr = self._getScrollAreaSizer()
+        szr.Insert(pos, widget, proportion, flags, border)
     
     def removeWidget(self, widget):
         """Remove a widget from the scrollable area.
@@ -426,14 +397,6 @@ if __name__ == "__main__":
     #     txt = wx.TextCtrl(widgetParent, wx.ID_ANY, "Text Box %d" % i)
     #     scrollArea.addWidget(txt)
 
-    # # set the header as a static label
-    # header = wx.StaticText(scrollArea, wx.ID_ANY, "Header")
-    # scrollArea.setPanelHeader(header)
-
-    # # set the footer as a static label
-    # footer = wx.StaticText(scrollArea, wx.ID_ANY, "Footer")
-    # scrollArea.setPanelFooter(footer)
-    
     # frame.Show()
     # app.MainLoop()
     pass
