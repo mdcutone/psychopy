@@ -376,7 +376,7 @@ class PygletBackend(BaseBackend):
     @property
     def shadersSupported(self):
         # on pyglet shaders are fine so just check GL>2.0
-        return pyglet.gl.gl_info.get_version() >= '2.0'
+        return pyglet.gl.gl_info.get_version()[0] >= 2
 
     def swapBuffers(self, flipThisFrame=True):
         """Performs various hardware events around the window flip and then
