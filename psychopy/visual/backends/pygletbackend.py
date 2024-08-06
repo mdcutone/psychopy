@@ -367,6 +367,17 @@ class PygletBackend(BaseBackend):
 
         # store properties of the system
         self._driver = pyglet.gl.gl_info.get_renderer()
+        logging.info("Using renderer '{}' for graphics".format(self._driver))
+
+        # report the OpenGL version
+        glVersion = pyglet.gl.gl_info.get_version()
+        logging.info("OpenGL version supported by driver is {}.{}".format(
+            glVersion[0], glVersion[1]))
+
+        if glVersion[0] < 2:
+            raise RuntimeError(
+                "OpenGL version 2.0 or higher is required! Please update your "
+                "graphics drivers or use a different backend.")
 
     @property
     def frameBufferSize(self):
