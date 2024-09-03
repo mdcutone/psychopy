@@ -7,6 +7,7 @@ This module provides routines for saving/loading and manipulating audio samples.
 """
 
 __all__ = [
+    'AudioFileWriter',
     'array2wav',
     'wav2array',
     'sinetone',
@@ -24,7 +25,9 @@ __all__ = [
     'SAMPLE_RATE_96kHz',
     'SAMPLE_RATE_192kHz',
     'AUDIO_SUPPORTED_CODECS',
-    'knownNoteNames', 'stepsFromA'
+    'knownNoteNames', 
+    'stepsFromA',
+    'closeAllAudioWriters'
 ]
 
 # Part of the PsychoPy library
@@ -35,6 +38,11 @@ import os
 import numpy as np
 from scipy.io import wavfile
 from scipy import signal
+import queue
+import threading
+import atexit
+import time
+from psychopy import logging
 
 # pydub is needed for saving and loading MP3 files among others
 # _has_pydub = True
@@ -105,6 +113,394 @@ try:
     AUDIO_SUPPORTED_CODECS = [s.lower() for s in sf.available_formats().keys()]
 except ImportError:
     AUDIO_SUPPORTED_CODECS = []
+
+
+# keep track of open audio writers
+_openAudioWriters = set()
+
+
+class AudioFileWriter:
+    """Asyncronous audio file writer.
+
+    This class is used to write audio samples to a file in a separate thread.
+    This is useful for recording audio in real-time and writing to disk without
+    blocking the main thread.
+
+    Parameters
+    ----------
+    filename : str
+        File name for the output. This can be a relative or absolute path.
+    sampleRate : int
+        Samples rate of the audio for playback in Hertz (Hz). Adjust to match
+        the sample rate of the audio data being written. Default is `48000`.
+    channels : int
+        Number of audio channels in the file. Either `1` (mono) or `2` (stereo).
+        Default is `1`.
+    codec : str
+        Codec used to encode the audio file. Default is `'wav'`.
+    encoderLib : str
+        Library used to encode the audio file. Default is `'soundfile'`.
+    encoderOpts : dict
+        Options used to encode the audio file. These are settings that are 
+        passed to the encoder when opening the file for writing. Use this to 
+        specify additional options that are specific to the encoder. Default is 
+        `None`.
+    keepTempFile : bool
+        Keep any temporary files created during encoding. This is usually not 
+        needed, however it can be useful for debugging or to retain the original
+        audio data that can be recovered in the event of a crash. Temporary
+        files usually have the same name as the final file with an additional
+        extension (e.g., `.raw`). Default is `False`.
+
+    Examples
+    --------
+    Open a writer and write some samples to a file::
+
+        # create a writer object and open the file
+        writer = AudioFileWriter('test.wav', SAMPLE_RATE_48kHz)
+        writer.open()
+
+        # generate and add audio samples to the file
+        writer.addSamples(
+            sinetone(0.5, 440.0, gain=0.8, sampleRateHz=SAMPLE_RATE_48kHz))
+        writer.addSamples(
+            squaretone(0.5, 440.0, gain=0.8, sampleRateHz=SAMPLE_RATE_48kHz))
+        writer.addSamples(
+            sawtone(0.5, 440.0, gain=0.8, sampleRateHz=SAMPLE_RATE_48kHz))
+
+        # close the file
+        writer.close()
+
+    Notes
+    -----
+    * Some encoders require a temporary file to be created since they cannot
+      write directly to the final file. The audio data is converted to the
+      requested format upon closing the file.
+    
+    """
+    def __init__(self, filename, sampleRate, channels=1, codec='wav', 
+            encoderLib='soundfile', encoderOpts=None, keepTempFile=False):
+
+        self._writerThread = None
+        self._sampleQueue = queue.Queue()
+        self._dataLock = threading.Lock()
+        self._keepTempFile = keepTempFile
+        self._absPath = self._filename = None
+        self._lastAudioFile = self._tempFileName = None
+        self.filename = filename
+        self._sampleRate = sampleRate
+        self._channels = channels
+        self._codec = codec
+        self._encoderLib = encoderLib
+        self._encoderOpts = encoderOpts
+
+    def __hash__(self):
+        return hash(self._filename)
+
+    @property
+    def isOpen(self):
+        """Is the audio file writer is open (`bool`)?
+        """
+        return self._writerThread.is_alive() if self._writerThread else False
+
+    @property
+    def filename(self):
+        """The name (path) of the movie file (`str`).
+
+        This cannot be changed after the writer has been opened.
+
+        """
+        return self._filename
+
+    @filename.setter
+    def filename(self, value):
+        self._filename = value
+        self._absPath = os.path.abspath(self._filename)
+
+    @property
+    def sampleRate(self):
+        """The sample rate of the audio file (`int`).
+
+        This cannot be changed after the writer has been opened.
+
+        """
+        return self._sampleRate
+
+    @property
+    def channels(self):
+        """The number of audio channels in the file (`int`).
+
+        This cannot be changed after the writer has been opened.
+
+        """
+        return self._channels
+    
+    @property
+    def codec(self):
+        """The codec used to encode the audio file (`str`).
+
+        This cannot be changed after the writer has been opened.
+
+        """
+        return self._codec
+
+    @property
+    def encoderLib(self):
+        """The library used to encode the audio file (`str`).
+
+        This cannot be changed after the writer has been opened.
+
+        """
+        return self._encoderLib
+
+    @property
+    def encoderOpts(self):
+        """The options used to encode the audio file (`dict`).
+
+        This cannot be changed after the writer has been opened.
+
+        """
+        return self._encoderOpts
+
+    def _finalize(self):
+        """Finalize the audio file writer.
+
+        This will do any cleanup necessary when the writer is closed. This 
+        includes converting the temporary file to the proper format if the 
+        encoder requires it.
+
+        """
+        if self._encoderLib == 'soundfile':
+            # Using soundfile requires a temporary file to be converted to the
+            # proper format after writing all the samples to disk. This is done
+            # by reading the temporary file and writing it to the final file.
+            import soundfile as sf
+
+            # read the file
+            with sf.SoundFile(self._tempFileName, 'r', 
+                    samplerate=self._sampleRate, 
+                    channels=self._channels,
+                    format='RAW', subtype='PCM_16') as f:
+                data = f.read()
+
+            # write out file
+            with sf.SoundFile(self._absPath, 'w', 
+                    samplerate=self._sampleRate, 
+                    channels=self._channels, 
+                    format='WAV', subtype='PCM_16') as f:
+                f.write(data)
+        
+        # delete the temporary files if they exist
+        if self._tempFileName is not None:
+            if not self._keepTempFile:
+                logging.debug("Deleting temporary audio file '%s'...", 
+                    self._tempFileName)
+                os.remove(self._tempFileName)
+                self._tempFileName = None
+
+    def _openSoundFile(self):
+        """Open the audio file for writing.
+
+        This will create a new thread for writing audio samples to the file. The
+        thread will be started and the file will be opened for writing.
+
+        """
+        import soundfile as sf
+
+        # check if the file is already open
+        if self.isOpen:
+            raise RuntimeError("Audio file writer is already open.")
+
+        # mapping for the soundfile library settings for the codec, these need 
+        # to be deteremined based on the codec used
+        codecMap = {
+            'wav': ('WAV', sf.default_subtype('WAV')),
+            'flac': ('FLAC', sf.default_subtype('FLAC')),
+            'ogg': ('OGG', sf.default_subtype('OGG')),
+            'mp3': ('MP3', sf.default_subtype('MP3'))
+        }
+
+        def _writeSamplesAsync(filename, writerOpts, sampleQueue, readyBarrier, 
+                dataLock):
+            """Write audio samples to a file asynchronously.
+
+            This function is used to write audio samples to a file in a separate
+            thread. It will write samples to the file as they are added to the
+            sample queue.
+
+            Parameters
+            ----------
+            filename : str
+                File name for the output.
+            writerOpts : dict
+                Options used to write the audio file.
+            sampleQueue : queue.Queue
+                Queue used to store audio samples to be written to the file.
+            readyBarrier : threading.Barrier
+                Barrier used to synchronize the writer thread with other threads.
+            dataLock : threading.Lock
+                Lock used to synchronize access to the sample queue.
+
+            """
+            # Open a RAW file for writing since saoundfile cannoty append to
+            # files in other formats. This will be converted to the proper format
+            # after all samples have been written.
+            with sf.SoundFile(filename, 'r+', 
+                    samplerate=writerOpts['samplerate'], 
+                    channels=writerOpts['channels'], 
+                    format='RAW', 
+                    subtype=writerOpts['subtype']) as f:
+
+                # hold until file is ready for writing
+                if readyBarrier is not None:  
+                    readyBarrier.wait()
+
+                # main loop to write samples to the file
+                while True:
+                    samples = sampleQueue.get()  # waited on until a frame is added
+                    if samples is None:
+                        break  # stope writing to file if we get a None
+
+                    f.seek(0, sf.SEEK_END)
+                    f.write(samples)
+
+        logging.debug("Opening temporary audio file '%s' for writing...", 
+            self._filename)
+
+        # create a temporary file for writing
+        self._tempFileName = self._absPath + '.raw'
+
+        # create a barrier to synchronize the movie writer with other threads
+        self._syncBarrier = threading.Barrier(2)
+
+        writerOpts = {
+            'samplerate': self._sampleRate,
+            'channels': self._channels,
+            'format': self._codec,
+            'subtype': codecMap[self._codec][1]
+        }
+
+        # create the thread
+        self._writerThread = threading.Thread(
+            target=_writeSamplesAsync,
+            args=(self._tempFileName, 
+                  writerOpts, 
+                  self._sampleQueue, 
+                  self._syncBarrier, 
+                  self._dataLock))
+
+        self._writerThread.start()
+
+        logging.debug("Waiting for movie writer thread to start...")
+        self._syncBarrier.wait()  # wait for the thread to start
+        logging.debug("Movie writer thread started.")
+
+    def open(self):
+        """Open the audio file for writing.
+
+        This will create a new thread for writing audio samples to the file. The
+        thread will be started and the file will be opened for writing.
+
+        """
+        if self.isOpen:
+            raise RuntimeError("Audio file writer is already open.")
+
+        global _openAudioWriters
+        if self in _openAudioWriters:
+            raise RuntimeError("Another audio file writer is already open on "
+                    "file.")
+
+        if self._encoderLib == 'soundfile':
+            self._openSoundFile()
+        else:
+            raise NotImplementedError("Unsupported encoder library.")
+
+        _openAudioWriters.add(self)
+        logging.info("Audio file '%s' opened for writing.", self._filename)
+
+    def close(self):
+        """Close the audio file writer.
+
+        This stops the thread writing audio samples to disk and closes the file.
+        After calling this, calling `open()` on the writer will overwrite the 
+        file if the filename is the same.
+
+        """
+        if self._writerThread is None:
+            raise RuntimeError("Audio file writer is not open.")
+
+        # signal the thread to stop
+        self._sampleQueue.put(None)
+        self._writerThread.join()  # wait on thread to complete
+
+        # clean up
+        self._writerThread = None
+
+        self._finalize()  # convert temp file to proper format
+
+        _openAudioWriters.remove(self)
+        logging.info("Audio file '%s' closed.", self._filename)
+
+        self._lastAudioFile = self._filename
+
+    def flush(self):
+        """Flush the audio file writer.
+
+        This will flush any queued audio samples to the file, waiting until all
+        samples have been written.
+
+        """
+        if not self.isOpen:
+            raise RuntimeError(
+                "Cannot flush audio samples. Writer is not open.")
+
+        while self._sampleQueue.qsize() > 0:  # wait until the queue is empty
+            time.sleep(0.001)
+
+    def _convertSampleFormat(self, samples):
+        """Convert audio samples to a format suitable for writing.
+
+        This will convert the audio samples to the proper format for writing to
+        the file. This includes converting the samples to the proper data type
+        and scaling the values to the proper range for the encoder used.
+
+        Parameters
+        ----------
+        samples : ArrayLike
+            Nx1 or Nx2 array of audio samples with values ranging between -1 and
+            1.
+
+        Returns
+        -------
+        ndarray
+            Nx1 or Nx2 array of audio samples in the proper format for writing.
+
+        """
+        return samples
+
+    def addSamples(self, samples):
+        """Add audio samples to the file.
+
+        Parameters
+        ----------
+        samples : ArrayLike
+            Nx1 or Nx2 array of audio samples with values ranging between -1 and 
+            1.
+
+        """
+        if self._writerThread is None:
+            raise RuntimeError("Audio file writer is not open.")
+
+        if samples is None:
+            raise ValueError("Cannot write None samples to audio file.")
+
+        samples = self._convertSampleFormat(samples)
+
+        self._sampleQueue.put(samples)
+
+    def __del__(self):
+        if self._writerThread is not None:
+            self.close()
 
 
 def array2wav(filename, samples, freq=48000):
@@ -335,13 +731,14 @@ def audioBufferSize(duration=1.0, freq=SAMPLE_RATE_48kHz):
 
 def audioMaxDuration(bufferSize=1536000, freq=SAMPLE_RATE_48kHz):
     """
-    Work out the max duration of audio able to be recorded given the buffer size (kb) and frequency (Hz).
+    Work out the max duration of audio able to be recorded given the buffer size 
+    (kb) and frequency (Hz).
 
     Parameters
     ----------
     bufferSize : int, float
         Size of the buffer in bytes
-        freq : int
+    freq : int
         Sampling frequency in Hz.
 
     Returns
@@ -354,5 +751,53 @@ def audioMaxDuration(bufferSize=1536000, freq=SAMPLE_RATE_48kHz):
     return bufferSize / (sizef32 * freq)
 
 
+def closeAllAudioWriters():
+    """Close all open audio file writers.
+
+    This will close all audio file writers that are currently open. This 
+    function is registered to be called at exit automatically to ensure that
+    all audio files are closed properly.
+
+    """
+    global _openAudioWriters
+
+    if len(_openAudioWriters) == 0:
+        logging.debug("No audio file writers to close.")
+        return
+
+    logging.debug("Closing all open audio file writers (%d)...",
+                  len(_openAudioWriters))
+
+    for writer in _openAudioWriters:
+        logging.debug("Closing audio file writer '%s'...", writer._filename)
+        writer.close()
+
+    _openAudioWriters.clear()
+
+
+atexit.register(closeAllAudioWriters)
+
+
+def test_audio_writer():
+    import time
+
+    writer = AudioFileWriter('test2.wav', SAMPLE_RATE_48kHz)
+    print(writer._absPath)
+    writer.open()
+
+    sineSamples = sinetone(0.5, 440.0, gain=0.8, sampleRateHz=SAMPLE_RATE_48kHz)
+    noiseSamples = whiteNoise(0.5, sampleRateHz=SAMPLE_RATE_48kHz)
+
+    t0 = time.time()
+    for i in range(60 * 30):
+        writer.addSamples(sineSamples)
+        writer.addSamples(noiseSamples)
+    
+    writer.close()
+    t1 = time.time()
+
+    print("Time to write 30 minutes of audio: {:.2f} seconds".format(t1 - t0))
+
+
 if __name__ == "__main__":
-    pass
+    test_audio_writer()
