@@ -189,6 +189,10 @@ class AudioFileWriter:
     * Some encoders require a temporary file to be created since they cannot
       write directly to the final file. The audio data is converted to the
       requested format upon closing the file.
+    * The `close()` method is registered to be called at exit, any samples in
+      the queue will be written to the file before closing. While this is not
+      garanteed to work in all cases, it helps prevent data loss in the event of
+      a crash.
     
     """
     def __init__(self, filename, sampleRate, channels=1, codec=None, 
@@ -207,6 +211,10 @@ class AudioFileWriter:
         self._encoderLib = encoderLib
         self._encoderOpts = encoderOpts
         self._fileExistsPolicy = fileExistsPolicy
+
+        # codec specific settings, the value of these will be determined based
+        # on the requirments of the endocer used
+        self._formatInfo = None
 
         # determine codec from file extension if not specified
         if self._codec is None:
