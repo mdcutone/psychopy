@@ -1059,6 +1059,8 @@ class Session:
         logging.info(_translate(
             "Running experiment via Session: name={key}, expInfo={expInfo}"
         ).format(key=key, expInfo=expInfo))
+        # reset session clock
+        self.sessionClock.reset()
         # Run this experiment
         try:
             self.experiments[key].run(
@@ -1278,7 +1280,7 @@ class Session:
         if self.currentExperiment is None:
             return
         # skip trials in current loop
-        self.currentExperiment.skipTrials(n)
+        return self.currentExperiment.skipTrials(n)
 
     def rewindTrials(self, n=1):
         """
@@ -1299,7 +1301,7 @@ class Session:
         if self.currentExperiment is None:
             return
         # rewind trials in current loop
-        self.currentExperiment.rewindTrials(n)
+        return self.currentExperiment.rewindTrials(n)
 
     def saveExperimentData(self, key, thisExp=None, blocking=True):
         """

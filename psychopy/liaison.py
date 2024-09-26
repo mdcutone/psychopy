@@ -110,8 +110,18 @@ class WebSocketServer:
 
 		# register the Liaison methods available to clients:
 		self._methods = {
-			'liaison': (self, ['listRegisteredMethods', 'pingPong'])
+			'liaison': (self, ['listRegisteredMethods', 'addLogFile', 'pingPong'])
 		}
+	
+	def addLogFile(self, file, loggingLevel=logging.INFO):
+		# actualize logging level
+		if isinstance(loggingLevel, str):
+			loggingLevel = getattr(logging, loggingLevel.upper())
+		# if given a log file, add it
+		logFile = logging.LogFile(
+			file, level=logging.DEBUG
+		)
+		self._logger.addTarget(logFile)
 
 	def registerObject(self, targetObject, referenceName):
 		"""
@@ -391,7 +401,7 @@ class WebSocketServer:
 					# try to parse json string
 					try:
 						arg = json.loads(arg)
-					except json.decoder.JSONDecodeError:
+					except (json.decoder.JSONDecodeError, TypeError):
 						pass
 					# if arg is a known property, get its value
 					arg = self.actualizeAttributes(arg)
