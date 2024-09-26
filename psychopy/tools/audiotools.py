@@ -344,14 +344,16 @@ class AudioFileWriter:
             with sf.SoundFile(self._tempFileName, 'r', 
                     samplerate=self._sampleRate, 
                     channels=self._channels,
-                    format='RAW', subtype='PCM_16') as f:
+                    format='RAW', 
+                    subtype=self._formatInfo['subtype']) as f:
                 data = f.read()
 
             # write out file
             with sf.SoundFile(self._absPath, 'w', 
                     samplerate=self._sampleRate, 
                     channels=self._channels, 
-                    format='WAV', subtype='PCM_16') as f:
+                    format='WAV', 
+                    subtype=self._formatInfo['subtype']) as f:
                 f.write(data)
         else:
             raise NotImplementedError("Unsupported encoder library.")
@@ -445,7 +447,9 @@ class AudioFileWriter:
         if self._fileExistsPolicy == 'append':
             writerMode = 'r+'
 
-        writerOpts = {
+        # format information for the writer, keep track of this so we know how
+        # to write the final file
+        self._formatInfo = {
             'samplerate': self._sampleRate,
             'channels': self._channels,
             'format': self._codec,
@@ -457,7 +461,7 @@ class AudioFileWriter:
         self._writerThread = threading.Thread(
             target=_writeSamplesAsync,
             args=(self._tempFileName, 
-                  writerOpts, 
+                  self._formatInfo, 
                   self._sampleQueue, 
                   self._syncBarrier, 
                   self._dataLock))
@@ -555,6 +559,22 @@ class AudioFileWriter:
             Nx1 or Nx2 array of audio samples in the proper format for writing.
 
         """
+        if self._encoderLib == 'soundfile':  # soundfile specific conversion
+            if isinstance(samples, np.ndarray):  # got a numpy array
+                samples = np.atleast_2d(samples)
+                if self._formatInfo['subtype'] == 'PCM_16' and samples.dtype != np.int16:
+                    # rescale samples and change type to int16
+                    samples = np.ascontiguousarray(
+                        samples * (MAX_16BITS_SIGNED - 1), dtype=np.int16)
+                elif self._formatInfo['subtype'] == 'PCM_24' and samples.dtype != np.int32:
+                    # rescale samples and change type to int32
+                    samples = np.ascontiguousarray(
+                        samples * (MAX_16BITS_SIGNED - 1), dtype=np.int32)
+            else:
+                raise ValueError("Unsupported sample format.")
+
+        assert samples.shape[1] == self._channels, "Invalid number of channels."
+
         return samples
 
     def submit(self, samples):
