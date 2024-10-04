@@ -64,11 +64,6 @@ def addComponent(compClass):
 
     # check type and attributes of the class
     if not issubclass(compClass, (BaseComponent, BaseVisualComponent)):
-        logging.warning(
-            "Component `{}` does not appear to be a subclass of "
-            "`psychopy.experiment.components._base.BaseComponent`. This will be skipped."
-            .format(compName)
-        )
         return
     elif not hasattr(compClass, 'categories'):
         logging.warning(
@@ -395,10 +390,13 @@ def getInitVals(params, target="PsychoPy"):
         elif name in ('movie', 'latitude', 'longitude', 'elevation', 'azimuth', 'speechPoint'):
             inits[name].val = 'None'
             inits[name].valType = 'code'
+        elif name == 'allowedKeys':
+            inits[name].val = "[]"
+            inits[name].valType = 'code'
         else:
-            print("I don't know the appropriate default value for a '%s' "
-                  "parameter. Please email the mailing list about this error" %
-                  name)
+            # if not explicitly handled, default to None
+            inits[name].val = "None"
+            inits[name].valType = "code"
 
     return inits
 

@@ -37,6 +37,7 @@ import os.path
 
 import wx
 import os
+import sys
 from subprocess import Popen, PIPE
 from threading import Thread, Event
 from queue import Queue, Empty
@@ -192,7 +193,10 @@ class Job:
     """
     def __init__(self, parent, command='', terminateCallback=None,
                  inputCallback=None, errorCallback=None, extra=None):
-
+        # use the app instance if parent isn't given
+        if parent is None:
+            from psychopy.app import getAppInstance
+            parent = getAppInstance()
         # command to be called, cannot be changed after spawning the process
         self.parent = parent
         self._command = command
@@ -246,6 +250,22 @@ class Job:
         # start the sub-process
         command = self._command
 
+        # # subprocess inherits the environment of the parent process
+        if env is None:  
+            scriptEnv = os.environ.copy()
+        else:
+            scriptEnv = env
+
+        # remove some environment variables that can cause issues
+        if 'PYTHONSTARTUP' in scriptEnv:
+            del scriptEnv['PYTHONSTARTUP']
+
+        # Set encoding for text mode pipes, needs to be explicitly set or we 
+        # crash on windows
+        scriptEnv['PYTHONIOENCODING'] = 'utf-8'
+        if sys.platform == 'win32':
+            scriptEnv['PYTHONLEGACYWINDOWSSTDIO'] = 'utf-8'
+
         try:
             self._process = Popen(
                 args=command,
@@ -257,10 +277,11 @@ class Job:
                 preexec_fn=None,
                 shell=False,
                 cwd=cwd,
-                env=env,
-                universal_newlines=True,  # gives us back a string instead of bytes
+                env=scriptEnv,
+                # universal_newlines=True,  # gives us back a string instead of bytes
                 creationflags=0,
-                text=True
+                text=False,
+                encoding='utf-8'
             )
         except FileNotFoundError:
             return -1  # negative PID means failure

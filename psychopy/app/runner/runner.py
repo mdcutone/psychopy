@@ -24,7 +24,7 @@ import webbrowser
 from pathlib import Path
 from subprocess import Popen, PIPE
 
-from psychopy import experiment, logging
+from psychopy import experiment, logging, alerts
 from psychopy.app.utils import FrameSwitcher, FileDropTarget
 from psychopy.localization import _translate
 from psychopy.projects.pavlovia import getProject
@@ -539,7 +539,7 @@ class RunnerPanel(wx.Panel, ScriptProcess, handlers.ThemeMixin):
         self.splitter.SplitVertically(
             window1=self.topPanel,
             window2=self.bottomPanel,
-            sashPosition=480
+            sashPosition=360
         )
         self.splitter.SetMinimumPaneSize(360)
 
@@ -902,7 +902,7 @@ class RunnerPanel(wx.Panel, ScriptProcess, handlers.ThemeMixin):
         # disable stop
         self.ribbon.buttons['pystop'].Disable()
         # switch mode
-        self.ribbon.buttons['pyswitch'].setMode(runMode == "run")
+        self.ribbon.buttons['pyswitch'].setMode(runMode == "run", silent=True)
         # update
         self.updateAlerts()
         self.app.updateWindowMenu()
@@ -1053,6 +1053,7 @@ class RunnerOutputNotebook(aui.AuiNotebook, handlers.ThemeMixin):
             self.alertsPnl, caption=_translate("Alerts")
         )
         self.panels['alerts'] = self.alertsPnl
+        alerts.addAlertHandler(self.alertsPnl.ctrl)
 
         # StdOut
         self.stdoutPnl = ScriptOutputPanel(
@@ -1079,8 +1080,11 @@ class RunnerOutputNotebook(aui.AuiNotebook, handlers.ThemeMixin):
         # bind function when page receives focus
         self._readCache = {}
         self.Bind(aui.EVT_AUINOTEBOOK_PAGE_CHANGED, self.onFocus)
-
-        self.SetMinSize(wx.Size(100, 100))  # smaller than window min size
+        # min size is 80 chars / 40 lines
+        self.SetMinSize(wx.Size(
+            self.stdoutPnl.GetCharWidth() * 80, 
+            self.stdoutPnl.GetCharHeight() * 40, 
+        ))
 
     def setRead(self, i, state):
         """
@@ -1234,6 +1238,11 @@ class RunnerRibbon(ribbon.FrameRibbon):
         self.addPavloviaUserCtrl(
             section="pavlovia", name="pavuser", frame=parent
         )
+
+        self.addSeparator()
+
+        # --- Plugin sections ---
+        self.addPluginSections("psychopy.app.builder")
 
         # --- Views ---
         self.addStretchSpacer()

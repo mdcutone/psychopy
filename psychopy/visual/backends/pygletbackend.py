@@ -139,11 +139,13 @@ class PygletBackend(BaseBackend):
             win.stereo = False
 
         if sys.platform == 'darwin' and not win.useRetina and pyglet.version >= "1.3":
-            raise ValueError(
+            logging.warn(
                 "As of PsychoPy 1.85.3 OSX windows should all be set to "
                 "`useRetina=True` (or remove the argument). Pyglet 1.3 appears "
                 "to be forcing us to use retina on any retina-capable screen "
-                "so setting to False has no effect.")
+                "so setting to False has no effect."
+            )
+            win.useRetina = True
 
         # window framebuffer configuration
         bpc = backendConf.get('bpc', (8, 8, 8))
@@ -179,20 +181,27 @@ class PygletBackend(BaseBackend):
                     'integer greater than two. Disabling.')
                 win.multiSample = False
 
+        skip_screen_warn = False
         if platform.system() == 'Linux':
-            display = pyglet.canvas.Display()
+            from pyglet.canvas.xlib import NoSuchDisplayException
+            try:
+                display = pyglet.canvas.Display(x_screen=win.screen)
+                # in this case, we'll only get a single x-screen back
+                skip_screen_warn = True
+            except NoSuchDisplayException:
+                # Maybe xinerama? Try again and get the specified screen later
+                display = pyglet.canvas.Display(x_screen=0)
+
             allScrs = display.get_screens()
         else:
-            if pyglet.version < '1.4':
-                allScrs = _default_display_.get_screens()
-            else:
-                allScrs = _default_display_.get_screens()
+            allScrs = _default_display_.get_screens()
 
-        # Screen (from Exp Settings) is 1-indexed,
+        # Screen (from Exp Settings) is 0-indexed,
         # so the second screen is Screen 1
         if len(allScrs) < int(win.screen) + 1:
-            logging.warn("Requested an unavailable screen number - "
-                         "using first available.")
+            if not skip_screen_warn:
+                logging.warn("Requested an unavailable screen number - "
+                             "using first available.")
             thisScreen = allScrs[0]
         else:
             thisScreen = allScrs[win.screen]
@@ -247,7 +256,7 @@ class PygletBackend(BaseBackend):
             self.winHandle = pyglet.window.Window(
                 width=w, height=h,
                 caption="PsychoPy",
-                fullscreen=self._isFullScr,
+                fullscreen=win._isFullScr,
                 config=config,
                 screen=thisScreen,
                 style=style)

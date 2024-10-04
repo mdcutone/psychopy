@@ -1340,9 +1340,9 @@ class CoderFrame(BaseAuiFrame, handlers.ThemeMixin):
 
         Provides menu items to clear all, select all and copy selected text."""
         if not hasattr(self, "outputMenuID1"):
-            self.outputMenuID1 = wx.NewId()
-            self.outputMenuID2 = wx.NewId()
-            self.outputMenuID3 = wx.NewId()
+            self.outputMenuID1 = wx.NewIdRef(count=1)
+            self.outputMenuID2 = wx.NewIdRef(count=1)
+            self.outputMenuID3 = wx.NewIdRef(count=1)
 
             self.Bind(wx.EVT_MENU, self.outputClear, id=self.outputMenuID1)
             self.Bind(wx.EVT_MENU, self.outputSelectAll, id=self.outputMenuID2)
@@ -1429,7 +1429,7 @@ class CoderFrame(BaseAuiFrame, handlers.ThemeMixin):
             wx.ID_ANY, _translate("Reset preferences...")
         )
         self.Bind(wx.EVT_MENU, self.resetPrefs, item)
-        # item = menu.Append(wx.NewId(), "Plug&ins")
+        # item = menu.Append(wx.NewIdRef(count=1), "Plug&ins")
         # self.Bind(wx.EVT_MENU, self.pluginManager, id=item.GetId())
         # -------------Close coder frame
         menu.AppendSeparator()
@@ -2070,6 +2070,7 @@ class CoderFrame(BaseAuiFrame, handlers.ThemeMixin):
         #     self.OnFindClose(None)
 
     def OnFindClose(self, event):
+        self.findDlg.Destroy()
         self.findDlg = None
 
     def OnFileHistory(self, evt=None):
@@ -2873,10 +2874,6 @@ class CoderFrame(BaseAuiFrame, handlers.ThemeMixin):
         # TODO: Allow user to run project from coder
         pass
 
-    def setPavloviaUser(self, user):
-        # TODO: update user icon on button to user avatar
-        pass
-
     def resetPrefs(self, event):
         """Reset preferences to default"""
         # Present "are you sure" dialog
@@ -3055,6 +3052,9 @@ class CoderRibbon(ribbon.FrameRibbon):
         )
 
         self.addSeparator()
+
+        # --- Plugin sections ---
+        self.addPluginSections("psychopy.app.builder")
 
         # --- Views ---
         self.addStretchSpacer()

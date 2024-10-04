@@ -36,7 +36,8 @@ class SoundComponent(BaseDeviceComponent):
                  speakerIndex=-1,
                  # playback
                  volume=1,
-                 stopWithRoutine=True):
+                 stopWithRoutine=True,
+                 forceEndRoutine=False):
         super(SoundComponent, self).__init__(
             exp, parentName, name,
             startType=startType, startVal=startVal,
@@ -47,14 +48,13 @@ class SoundComponent(BaseDeviceComponent):
         self.type = 'Sound'
         self.url = "https://www.psychopy.org/builder/components/sound.html"
         self.exp.requirePsychopyLibs(['sound'])
+
+        # --- Basic params ---
         self.order += [
-            "sound",  # Basic tab
-            "volume", "hammingWindow",  # Playback tab
+            "sound",  
+            "syncScreenRefresh",
         ]
-        # params
-        self.params['stopType'].allowedVals = ['duration (s)']
-        self.params['stopType'].hint = _translate('The maximum duration of a'
-                                                  ' sound in seconds')
+
         hnt = _translate("When does the Component end? (blank to use the "
                          "duration of the media)")
         self.params['stopVal'].hint = hnt
@@ -63,15 +63,10 @@ class SoundComponent(BaseDeviceComponent):
                          " to specify Hz (e.g. 440) or a filename")
         self.params['sound'] = Param(
             sound, valType='str', inputType="file", allowedTypes=[], updates='constant', categ='Basic',
-            allowedUpdates=['constant', 'set every repeat'],
+            allowedUpdates=['set every repeat'],
             hint=hnt,
             label=_translate("Sound"))
         _allowed = ['constant', 'set every repeat', 'set every frame']
-        self.params['volume'] = Param(
-            volume, valType='num', inputType="single", allowedTypes=[], updates='constant', categ='Playback',
-            allowedUpdates=_allowed[:],  # use a copy
-            hint=_translate("The volume (in range 0 to 1)"),
-            label=_translate("Volume"))
         msg = _translate(
             "A reaction time to a sound stimulus should be based on when "
             "the screen flipped")
@@ -80,6 +75,20 @@ class SoundComponent(BaseDeviceComponent):
             updates='constant',
             hint=msg,
             label=_translate("Sync start with screen"))
+
+        # --- Playback params ---
+        self.order += [
+            "volume", 
+            "hamming", 
+            "stopWithRoutine", 
+            "forceEndRoutine",
+        ]
+        self.params['volume'] = Param(
+            volume, valType='num', inputType="single", allowedTypes=[], updates='constant', categ='Playback',
+            allowedUpdates=_allowed[:],  # use a copy
+            hint=_translate("The volume (in range 0 to 1)"),
+            label=_translate("Volume")
+        )
         self.params['hamming'] = Param(
             True, valType='bool', inputType="bool", updates='constant', categ='Playback',
             hint=_translate(
@@ -92,12 +101,17 @@ class SoundComponent(BaseDeviceComponent):
                 "Should playback cease when the Routine ends? Untick to continue playing "
                 "after the Routine has finished."),
             label=_translate('Stop with Routine?'))
+        self.params['forceEndRoutine'] = Param(
+            forceEndRoutine, valType="bool", inputType="bool", updates="constant", categ="Playback",
+            hint=_translate(
+                "Should the end of the sound cause the end of the Routine (e.g. trial)?"
+            ),
+            label=_translate("Force end of Routine"))
 
         # --- Device params ---
         self.order += [
-            "speaker"
+            "speakerIndex"
         ]
-
         def getSpeakerLabels():
             from psychopy.hardware.speaker import SpeakerDevice
             labels = [_translate("Default")]
@@ -115,14 +129,13 @@ class SoundComponent(BaseDeviceComponent):
             return vals
 
         self.params['speakerIndex'] = Param(
-            speakerIndex, valType="code", inputType="choice", categ="Device",
+            speakerIndex, valType="str", inputType="choice", categ="Device",
             allowedVals=getSpeakerValues,
             allowedLabels=getSpeakerLabels,
             hint=_translate(
                 "What speaker to play this sound on"
             ),
-            label=_translate("Speaker")
-        )
+            label=_translate("Speaker"))
 
     def writeDeviceCode(self, buff):
         inits = getInitVals(self.params)
@@ -192,6 +205,12 @@ class SoundComponent(BaseDeviceComponent):
                                           inits['sound'],
                                           inits['stopVal']))
         buff.writeIndented("%(name)s.setVolume(%(volume)s);\n" % (inits))
+        # until isFinished and isPlaying are added in JS, we can immitate them here
+        code = (
+            "%(name)s.isPlaying = false;\n"
+            "%(name)s.isFinished = false;\n"
+        )
+        buff.writeIndentedLines(code % self.params)
 
     def writeRoutineStartCodeJS(self, buff):
         stopVal = self.params['stopVal']
@@ -209,39 +228,58 @@ class SoundComponent(BaseDeviceComponent):
     def writeFrameCode(self, buff):
         """Write the code that will be called every frame
         """
-        # Write start code
+        # Write start code to update parameters. Unlike BaseVisualComponents, which
+        # inserts writeActiveTestCode() after the start code, we need to insert it
+        # here before the start code to provide the correct parameters for calling
+        # the play() method.
+
+        buff.writeIndented("\n")
+        buff.writeIndented(f"# *{self.params['name']}* updates\n")
         self.writeParamUpdates(buff, 'set every frame')
+
+        # write code for starting
         indented = self.writeStartTestCode(buff)
         if indented:
             if self.params['syncScreenRefresh'].val:
-                code = ("%(name)s.play(when=win)  # sync with win flip\n") % self.params
+                code = ("%(name)s.play(when=win)  # sync with win flip\n")
             else:
-                code = "%(name)s.play()  # start the sound (it finishes automatically)\n" % self.params
-            buff.writeIndented(code)
+                code = "%(name)s.play()  # start the sound (it finishes automatically)\n"
+            buff.writeIndentedLines(code % self.params)
         buff.setIndentLevel(-indented, relative=True)
 
-        # Write stop code
-        indented = self.writeStopTestCode(buff)
+        # write code for stopping
+        indented = self.writeStopTestCode(buff, extra=" or %(name)s.isFinished")
         if indented:
-            code = ("%(name)s.stop()\n")
+            # stop playback
+            code = (
+                "%(name)s.stop()\n"
+            )
             buff.writeIndentedLines(code % self.params)
+            # force end of Routine if asked
+            if self.params['forceEndRoutine']:
+                code = (
+                    "# %(name)s has finished playback, so force end Routine\n"
+                    "continueRoutine = False\n"
+                )
+                buff.writeIndentedLines(code % self.params)
         # because of the 'if' statement of the time test
         buff.setIndentLevel(-indented, relative=True)
-
-        # Update status
-        code = (
-            "# update %(name)s status according to whether it's playing\n"
-            "if %(name)s.isPlaying:\n"
-            "    %(name)s.status = STARTED\n"
-            "elif %(name)s.isFinished:\n"
-            "    %(name)s.status = FINISHED\n"
-        )
-        buff.writeIndentedLines(code % self.params)
 
     def writeFrameCodeJS(self, buff):
         """Write the code that will be called every frame
         """
-        # the sound object is unusual, because it is
+        # until isFinished and isPlaying are added in JS, we can immitate them here
+        code = (
+            "if (%(name)s.status === STARTED) {\n"
+            "    %(name)s.isPlaying = true;\n"
+            "    if (t >= (%(name)s.getDuration() + %(name)s.tStart)) {\n"
+            "        %(name)s.isFinished = true;\n"
+            "    }\n"
+            "}\n"
+        )
+        buff.writeIndentedLines(code % self.params)
+
+        # the sound object is unusual, because it is controlling the playback stream
         buff.writeIndented("// start/stop %(name)s\n" % (self.params))
         # do this EVERY frame, even before/after playing?
         self.writeParamUpdates(buff, 'set every frame', target="PsychoJS")
@@ -255,38 +293,27 @@ class SoundComponent(BaseDeviceComponent):
         # because of the 'if' statement of the time test
         buff.setIndentLevel(-1, relative=True)
         buff.writeIndentedLines('}\n')
-        knownNote = (self.params['sound'] in knownNoteNames) or (self.params['sound'].val.isdigit())
-        if self.params['stopVal'].val in [None, 'None', '']:
-            if not knownNote:  # Known notes have no getDuration function because duration is infinite or not None
-                # infinite sounds
-                code = ('if (t >= (%(name)s.getDuration() + %(name)s.tStart) '
-                        '    && %(name)s.status === PsychoJS.Status.STARTED) {\n'
-                        '  %(name)s.stop();  // stop the sound (if longer than duration)\n'
-                        '  %(name)s.status = PsychoJS.Status.FINISHED;\n'
-                        '}\n')
-                buff.writeIndentedLines(code % self.params)
-        else:
-            # sounds with stop values
-            self.writeStopTestCodeJS(buff)
-            code = ("if (t >= %(name)s.tStart + 0.5) {\n"
-                    "  %(name)s.stop();  // stop the sound (if longer than duration)\n"
-                    "  %(name)s.status = PsychoJS.Status.FINISHED;\n"
-                    "}\n")
-            buff.writeIndentedLines(code % self.params)
-            # because of the 'if' statement of the time test
-            buff.setIndentLevel(-1, relative=True)
-            buff.writeIndented('}\n')
 
-            # # Update status
-            # code = (
-            #     "// update %(name)s status according to whether it's playing\n"
-            #     "if (%(name)s.isPlaying) {\n"
-            #     "  %(name)s.status = PsychoJS.Status.STARTED;\n"
-            #     "} else if (%(name)s.isFinished) {\n"
-            #     "  %(name)s.status = PsychoJS.Status.FINISHED;\n"
-            #     "}\n"
-            # )
-            # buff.writeIndentedLines(code % self.params)
+        # are we stopping this frame?
+        indented = self.writeStopTestCodeJS(buff, extra=" || %(name)s.isFinished")
+        if indented:
+            # stop playback
+            code = (
+                "// stop playback\n"
+                "%(name)s.stop();\n"
+            )
+            buff.writeIndentedLines(code % self.params)
+            # end Routine if asked
+            if self.params['forceEndRoutine']:
+                code = (
+                    "// %(name)s has finished playback, so force end Routine\n"
+                    "continueRoutine = false;\n"
+                )
+                buff.writeIndentedLines(code % self.params)
+            # exit if statement(s)
+            for n in range(indented):
+                buff.setIndentLevel(-1, relative=True)
+                buff.writeIndentedLines("}\n")
 
     def writeRoutineEndCode(self, buff):
         if self.params['stopWithRoutine']:
@@ -305,3 +332,43 @@ class SoundComponent(BaseDeviceComponent):
                 "%(name)s.stop();  // ensure sound has stopped at end of Routine\n"
             )
             buff.writeIndentedLines(code % self.params)
+
+    def writeParamUpdate(
+            self,
+            buff,
+            compName,
+            paramName,
+            val,
+            updateType,
+            params=None,
+            target="PsychoPy",
+    ):
+        """
+        Overload BaseComponent.writeParamUpdate to handle special case for SoundComponent
+        """
+        # when writing param updates for Sound.sound, needs to be `setValue` in JS
+        # (this is intended as a temporary patch - please delete when `setSound` in JS can accept
+        # the same range of values as in Py)
+        if target == 'PsychoJS' and paramName == "sound":
+            # get logging string
+            if updateType == 'set every frame' and target == 'PsychoJS':
+                loggingStr = ', false'
+            else:
+                loggingStr = ''
+            # write setValue code
+            code = (
+                f"{compName}.setValue({val}{loggingStr});\n"
+            )
+            buff.writeIndented(code)
+        else:
+            # do normal stuff for every other param
+            BaseDeviceComponent.writeParamUpdate(
+                self,
+                buff,
+                compName,
+                paramName,
+                val,
+                updateType,
+                params=params,
+                target=target,
+            )

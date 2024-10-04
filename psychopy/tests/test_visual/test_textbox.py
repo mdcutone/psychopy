@@ -3,8 +3,9 @@ from pathlib import Path
 import numpy as np
 
 from psychopy import layout
+from psychopy.alerts import addAlertHandler
 from psychopy.alerts._errorHandler import _BaseErrorHandler
-from psychopy.tests.test_visual.test_basevisual import _TestColorMixin, _TestUnitsMixin
+from psychopy.tests.test_visual.test_basevisual import _TestColorMixin, _TestUnitsMixin, _TestSerializationMixin
 from psychopy.tests.test_experiment.test_component_compile_python import _TestBoilerplateMixin
 from psychopy.visual import Window
 from psychopy.visual import TextBox2
@@ -17,10 +18,11 @@ from psychopy.tests import utils
 
 
 @pytest.mark.textbox
-class Test_textbox(_TestColorMixin, _TestUnitsMixin, _TestBoilerplateMixin):
+class Test_textbox(_TestColorMixin, _TestUnitsMixin, _TestBoilerplateMixin, _TestSerializationMixin):
     def setup_method(self):
         self.win = Window((128, 128), pos=(50, 50), monitor="testMonitor", allowGUI=False, autoLog=False)
         self.error = _BaseErrorHandler()
+        addAlertHandler(self.error)
         self.textbox = TextBox2(self.win,
                                 "A PsychoPy zealot knows a smidge of wx, but JavaScript is the question.",
                                 placeholder="Placeholder text",
@@ -101,6 +103,42 @@ class Test_textbox(_TestColorMixin, _TestUnitsMixin, _TestBoilerplateMixin):
                 filename = "textbox_{}_{}".format(self.textbox._lineBreaking, case['screenshot'])
                 #self.win.getMovieFrame(buffer='back').save(Path(utils.TESTS_DATA_PATH) / filename)
                 utils.compareScreenshot(Path(utils.TESTS_DATA_PATH) / filename, self.win, crit=20)
+
+    def test_ori(self):
+        # setup textbox
+        self.textbox.color = "black"
+        self.textbox.fillColor = "white"
+        self.textbox.units = "pix"
+        self.textbox.size = (100, 50)
+        self.textbox.pos = (0, 0)
+        self.textbox.letterHeight = 5
+        # define params to use
+        orientations = [
+            0, 120, 180, 240,
+        ]
+        anchors = [
+            "top left", "center", "bottom right",
+        ]
+        # try each combination
+        for ori in orientations:
+            for anchor in anchors:
+                # flip
+                self.win.flip()
+                # set params
+                self.textbox.ori = ori
+                self.textbox.anchor = anchor
+                self.textbox._layout()
+                # draw
+                self.textbox.draw()
+                # construct exemplar filename
+                exemplar = f"test_ori_{ori}_{anchor}.png"
+                # check/make exemplar
+                # self.win.getMovieFrame(buffer='back').save(
+                #     Path(utils.TESTS_DATA_PATH) / "Test_textbox" / exemplar
+                # )
+                utils.compareScreenshot(
+                    Path(utils.TESTS_DATA_PATH) / "Test_textbox" / exemplar, self.win, crit=20
+                )
 
     def test_colors(self):
         # Do base tests

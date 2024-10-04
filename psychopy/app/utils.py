@@ -448,7 +448,7 @@ class MarkdownCtrl(wx.Panel, handlers.ThemeMixin):
             Path to markdown file to edit via this control.
         style : wx.Style
             Style tags for this control. Accepts the following:
-            - wx.READONLY: Hides all button controls and shows only the rendered HTML
+            - wx.TE_READONLY: Hides all button controls and shows only the rendered HTML
             - wx.RIGHT: Arranges buttons vertically along the right hand side
             - wx.BOTTOM: Arranges buttons horizontally along the bottom
             - wx.BU_NOTEXT: Don't show any label on the buttons
@@ -511,7 +511,7 @@ class MarkdownCtrl(wx.Panel, handlers.ThemeMixin):
         if value is None and self.file is not None:
                 self.load()
         elif value is not None:
-            self.rawTextCtrl.SetValue(value)
+            self.setValue(value)
 
         # Set initial view
         self.showHTML()
@@ -1671,7 +1671,7 @@ def sanitize(inStr):
     """
     # Key-value pairs of patterns with what to replace them with
     patterns = {
-        "https\:\/\/oauth2\:[\d\w]{64}@gitlab\.pavlovia\.org\/.*\.git": "[[OAUTH key hidden]]" # Remove any oauth keys
+        r"https:\/\/oauth2:[\d\w]{64}@gitlab\.pavlovia\.org\/.*\.git": "[[OAUTH key hidden]]" # Remove any oauth keys
     }
     # Replace each pattern
     for pattern, repl in patterns.items():

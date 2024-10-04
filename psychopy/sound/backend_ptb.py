@@ -86,7 +86,7 @@ def getDevices(kind=None):
     kind can be None, 'input' or 'output'
     The dict keys are names, and items are dicts of properties
     """
-    if sys.platform=='win32':
+    if sys.platform == 'win32':
         deviceTypes = 13  # only WASAPI drivers need apply!
     else:
         deviceTypes = None
@@ -97,7 +97,7 @@ def getDevices(kind=None):
         allDevs = audio.get_devices(device_type=deviceTypes)
 
     # annoyingly query_devices is a DeviceList or a dict depending on number
-    if type(allDevs) == dict:
+    if isinstance(allDevs, dict):
         allDevs = [allDevs]
 
     for ii, dev in enumerate(allDevs):
@@ -127,6 +127,9 @@ class _StreamsDict(dict):
 
     use the instance `streams` rather than creating a new instance of this
     """
+    def __init__(self, index):
+        # store device index
+        self.index = index
 
     def getStream(self, sampleRate, channels, blockSize):
         """Gets a stream of exact match or returns a new one
@@ -180,17 +183,17 @@ class _StreamsDict(dict):
             raise SoundFormatError(
                 "Tried to create audio stream {} but {} already exists "
                 "and {} doesn't support multiple portaudio streams"
-                    .format(label, list(self.keys())[0], sys.platform)
+                .format(label, list(self.keys())[0], sys.platform)
             )
         else:
 
             # create new stream
             self[label] = _MasterStream(sampleRate, channels, blockSize,
-                                       device=defaultOutput)
+                                        device=self.index)
         return label, self[label]
 
 
-streams = _StreamsDict()
+devices = {}
 
 
 class _MasterStream(audio.Stream):
@@ -209,9 +212,9 @@ class _MasterStream(audio.Stream):
         self.duplex = duplex
         self.blockSize = blockSize
         self.label = getStreamLabel(sampleRate, channels, blockSize)
-        if type(device) == list and len(device):
+        if isinstance(device, list) and len(device):
             device = device[0]
-        if type(device)==str:  # we need to convert name to an ID or make None
+        if isinstance(device, str):  # we need to convert name to an ID or make None
             devs = getDevices('output')
             if device in devs:
                 deviceID = devs[device]['DeviceIndex']
@@ -226,16 +229,16 @@ class _MasterStream(audio.Stream):
         if not systemtools.isVM_CI():  # Github Actions VM does not have a sound device
             try:
                 audio.Stream.__init__(self, device_id=deviceID, mode=mode+8,
-                                    latency_class=audioLatencyClass,
-                                    freq=sampleRate, 
-                                    channels=channels,
-                                    )  # suggested_latency=suggestedLatency
-            except OSError as e:
+                                      latency_class=audioLatencyClass,
+                                      freq=sampleRate,
+                                      channels=channels,
+                                      )  # suggested_latency=suggestedLatency
+            except OSError as e:  # noqa: F841
                 audio.Stream.__init__(self, device_id=deviceID, mode=mode+8,
-                                    latency_class=audioLatencyClass,
-                                    # freq=sampleRate, 
-                                    channels=channels,
-                                    )
+                                      latency_class=audioLatencyClass,
+                                      # freq=sampleRate,
+                                      channels=channels,
+                                      )
                 self.sampleRate = self.status['SampleRate']
                 print("Failed to start PTB.audio with requested rate of "
                       "{} but succeeded with a default rate ({}). "
@@ -244,14 +247,14 @@ class _MasterStream(audio.Stream):
             except TypeError as e:
                 print("device={}, mode={}, latency_class={}, freq={}, channels={}"
                       .format(device, mode+8, audioLatencyClass, sampleRate, channels))
-                raise(e)
+                raise e
             except Exception as e:
                 audio.Stream.__init__(self, mode=mode+8,
-                                    latency_class=audioLatencyClass,
-                                    freq=sampleRate, 
-                                    channels=channels,
-                                    )
-                
+                                      latency_class=audioLatencyClass,
+                                      freq=sampleRate,
+                                      channels=channels,
+                                      )
+
                 if "there isn't any audio output device" in str(e):
                     print("Failed to load audio device:\n"
                           "    '{}'\n"
@@ -329,7 +332,7 @@ class SoundPTB(_SoundBase):
         self.sndArr = None
         self.hamming = hamming
         self._hammingWindow = None  # will be created during setSound
-        self.win=syncToWin
+        self.win = syncToWin
         # setSound (determines sound type)
         self.setSound(value, secs=self.secs, octave=self.octave,
                       hamming=self.hamming)
@@ -340,17 +343,19 @@ class SoundPTB(_SoundBase):
     @property
     def isPlaying(self):
         """`True` if the audio playback is ongoing."""
+        # This will update _isPlaying if sound has stopped by _EOS()
+        _ = self._checkPlaybackFinished()
         return self._isPlaying
 
     @property
     def isFinished(self):
         """`True` if the audio playback has completed."""
-        return self._isFinished
+        return self._checkPlaybackFinished()
 
     def _getDefaultSampleRate(self):
         """Check what streams are open and use one of these"""
-        if len(streams):
-            return list(streams.values())[0].sampleRate
+        if len(devices.get(self.speaker.index, [])):
+            return list(devices[self.speaker.index].values())[0].sampleRate
         else:
             return 48000  # seems most widely supported
 
@@ -359,27 +364,6 @@ class SoundPTB(_SoundBase):
         if not self.track:
             return None
         return self.track.status
-
-    @property
-    def status(self):
-        """status gives a simple value from psychopy.constants to indicate
-        NOT_STARTED, STARTED, FINISHED, PAUSED
-
-        Psychtoolbox sounds also have a statusDetailed property with further info"""
-
-        if self.__dict__['status']==STARTED:
-            # check portaudio to see if still playing
-            pa_status = self.statusDetailed
-            if not pa_status['Active'] and pa_status['State']==0:
-                # we were playing and now not so presumably FINISHED
-                self._EOS()
-
-        return self.__dict__['status']
-
-
-    @status.setter
-    def status(self, newStatus):
-        self.__dict__['status'] = newStatus
 
     @property
     def volume(self):
@@ -402,10 +386,15 @@ class SoundPTB(_SoundBase):
 
     @stereo.setter
     def stereo(self, val):
+        # if auto, get from speaker
+        if val == -1:
+            val = self.speaker.channels > 1
+        # store value
         self.__dict__['stereo'] = val
-        if val == True:
+        # convert to n channels
+        if val is True:
             self.__dict__['channels'] = 2
-        elif val == False:
+        elif val is False:
             self.__dict__['channels'] = 1
         elif val == -1:
             self.__dict__['channels'] = -1
@@ -479,7 +468,6 @@ class SoundPTB(_SoundBase):
         self._channelCheck(
             self.sndArr)  # Check for fewer channels in stream vs data array
 
-
     def _setSndFromArray(self, thisArray):
 
         self.sndArr = np.asarray(thisArray).astype('float32')
@@ -513,6 +501,13 @@ class SoundPTB(_SoundBase):
         self.seek(0)
         self.sourceType = "array"
 
+        # catch when array is empty
+        if not len(self.sndArr):
+            logging.warning(
+                "Received a blank array for sound, playing nothing instead."
+            )
+            self.sndArr = np.zeros(shape=(self.blockSize, self.channels))
+
         if not self.track:  # do we have one already?
             self.track = audio.Slave(self.stream.handle, data=self.sndArr,
                                      volume=self.volume)
@@ -529,12 +524,20 @@ class SoundPTB(_SoundBase):
                 "experiment settings**".format(self.channels, array.shape[1]))
             logging.error(msg)
             raise ValueError(msg)
-        
+
     def _checkPlaybackFinished(self):
         """Checks whether playback has finished by looking up the status.
         """
+        # get detailed status from backend
         pa_status = self.statusDetailed
-        self._isFinished = not pa_status['Active'] and pa_status['State'] == 0
+        # was the sound already finished?
+        wasFinished = self._isFinished
+        # is it finished now?
+        isFinished = self._isFinished = not pa_status['Active'] and pa_status['State'] == 0
+        # if it wasn't finished but now is, do end of stream behaviour
+        if isFinished and not wasFinished:
+            self._EOS()
+
         return self._isFinished
 
     def play(self, loops=None, when=None, log=True):
@@ -546,7 +549,7 @@ class SoundPTB(_SoundBase):
         """
         if self._checkPlaybackFinished():
             self.stop(reset=True)
-        
+
         if loops is not None and self.loops != loops:
             self.setLoops(loops)
 
@@ -565,13 +568,13 @@ class SoundPTB(_SoundBase):
         self._isFinished = False
         # time.sleep(0.)
         if log and self.autoLog:
-            logging.exp(u"Sound %s started" % (self.name), obj=self, t=logTime)
+            logging.exp(u"Playing sound %s on speaker %s" % (self.name, self.speaker.deviceName), obj=self, t=logTime)
 
     def pause(self, log=True):
         """Stops the sound without reset, so that play will continue from here if needed
         """
-        if self.isPlaying:
-            self.stop(reset=False)
+        if self._isPlaying:
+            self.stop(reset=False, log=False)
             if log and self.autoLog:
                 logging.exp(u"Sound %s paused" % (self.name), obj=self)
 
@@ -579,7 +582,7 @@ class SoundPTB(_SoundBase):
         """Stop the sound and return to beginning
         """
         # this uses FINISHED for some reason, all others use STOPPED
-        if not self.isPlaying:
+        if not self._isPlaying:
             return
 
         self.track.stop()
@@ -601,11 +604,12 @@ class SoundPTB(_SoundBase):
         """Function called on End Of Stream
         """
         self._loopsFinished += 1
-        if self.loops == 0:
+        if self._loopsFinished >= self._loopsRequested:
+            # if we have finished all requested loops
             self.stop(reset=reset, log=False)
-            self._isFinished = True
-        elif 0 < self.loops <= self._loopsFinished:
-            self.stop(reset=reset, log=False)
+        else:
+            # reset _isFinished back to False
+            self._isFinished = False
 
         if log and self.autoLog:
             logging.exp(u"Sound %s reached end of file" % self.name, obj=self)
@@ -615,17 +619,26 @@ class SoundPTB(_SoundBase):
         """Read-only property returns the stream on which the sound
         will be played
         """
+        # if no stream yet, make one
         if not self.streamLabel:
+            # if no streams for current device yet, make a StreamsDict for it
+            if self.speaker.index not in devices:
+                devices[self.speaker.index] = _StreamsDict(index=self.speaker.index)
+            # make stream
             try:
-                label, s = streams.getStream(sampleRate=self.sampleRate,
-                                             channels=self.channels,
-                                             blockSize=self.blockSize)
+                label, s = devices[self.speaker.index].getStream(
+                    sampleRate=self.sampleRate,
+                    channels=self.channels,
+                    blockSize=self.blockSize
+                )
             except SoundFormatError as err:
                 # try to use something similar (e.g. mono->stereo)
                 # then check we have an appropriate stream open
-                altern = streams._getSimilar(sampleRate=self.sampleRate,
-                                             channels=-1,
-                                             blockSize=-1)
+                altern = devices[self.speaker.index]._getSimilar(
+                    sampleRate=self.sampleRate,
+                    channels=-1,
+                    blockSize=-1
+                )
                 if altern is None:
                     raise SoundFormatError(err)
                 else:  # safe to extract data
@@ -636,7 +649,7 @@ class SoundPTB(_SoundBase):
                 self.blockSize = s.blockSize
             self.streamLabel = label
 
-        return streams[self.streamLabel]
+        return devices[self.speaker.index][self.streamLabel]
 
     def __del__(self):
         if self.track:

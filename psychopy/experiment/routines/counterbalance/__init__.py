@@ -43,7 +43,7 @@ class CounterbalanceRoutine(BaseStandaloneRoutine):
         self.params['specMode'] = Param(
             specMode, valType="str", inputType="choice", categ="Basic",
             allowedVals=["uniform", "file"],
-            allowedLabels=[_translate("Num. groups"), _translate("Conditions file")],
+            allowedLabels=[_translate("Num. groups"), _translate("Conditions file (local only)")],
             label=_translate("Groups from..."),
             hint=_translate(
                 "Specify groups using an Excel file (for fine tuned control), specify as a variable name, or specify a "
@@ -91,7 +91,11 @@ class CounterbalanceRoutine(BaseStandaloneRoutine):
             hint=_translate(
                 "Name of a file specifying the parameters for each group (.csv, .xlsx, or .pkl). Browse to select "
                 "a file. Right-click to preview file contents, or create a new file."
-            ))
+            ),
+            ctrlParams={
+                'template': Path(__file__).parent / "counterbalanceItems.xltx"
+            }
+        )
 
         self.params['conditionsVariable'] = Param(
             conditionsVariable, valType='code', inputType="single", categ="Basic",
@@ -304,7 +308,7 @@ class CounterbalanceRoutine(BaseStandaloneRoutine):
 
     def writeExperimentEndCodeJS(self, buff):
         code = (
-            "if (%(name)s) {\n"
+            "if (%(name)s && !%(name)s.finished) {\n"
             "  await psychoJS.shelf.counterbalanceConfirm(\n"
             "    ['%(name)s', '@designer', '@experiment'],\n"
             "    %(name)s.participantToken,\n"

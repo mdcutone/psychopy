@@ -9,6 +9,7 @@ import pandas as pd
 
 from psychopy import constants, clock
 from psychopy import logging
+from psychopy.data.trial import TrialHandler2
 from psychopy.tools.filetools import (openOutputFile, genDelimiter,
                                       genFilenameFromDelimiter)
 from psychopy.localization import _translate
@@ -107,6 +108,8 @@ class ExperimentHandler(_ComparisonMixin):
         self.autoLog = autoLog
         self.appendFiles = appendFiles
         self.status = constants.NOT_STARTED
+        # dict of filenames to collision method to be used next time it's saved
+        self._nextSaveCollision = {}
 
         if dataFileName in ['', None]:
             logging.warning('ExperimentHandler created with no dataFileName'
@@ -456,6 +459,112 @@ class ExperimentHandler(_ComparisonMixin):
         # set own status
         self.status = constants.STOPPED
 
+    def skipTrials(self, n=1):
+        """
+        Skip ahead n trials - the trials inbetween will be marked as "skipped". If you try to
+        skip past the last trial, will log a warning and skip *to* the last trial.
+
+        Parameters
+        ----------
+        n : int
+            Number of trials to skip ahead
+        """
+        # return if there isn't a TrialHandler2 active
+        if not isinstance(self.currentLoop, TrialHandler2):
+            return
+        # skip trials in current loop
+        return self.currentLoop.skipTrials(n)
+
+    def rewindTrials(self, n=1):
+        """
+        Skip ahead n trials - the trials inbetween will be marked as "skipped". If you try to
+        skip past the last trial, will log a warning and skip *to* the last trial.
+
+        Parameters
+        ----------
+        n : int
+            Number of trials to skip ahead
+        """
+        # return if there isn't a TrialHandler2 active
+        if not isinstance(self.currentLoop, TrialHandler2):
+            return
+        # rewind trials in current loop
+        return self.currentLoop.rewindTrials(n)
+    
+    def getAllTrials(self):
+        """
+        Returns all trials (elapsed, current and upcoming) with an index indicating which trial is 
+        the current trial.
+
+        Returns
+        -------
+        list[Trial]
+            List of trials, in order (oldest to newest)
+        int
+            Index of the current trial in this list
+        """
+        # return None if there isn't a TrialHandler2 active
+        if not isinstance(self.currentLoop, TrialHandler2):
+            return [None], 0
+        # get all trials from current loop
+        return self.currentLoop.getAllTrials()
+
+    def getCurrentTrial(self):
+        """
+        Returns the current trial (`.thisTrial`)
+
+        Returns
+        -------
+        Trial
+            The current trial
+        """
+        # return None if there isn't a TrialHandler2 active
+        if not isinstance(self.currentLoop, TrialHandler2):
+            return None
+        
+        return self.currentLoop.getCurrentTrial()
+    
+    def getFutureTrial(self, n=1):
+        """
+        Returns the condition for n trials into the future, without
+        advancing the trials. Returns 'None' if attempting to go beyond
+        the last trial in the current loop, or if there is no current loop.
+        """
+        # return None if there isn't a TrialHandler2 active
+        if not isinstance(self.currentLoop, TrialHandler2):
+            return None
+        # get future trial from current loop
+        return self.currentLoop.getFutureTrial(n)
+
+    def getFutureTrials(self, n=1, start=0):
+        """
+        Returns Trial objects for a given range in the future. Will start looking at `start` trials 
+        in the future and will return n trials from then, so e.g. to get all trials from 2 in the 
+        future to 5 in the future you would use `start=2` and `n=3`.
+
+        Parameters
+        ----------
+        n : int, optional
+            How many trials into the future to look, by default 1
+        start : int, optional
+            How many trials into the future to start looking at, by default 0
+        
+        Returns
+        -------
+        list[Trial or None]
+            List of Trial objects n long. Any trials beyond the last trial are None.
+        """
+        # blank list to store trials in
+        trials = []
+        # iterate through n trials
+        for i in range(n):
+            # add each to the list
+            trials.append(
+                self.getFutureTrial(start + i)
+            )
+        
+        return trials
+
     def nextEntry(self):
         """Calling nextEntry indicates to the ExperimentHandler that the
         current trial has ended and so further addData() calls correspond
@@ -464,15 +573,31 @@ class ExperimentHandler(_ComparisonMixin):
         this = self.thisEntry
         # fetch data from each (potentially-nested) loop
         for thisLoop in self.loopsUnfinished:
-            names, vals = self._getLoopInfo(thisLoop)
-            for n, name in enumerate(names):
-                this[name] = vals[n]
+            self.updateEntryFromLoop(thisLoop)
         # add the extraInfo dict to the data
         if type(self.extraInfo) == dict:
             this.update(self.extraInfo)
         self.entries.append(this)
         # add new entry with its
         self.thisEntry = {}
+
+    def updateEntryFromLoop(self, thisLoop):
+        """
+        Add all values from the given loop to the current entry.
+
+        Parameters
+        ----------
+        thisLoop : BaseLoopHandler
+            Loop to get fields from
+        """
+        # for each name and value in the current trial...
+        names, vals = self._getLoopInfo(thisLoop)
+        for n, name in enumerate(names):
+            # add/update value
+            self.thisEntry[name] = vals[n]
+            # make sure name is in data names
+            if name not in self.dataNames:
+                self.dataNames.append(name)
 
     def getAllEntries(self):
         """Fetches a copy of all the entries including a final (orphan) entry
@@ -487,13 +612,55 @@ class ExperimentHandler(_ComparisonMixin):
             entries.append(self.thisEntry)
         return entries
 
+    def queueNextCollision(self, fileCollisionMethod, fileName=None):
+        """
+        Tell this ExperimentHandler than, next time the named file is saved, it should handle 
+        collisions a certain way. This is useful if you want to save multiple times within an 
+        experiment.
+
+        Parameters
+        ----------
+        fileCollisionMethod : str
+            File collision method to use, see `saveAsWideText` or `saveAsPickle` for 
+            details.
+        fileName : str
+            Filename to queue collision on, if None (default) will use this ExperimentHandler's 
+            `dataFileName`
+        """
+        # handle default
+        if fileName is None:
+            fileName = self.dataFileName
+        # queue collision
+        self._nextSaveCollision[fileName] = fileCollisionMethod
+    
+    def save(self):
+        """
+        Work out from own settings how to save, then use the appropriate method (saveAsWideText, 
+        saveAsPickle, etc.)
+        """
+        savedName = None
+        if self.dataFileName not in ['', None]:
+            if self.autoLog:
+                msg = 'Saving data for %s ExperimentHandler' % self.name
+                logging.debug(msg)
+            if self.savePickle:
+                savedName = self.saveAsPickle(self.dataFileName)
+            if self.saveWideText:
+                savedName = self.saveAsWideText(self.dataFileName + '.csv')
+        else:
+            logging.warn(
+                "ExperimentHandler.save was called on an ExperimentHandler with no dataFileName set."
+            )
+        
+        return savedName
+
     def saveAsWideText(self,
                        fileName,
                        delim='auto',
                        matrixOnly=False,
                        appendFile=None,
                        encoding='utf-8-sig',
-                       fileCollisionMethod='rename',
+                       fileCollisionMethod=None,
                        sortColumns=None):
         """Saves a long, wide-format text file, with one line representing
         the attributes and data for a single trial. Suitable for analysis
@@ -509,38 +676,43 @@ class ExperimentHandler(_ComparisonMixin):
         which can be handy if you want to append data to an existing file
         of the same format.
 
-        :Parameters:
+        Parameters
+        ----------
 
-            fileName:
-                if extension is not specified, '.csv' will be appended if
-                the delimiter is ',', else '.tsv' will be appended.
-                Can include path info.
+        fileName:
+            if extension is not specified, '.csv' will be appended if
+            the delimiter is ',', else '.tsv' will be appended.
+            Can include path info.
 
-            delim:
-                allows the user to use a delimiter other than the default
-                tab ("," is popular with file extension ".csv")
+        delim:
+            allows the user to use a delimiter other than the default
+            tab ("," is popular with file extension ".csv")
 
-            matrixOnly:
-                outputs the data with no header row.
+        matrixOnly:
+            outputs the data with no header row.
 
-            appendFile:
-                will add this output to the end of the specified file if
-                it already exists.
+        appendFile:
+            will add this output to the end of the specified file if
+            it already exists.
 
-            encoding:
-                The encoding to use when saving a the file.
-                Defaults to `utf-8-sig`.
+        encoding:
+            The encoding to use when saving a the file.
+            Defaults to `utf-8-sig`.
 
-            fileCollisionMethod:
-                Collision method passed to
-                :func:`~psychopy.tools.fileerrortools.handleFileCollision`
+        fileCollisionMethod:
+            Collision method passed to
+            :func:`~psychopy.tools.fileerrortools.handleFileCollision`
 
-            sortColumns : str or bool
-                How (if at all) to sort columns in the data file. Can be:
-                - "alphabetical", "alpha", "a" or True: Sort alphabetically by header name
-                - "priority", "pr" or "p": Sort according to priority
-                - other: Do not sort, columns remain in order they were added
-
+        sortColumns : str or bool
+            How (if at all) to sort columns in the data file. Can be:
+            - "alphabetical", "alpha", "a" or True: Sort alphabetically by header name
+            - "priority", "pr" or "p": Sort according to priority
+            - other: Do not sort, columns remain in order they were added
+        
+        Returns
+        -------
+        str
+            Final filename (including _1, _2, etc. and file extension) which data was saved as
         """
         # set default delimiter if none given
         delimOptions = {
@@ -555,6 +727,11 @@ class ExperimentHandler(_ComparisonMixin):
 
         if appendFile is None:
             appendFile = self.appendFiles
+        # check for queued collision methods if using default, fallback to rename
+        if fileCollisionMethod is None and fileName in self._nextSaveCollision:
+            fileCollisionMethod = self._nextSaveCollision.pop(fileName)
+        elif fileCollisionMethod is None:
+            fileCollisionMethod = "rename"
 
         # create the file or send to stdout
         fileName = genFilenameFromDelimiter(fileName, delim)
@@ -563,7 +740,9 @@ class ExperimentHandler(_ComparisonMixin):
                            encoding=encoding)
 
         names = self._getAllParamNames()
-        names.extend(self.dataNames)
+        for name in self.dataNames:
+            if name not in names:
+                names.append(name)
         # names from the extraInfo dictionary
         names.extend(self._getExtraInfo()[0])
         if len(names) < 1:
@@ -605,15 +784,23 @@ class ExperimentHandler(_ComparisonMixin):
             f.close()
         logging.info('saved data to %r' % f.name)
 
-    def saveAsPickle(self, fileName, fileCollisionMethod='rename'):
+        return fileName
+
+    def saveAsPickle(self, fileName, fileCollisionMethod=None):
         """Basically just saves a copy of self (with data) to a pickle file.
 
         This can be reloaded if necessary and further analyses carried out.
 
-        :Parameters:
+        Parameters
+        ----------
 
-            fileCollisionMethod: Collision method passed to
-            :func:`~psychopy.tools.fileerrortools.handleFileCollision`
+        fileCollisionMethod : str
+            Collision method passed to :func:`~psychopy.tools.fileerrortools.handleFileCollision`
+        
+        Returns
+        -------
+        str
+            Final filename (including _1, _2, etc. and file extension) which data was saved as
         """
         # Store the current state of self.savePickle and self.saveWideText
         # for later use:
@@ -628,6 +815,13 @@ class ExperimentHandler(_ComparisonMixin):
         # https://groups.google.com/d/msg/psychopy-dev/Z4m_UX88q8U/UGuh1eeyjMEJ
         savePickle = self.savePickle
         saveWideText = self.saveWideText
+
+        # check for queued collision methods if using default, fallback to rename
+        if fileCollisionMethod is None:
+            if fileCollisionMethod is None and fileName in self._nextSaveCollision:
+                fileCollisionMethod = self._nextSaveCollision.pop(fileName)
+            elif fileCollisionMethod is None:
+                fileCollisionMethod = "rename"
 
         self.savePickle = False
         self.saveWideText = False
@@ -649,6 +843,8 @@ class ExperimentHandler(_ComparisonMixin):
         self.entries = origEntries  # revert list of completed entries post-save
         self.savePickle = savePickle
         self.saveWideText = saveWideText
+
+        return fileName
 
     def getJSON(self, priorityThreshold=constants.priority.EXCLUDE+1):
         """
@@ -676,6 +872,7 @@ class ExperimentHandler(_ComparisonMixin):
         # put in context
         context = {
             'type': "trials_data",
+            'thisTrial': self.thisEntry,
             'trials': trials.to_dict(orient="records"),
             'priority': self.columnPriority,
             'threshold': priorityThreshold,
@@ -684,14 +881,7 @@ class ExperimentHandler(_ComparisonMixin):
         return json.dumps(context, indent=True, allow_nan=False, default=str)
         
     def close(self):
-        if self.dataFileName not in ['', None]:
-            if self.autoLog:
-                msg = 'Saving data for %s ExperimentHandler' % self.name
-                logging.debug(msg)
-            if self.savePickle:
-                self.saveAsPickle(self.dataFileName)
-            if self.saveWideText:
-                self.saveAsWideText(self.dataFileName + '.csv')
+        self.save()
         self.abort()
         self.autoLog = False
 

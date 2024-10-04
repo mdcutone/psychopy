@@ -1,3 +1,6 @@
+from pathlib import Path
+import shutil
+
 import wx
 from wx.lib import scrolledpanel
 import webbrowser
@@ -218,7 +221,7 @@ class PluginInfo:
             return
 
         wx.CallAfter(
-            self.parent.GetTopLevelParent().uninstallPackage, self.pipname)
+            self.parent.GetTopLevelParent().uninstallPlugin, self)
 
     @property
     def installed(self):
@@ -275,6 +278,12 @@ class PluginManagerPanel(wx.Panel, handlers.ThemeMixin):
         self.Layout()
         self.splitter.SetSashPosition(1, True)
         self.theme = theme.app
+    
+    def updateInfo(self):
+        # refresh all list items
+        self.pluginList.updateInfo()
+        # set current plugin again to refresh view
+        self.pluginViewer.info = self.pluginViewer.info
 
     def _applyAppTheme(self):
         # Set colors
@@ -316,9 +325,21 @@ class PluginBrowserList(scrolledpanel.ScrolledPanel, handlers.ThemeMixin):
             # self.activeBtn.Bind(wx.EVT_BUTTON, self.onToggleActivate)
             # self.btnSizer.Add(self.activeBtn, border=3, flag=wx.ALL | wx.ALIGN_RIGHT)
             # Add install button
-            self.installBtn = wx.Button(self)
+            self.installBtn = wx.Button(self, label=_translate("Install"))
+            self.installBtn.SetBitmap(
+                icons.ButtonIcon("download", 16).bitmap
+            )
+            self.installBtn.SetBitmapMargins(6, 3)
             self.installBtn.Bind(wx.EVT_BUTTON, self.onInstall)
             self.btnSizer.Add(self.installBtn, border=3, flag=wx.ALL | wx.ALIGN_RIGHT)
+            # # add uninstall button
+            # self.uninstallBtn = wx.Button(self, label=_translate("Uninstall"))
+            # self.uninstallBtn.SetBitmap(
+            #     icons.ButtonIcon("delete", 16).bitmap
+            # )
+            # self.uninstallBtn.SetBitmapMargins(6, 3)
+            # self.uninstallBtn.Bind(wx.EVT_BUTTON, self.onUninstall)
+            # self.btnSizer.Add(self.uninstallBtn, border=3, flag=wx.ALL | wx.EXPAND)
 
             # Map to onclick function
             self.Bind(wx.EVT_LEFT_DOWN, self.onSelect)
@@ -327,10 +348,8 @@ class PluginBrowserList(scrolledpanel.ScrolledPanel, handlers.ThemeMixin):
             # Bind navigation
             self.Bind(wx.EVT_NAVIGATION_KEY, self.onNavigation)
 
-            # Handle version mismatch
-            self.installBtn.Enable(__version__ in self.info.version)
-
             self._applyAppTheme()
+            self.markInstalled(self.info.installed)
 
         @property
         def viewer(self):
@@ -338,6 +357,10 @@ class PluginBrowserList(scrolledpanel.ScrolledPanel, handlers.ThemeMixin):
             Return parent's linked viewer when asked for viewer
             """
             return self.parent.viewer
+
+        def updateInfo(self):
+            # update install state
+            self.markInstalled(self.info.installed)
 
         def _applyAppTheme(self):
             # Set label fonts
@@ -427,14 +450,40 @@ class PluginBrowserList(scrolledpanel.ScrolledPanel, handlers.ThemeMixin):
                 active=active
             )
 
-        def onInstall(self, evt=None):
-            # Mark as pending
+        def _doInstall(self):
+            """Routine to run the installation of a package after the `onInstall`
+            event is processed.
+            """
+            # mark as pending
             self.markInstalled(None)
-            # Do install
+            # install
             self.info.install()
-            # Mark according to install success
+            # mark according to install success
+            self.markInstalled(self.info.installed)
+        
+        def _doUninstall(self):
+            # mark as pending
+            self.markInstalled(None)
+            # uninstall
+            self.info.uninstall()
+            # mark according to uninstall success
             self.markInstalled(self.info.installed)
 
+        def onInstall(self, evt=None):
+            """Event called when the install button is clicked.
+            """
+            wx.CallAfter(self._doInstall)  # call after processing button events
+            if evt is not None and hasattr(evt, 'Skip'):
+                evt.Skip()
+        
+        def onUninstall(self, evt=None):
+            """
+            Event called when the uninstall button is clicked.
+            """
+            wx.CallAfter(self._doUninstall)  # call after processing button events
+            if evt is not None and hasattr(evt, 'Skip'):
+                evt.Skip()
+        
         def onToggleActivate(self, evt=None):
             if self.info.active:
                 self.onDeactivate(evt=evt)
@@ -479,6 +528,24 @@ class PluginBrowserList(scrolledpanel.ScrolledPanel, handlers.ThemeMixin):
         self.sizer.Add(self.badItemLbl, border=9, flag=wx.ALL | wx.EXPAND)
         self.badItemSizer = wx.BoxSizer(wx.VERTICAL)
         self.sizer.Add(self.badItemSizer, border=3, flag=wx.ALL | wx.EXPAND)
+        # ctrl to display when plugins can't be retrieved
+        self.errorCtrl = utils.MarkdownCtrl(
+            self, value=_translate(
+                "Could not retrieve plugins. Try restarting the PsychoPy app and make sure you "
+                "are connected to the internet."
+            ),
+            style=wx.TE_READONLY
+        )
+        self.sizer.Add(self.errorCtrl, proportion=1, border=3, flag=wx.ALL | wx.EXPAND)
+        self.errorCtrl.Hide()
+        # add button to uninstall all
+        self.uninstallAllBtn = wx.Button(self, label=_translate("Uninstall all plugins"))
+        self.uninstallAllBtn.SetBitmap(
+            icons.ButtonIcon("delete", 16).bitmap
+        )
+        self.uninstallAllBtn.SetBitmapMargins(6, 3)
+        self.uninstallAllBtn.Bind(wx.EVT_BUTTON, self.onUninstallAll)
+        self.sizer.Add(self.uninstallAllBtn, border=12, flag=wx.ALL | wx.CENTER)
 
         # Bind deselect
         self.Bind(wx.EVT_LEFT_DOWN, self.onDeselect)
@@ -492,19 +559,25 @@ class PluginBrowserList(scrolledpanel.ScrolledPanel, handlers.ThemeMixin):
             self.initState[item.info.pipname] = {"installed": item.info.installed, "active": item.info.active}
 
     def populate(self):
-        # Get all plugin details
+        # get all plugin details
         items = getAllPluginDetails()
-        # Start off assuming no headings
+        # start off assuming no headings
         self.badItemLbl.Hide()
-        # Put installed packages at top of list
+        # put installed packages at top of list
         items.sort(key=lambda obj: obj.installed, reverse=True)
         for item in items:
             item.setParent(self)
             self.appendItem(item)
-
-        # Layout
+        # if we got no items, display error message
+        if not len(items):
+            self.errorCtrl.Show()
+        # layout
         self.Layout()
         self.SetupScrolling()
+    
+    def updateInfo(self):
+        for item in self.items:
+            item.updateInfo()
 
     def search(self, evt=None):
         searchTerm = self.searchCtrl.GetValue().strip()
@@ -557,6 +630,31 @@ class PluginBrowserList(scrolledpanel.ScrolledPanel, handlers.ThemeMixin):
     def onClick(self, evt=None):
         self.SetFocusIgnoringChildren()
         self.viewer.info = None
+    
+    def onUninstallAll(self, evt=None):
+        """
+        Called when the "Uninstall all" button is clicked
+        """
+        # warn user that they'll delete the packages folder
+        dlg = wx.MessageDialog(
+            self,
+            message=_translate("This will uninstall all plugins an additional packages you have installed, are you sure you want to continue?"),
+            style=wx.ICON_WARNING | wx.YES | wx.NO
+        )
+        if dlg.ShowModal() != wx.ID_YES:
+            # cancel if they didn't explicitly say yes
+            return
+        # delete the packages folder
+        shutil.rmtree(prefs.paths['packages'])
+        # print success
+        dlg = wx.MessageDialog(
+            self,
+            message=_translate("All plugins and additional packages have been uninstalled. You will need to restart PsychoPy for this to take effect."),
+            style=wx.ICON_INFORMATION | wx.OK
+        )
+        dlg.ShowModal()
+        # close dialog
+        self.GetTopLevelParent().Close()
 
     def setSelection(self, item):
         """
@@ -658,14 +756,22 @@ class PluginDetailsPanel(wx.Panel, handlers.ThemeMixin):
         # Buttons
         self.buttonSizer = wx.BoxSizer(wx.HORIZONTAL)
         self.titleSizer.Add(self.buttonSizer, flag=wx.EXPAND)
-        # Install btn
-        self.installBtn = wx.Button(self)
+        # install btn
+        self.installBtn = wx.Button(self, label=_translate("Install"))
+        self.installBtn.SetBitmap(
+            icons.ButtonIcon("download", 16).bitmap
+        )
+        self.installBtn.SetBitmapMargins(6, 3)
         self.installBtn.Bind(wx.EVT_BUTTON, self.onInstall)
         self.buttonSizer.Add(self.installBtn, border=3, flag=wx.ALL | wx.EXPAND)
-        # Active btn
-        # self.activeBtn = wx.Button(self)
-        # self.activeBtn.Bind(wx.EVT_BUTTON, self.onToggleActivate)
-        # self.buttonSizer.Add(self.activeBtn, border=3, flag=wx.ALL | wx.EXPAND)
+        # uninstall btn
+        self.uninstallBtn = wx.Button(self, label=_translate("Uninstall"))
+        self.uninstallBtn.SetBitmap(
+            icons.ButtonIcon("delete", 16).bitmap
+        )
+        self.uninstallBtn.SetBitmapMargins(6, 3)
+        self.uninstallBtn.Bind(wx.EVT_BUTTON, self.onUninstall)
+        self.buttonSizer.Add(self.uninstallBtn, border=3, flag=wx.ALL | wx.EXPAND)
         # Homepage btn
         self.homepageBtn = wx.Button(self, label=_translate("Homepage"))
         self.homepageBtn.Bind(wx.EVT_BUTTON, self.onHomepage)
@@ -697,7 +803,7 @@ class PluginDetailsPanel(wx.Panel, handlers.ThemeMixin):
         # Add placeholder for when there's no plugin selected
         self.placeholder = utils.MarkdownCtrl(
             self, value=_translate("Select a plugin to view details."),
-            style=wx.TE_MULTILINE | wx.BORDER_NONE | wx.TE_NO_VSCROLL
+            style=wx.TE_READONLY
         )
         self.border.Add(
             self.placeholder,
@@ -765,11 +871,19 @@ class PluginDetailsPanel(wx.Panel, handlers.ThemeMixin):
         """Routine to run the installation of a package after the `onInstall`
         event is processed.
         """
-        # Mark as pending
+        # mark as pending
         self.markInstalled(None)
-        # Do install
+        # install
         self.info.install()
-        # Mark according to install success
+        # mark according to install success
+        self.markInstalled(self.info.installed)
+    
+    def _doUninstall(self):
+        # mark as pending
+        self.markInstalled(None)
+        # uninstall
+        self.info.uninstall()
+        # mark according to uninstall success
         self.markInstalled(self.info.installed)
 
     def onInstall(self, evt=None):
@@ -778,7 +892,15 @@ class PluginDetailsPanel(wx.Panel, handlers.ThemeMixin):
         wx.CallAfter(self._doInstall)  # call after processing button events
         if evt is not None and hasattr(evt, 'Skip'):
             evt.Skip()
-
+    
+    def onUninstall(self, evt=None):
+        """
+        Event called when the uninstall button is clicked.
+        """
+        wx.CallAfter(self._doUninstall)  # call after processing button events
+        if evt is not None and hasattr(evt, 'Skip'):
+            evt.Skip()
+    
     def _doActivate(self, state=True):
         """Activate a plugin or package after the `onActivate` event.
 
@@ -840,7 +962,6 @@ class PluginDetailsPanel(wx.Panel, handlers.ThemeMixin):
         self.sizer.ShowItems(value is not None)
         # Show/hide placeholder according to None
         self.placeholder.Show(value is None)
-        self.placeholder.editBtn.Hide()
         # Handle None
         if value is None:
             value = PluginInfo(
@@ -1018,69 +1139,39 @@ def markInstalled(pluginItem, pluginPanel, installed=True):
     installed : bool or None
         True if installed, False if not installed, None if pending/unclear
     """
-    def _setAllBitmaps(btn, bmp):
-        """
-        Set all bitmaps (enabled, disabled, focus, unfocus, etc.) for a button
-        """
-        btn.SetBitmap(bmp)
-        btn.SetBitmapDisabled(bmp)
-        btn.SetBitmapPressed(bmp)
-        btn.SetBitmapCurrent(bmp)
-        btn.SetBitmapMargins(6, 3)
 
-    # Update plugin item
+    # update plugin item
     if pluginItem:
         if installed is None:
-            # If pending, show elipsis and refresh icon
-            pluginItem.installBtn.Show()
-            pluginItem.installBtn.SetLabel("...")
-            _setAllBitmaps(pluginItem.installBtn, icons.ButtonIcon("view-refresh", 16).bitmap)
-            # Hide active button while pending
-            # pluginItem.activeBtn.Hide()
-        elif installed:
-            # If installed, hide install button
+            # if pending, hide both buttons
             pluginItem.installBtn.Hide()
-            # Show active button when installed
-            # pluginItem.activeBtn.Show()
+        elif installed:
+            # if installed, hide install button
+            pluginItem.installBtn.Hide()
         else:
-            # If not installed, show "Install" and download icon
+            # if not installed, show "Install" and download icon
             pluginItem.installBtn.Show()
-            pluginItem.installBtn.SetLabel(_translate("Install"))
-            _setAllBitmaps(pluginItem.installBtn, icons.ButtonIcon("download", 16).bitmap)
-            # Hide active button when not installed
-            # pluginItem.activeBtn.Hide()
-        # Refresh buttons
+        # refresh buttons
         pluginItem.Update()
         pluginItem.Layout()
 
-    # Update panel (if applicable)
+    # update panel (if applicable)
     if pluginPanel and pluginItem and pluginPanel.info == pluginItem.info:
         if installed is None:
-            # If pending, show elipsis and refresh icon
-            pluginPanel.installBtn.Show()
-            pluginPanel.installBtn.Enable(__version__ in pluginItem.info.version)
-            pluginPanel.installBtn.SetLabel("...")
-            _setAllBitmaps(pluginPanel.installBtn, icons.ButtonIcon("view-refresh", 16).bitmap)
-            # Hide active button while pending
-            # pluginPanel.activeBtn.Hide()
+            # if pending, show elipsis and refresh icon
+            pluginPanel.installBtn.Hide()
+            pluginPanel.uninstallBtn.Hide()
         elif installed:
-            # If installed, show as installed with tick
-            pluginPanel.installBtn.Show()
-            pluginPanel.installBtn.Disable()
-            pluginPanel.installBtn.SetLabelText(_translate("Installed"))
-            _setAllBitmaps(pluginPanel.installBtn, icons.ButtonIcon("greytick", 16).bitmap)
-            # Show active button when installed
-            # pluginPanel.activeBtn.Show()
+            # if installed, show as installed with tick
+            pluginPanel.installBtn.Hide()
+            pluginPanel.uninstallBtn.Show()
         else:
-            # If not installed, show "Install" and download icon
+            # if not installed, show "Install" and download icon
             pluginPanel.installBtn.Show()
-            pluginPanel.installBtn.Enable(__version__ in pluginItem.info.version)
-            pluginPanel.installBtn.SetLabel(_translate("Install"))
-            _setAllBitmaps(pluginPanel.installBtn, icons.ButtonIcon("download", 16).bitmap)
-            # Hide active button when not installed
-            # pluginPanel.activeBtn.Hide()
-        # Refresh buttons
+            pluginPanel.uninstallBtn.Hide()
+        # refresh buttons
         pluginPanel.Update()
+        pluginPanel.Layout()
 
 
 def markActive(pluginItem, pluginPanel, active=True):
@@ -1145,6 +1236,8 @@ def markActive(pluginItem, pluginPanel, active=True):
 
 # store plugin objects for later use
 _pluginObjects = None
+# persistent variable to keep track of whether we need to update plugins
+redownloadPlugins = True
 
 
 def getAllPluginDetails():
@@ -1175,7 +1268,7 @@ def getAllPluginDetails():
             pass
 
     # where the database is expected to be
-    pluginDatabaseFile = os.path.join(appPluginCacheDir, 'plugins.json')
+    pluginDatabaseFile = Path(appPluginCacheDir) / "plugins.json"
 
     def downloadPluginDatabase(srcURL="https://psychopy.org/plugins.json"):
         """Downloads the plugin database from the server and returns the text
@@ -1188,23 +1281,42 @@ def getAllPluginDetails():
 
         Returns
         -------
-        str or None
-            The plugin database as a string, or None if the download failed.
+        list or None
+            The plugin database as a list, or None if the download failed.
         
         """
+        global redownloadPlugins
+        # if plugins already up to date, skip
+        if not redownloadPlugins:
+            return None
+        # download database from website
         try:
             resp = requests.get(srcURL)
-            if resp.status_code == 404:
-                return None
-            value = resp.text
-            # confirm json is valid
-            try:
-                json.loads(value)
-                return value
-            except json.decoder.JSONDecodeError:
-                return None
         except requests.exceptions.ConnectionError:
+            # if connection to website fails, return nothing
             return None
+        # if download failed, return nothing
+        if resp.status_code == 404:
+            return None
+        # otherwise get as a string
+        value = resp.text
+
+        if value is None or value == "":
+            return None
+
+        # make sure we are using UTF-8 encoding
+        value = value.encode('utf-8', 'ignore').decode('utf-8')
+
+        # attempt to parse JSON
+        try:
+            database = json.loads(value)
+        except json.decoder.JSONDecodeError:
+            # if JSON parse fails, return nothing
+            return None
+        # if we made it this far, mark plugins as not needing update
+        redownloadPlugins = False
+
+        return database
         
     def readLocalPluginDatabase(srcFile):
         """Read the local plugin database file (if it exists) and return the
@@ -1212,20 +1324,25 @@ def getAllPluginDetails():
 
         Parameters
         ----------
-        srcFile : str
+        srcFile : pathlib.Path
             The expected path to the plugin database file.
         
         Returns
         -------
-        str or None
-            The plugin database as a string, or None if the file doesn't exist.
+        list or None
+            The plugin database as a list, or None if the file doesn't exist.
         
         """
-        if os.path.exists(srcFile):
-            with open(srcFile, 'r') as f:
-                return f.read()
-            
-        return None
+        # if source file doesn't exist, return nothing
+        if not srcFile.is_file():
+            return None
+        # attempt to parse JSON
+        try:
+            with srcFile.open("r", encoding="utf-8", errors="ignore") as f:
+                return json.load(f)
+        except json.decoder.JSONDecodeError:
+            # if JSON parse fails, return nothing
+            return None
     
     def deletePluginDlgCache():
         """Delete the local plugin database file and cached files related to 
@@ -1238,47 +1355,38 @@ def getAllPluginDetails():
                 
     # get a copy of the plugin database from the server, check if it's newer
     # than the local copy, and if so, replace the local copy
-    refreshPlugins = False  # database has changed
-    serverPluginDatabase = downloadPluginDatabase()  # text
-    localPluginDatabase = readLocalPluginDatabase(pluginDatabaseFile)  # text
+
+    # get remote database
+    serverPluginDatabase = downloadPluginDatabase()
+    # get local database
+    localPluginDatabase = readLocalPluginDatabase(pluginDatabaseFile)
+
     if serverPluginDatabase is not None:
-        if localPluginDatabase is None:
+        # if we have a database from the remote, use it
+        pluginDatabase = serverPluginDatabase
+        # if the file contents has changed, delete cached icons and etc.
+        if str(pluginDatabase) != str(localPluginDatabase):
             deletePluginDlgCache()
-            # write the new plugin database file
-            with open(pluginDatabaseFile, 'w') as f:  # save the file
-                f.write(serverPluginDatabase)
-            localPluginDatabase = json.loads(serverPluginDatabase)
-        else:
-            # exists, but does it need updating?
-            localPluginDatabase = json.loads(localPluginDatabase)
-            serverPluginDatabase = json.loads(serverPluginDatabase)
-            if localPluginDatabase != serverPluginDatabase:
-                # clear the old cache
-                deletePluginDlgCache()
-                # write the new plugin database file
-                with open(pluginDatabaseFile, 'w') as f:  # save the file
-                    json.dump(serverPluginDatabase, f, indent=True)
-                localPluginDatabase = serverPluginDatabase
-        refreshPlugins = True
+            # write new contents to file
+            with pluginDatabaseFile.open("w", encoding='utf-8') as f:
+                json.dump(pluginDatabase, f, indent=True)
+
+    elif localPluginDatabase is not None:
+        # otherwise use cached
+        pluginDatabase = localPluginDatabase
     else:
-        # no server connection, use local copy
-        if localPluginDatabase is None:
-            # no local copy, so no plugins
-            return []
-        else:
-            # use local copy
-            localPluginDatabase = json.loads(localPluginDatabase)
-        refreshPlugins = True
+        # if we have neither, treat as blank list
+        pluginDatabase = []
 
     # check if we need to update plugin objects, if not return the cached data
     global _pluginObjects
-    requiresRefresh = refreshPlugins or _pluginObjects is None
+    requiresRefresh = _pluginObjects is None
     if not requiresRefresh:
         return _pluginObjects
 
     # Create PluginInfo objects from info list
     objs = []
-    for info in localPluginDatabase:
+    for info in pluginDatabase:
         objs.append(PluginInfo(**info))
 
     # Add info objects for local plugins which aren't found online

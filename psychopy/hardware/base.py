@@ -14,6 +14,8 @@ __all__ = [
 
 import json
 import inspect
+import numpy as np
+from psychopy import logging
 
 
 class BaseResponse:
@@ -23,7 +25,8 @@ class BaseResponse:
     # list of fields known to be a part of this response type
     fields = ["t", "value"]
 
-    def __init__(self, t, value):
+    def __init__(self, t, value, device=None):
+        self.device = device
         self.t = t
         self.value = value
 
@@ -31,22 +34,50 @@ class BaseResponse:
         # make key=val strings
         attrs = []
         for key in self.fields:
-            attrs.append(f"{key}={getattr(self, key)}")
+            try:
+                attrs.append(f"{key}={getattr(self, key)}")
+            except:
+                continue
         attrs = ", ".join(attrs)
         # construct
-        return f"<{type(self).__name__}: {attrs}>"
+        try:
+            return f"<{type(self).__name__} from {self.getDeviceName()}: {attrs}>"
+        except:
+            return f"<{type(self).__name__}: {attrs}>"
+    
+    def getDeviceName(self):
+        # if device isn't a device, and this method isn't overloaded, return None
+        if not hasattr(self.device, "getDeviceProfile"):
+            return None
+        # get profile
+        deviceProfile = self.device.getDeviceProfile()
+        # get name from profile
+        if "deviceName" in deviceProfile:
+            return deviceProfile['deviceName']
+        else:
+            # if profile doesn't include name, use class name
+            return type(self.device).__name__
 
     def getJSON(self):
         import json
+        # get device profile
+        deviceProfile = None
+        if hasattr(self.device, "getDeviceProfile"):
+            deviceProfile = self.device.getDeviceProfile()
         # construct message as dict
         message = {
             'type': "hardware_response",
             'class': type(self).__name__,
+            'device': deviceProfile,
             'data': {}
         }
         # add all fields to "data"
         for key in self.fields:
             message['data'][key] = getattr(self, key)
+            # sanitize numpy arrays
+            if isinstance(message['data'][key], np.ndarray):
+                message['data'][key] = message['data'][key].tolist()
+
 
         return json.dumps(message)
 
@@ -55,6 +86,9 @@ class BaseDevice:
     """
     Base class for device interfaces, includes support for DeviceManager and adding listeners.
     """
+    # start off with no cached profile
+    _profile = None
+    
     def __init_subclass__(cls, aliases=None):
         from psychopy.hardware.manager import DeviceManager
         # handle no aliases
@@ -86,15 +120,20 @@ class BaseDevice:
         dict
             Dictionary representing this device
         """
-        # get class string
-        cls = type(self)
-        mro = inspect.getmodule(cls).__name__ + "." + cls.__name__
-        # iterate through available devices for this class
-        for profile in self.getAvailableDevices():
-            if self.isSameDevice(profile):
-                # if current profile is this device, add deviceClass and return it
-                profile['deviceClass'] = mro
-                return profile
+        # only iteratively find it if we haven't done so already
+        if self._profile is None:
+            # get class string
+            cls = type(self)
+            mro = inspect.getmodule(cls).__name__ + "." + cls.__name__
+            # iterate through available devices for this class
+            for profile in self.getAvailableDevices():
+                if self.isSameDevice(profile):
+                    # if current profile is this device, add deviceClass and return it
+                    profile['deviceClass'] = mro
+                    self._profile = profile
+                    break
+        
+        return self._profile
 
     def getJSON(self, asString=True):
         """
@@ -170,6 +209,17 @@ class BaseResponseDevice(BaseDevice):
         """
         pass
 
+    def hasUnfinishedMessage(self):
+        """
+        If there is a message which have been partially received but not finished (e.g. 
+        getting the start of a message from a serial device but no end of line character 
+        yet), this will return True.
+
+        If not implemented or not relevant on a given device (e.g. Keyboard, which only 
+        sends full messages), this will always return False.
+        """
+        return False
+
     def parseMessage(self, message):
         raise NotImplementedError(
             "All subclasses of BaseDevice must implement the method `parseMessage`"
@@ -203,6 +253,15 @@ class BaseResponseDevice(BaseDevice):
         # relay message to listener
         for listener in self.listeners:
             listener.receiveMessage(message)
+        # relay to log file
+        try:
+            logging.exp(
+                f"Device response: {message}"
+            )
+        except Exception as err:
+            logging.error(
+                f"Received a response from a {type(self).__name__} but couldn't print it: {err}"
+            )
 
         return True
 
@@ -311,9 +370,10 @@ class BaseResponseDevice(BaseDevice):
         bool
             True if completed successfully
         """
-        # remove listeners from loop
+        # remove self from listener loop
         for listener in self.listeners:
-            listener.loop.removeDevice(listener)
+            if self in listener.loop.devices:
+                listener.loop.removeDevice(self)
         # clear list
         self.listeners = []
 

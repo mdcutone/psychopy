@@ -69,7 +69,10 @@ debug = False
 class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
     def __init__(self, win, text,
                  font="Open Sans",
-                 pos=(0, 0), units=None, letterHeight=None,
+                 pos=(0, 0),
+                 units=None,
+                 letterHeight=None,
+                 ori=0,
                  size=None,
                  color=(1.0, 1.0, 1.0), colorSpace='rgb',
                  fillColor=None, fillColorSpace=None,
@@ -79,7 +82,7 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
                  bold=False,
                  italic=False,
                  placeholder="Type here...",
-                 lineSpacing=None,
+                 lineSpacing=1.0,
                  letterSpacing=None,
                  padding=None,  # gap between box and text
                  speechPoint=None,
@@ -190,10 +193,11 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
         self._pixelScaling = self.letterHeightPix / self.letterHeight
         self.bold = bold
         self.italic = italic
+        if lineSpacing is None:
+            lineSpacing = 1.0
+        self.lineSpacing = lineSpacing
         self.glFont = None  # will be set by the self.font attribute setter
         self.font = font
-        if lineSpacing is not None:
-            self.lineSpacing = lineSpacing
         self.letterSpacing = letterSpacing
         # If font not found, default to Open Sans Regular and raise alert
         if not self.glFont:
@@ -246,6 +250,9 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
         self.languageStyle = languageStyle
         self._text = ''
         self.text = self.startText = text if text is not None else ""
+
+        # now that we have text, set orientation
+        self.ori = ori
 
         # Initialise arabic reshaper
         arabic_config = {'delete_harakat': False,  # if present, retain any diacritics
@@ -353,7 +360,7 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
             self.caret.color = self._foreColor
 
     @attributeSetter
-    def font(self, fontName, italic=False, bold=False):
+    def font(self, fontName):
         if isinstance(fontName, GLFont):
             self.glFont = fontName
             self.__dict__['font'] = fontName.name
@@ -362,7 +369,9 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
             self.glFont = allFonts.getFont(
                     fontName,
                     size=self.letterHeightPix,
-                    bold=self.bold, italic=self.italic)
+                    bold=self.bold,
+                    italic=self.italic,
+                    lineSpacing=self.lineSpacing)
 
     @attributeSetter
     def overflow(self, value):
@@ -469,8 +478,8 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
         if hasattr(self, "box"):
             self.box.size = self._pos
         if hasattr(self, "contentBox"):
-            # Content box should be anchored center relative to box, but its pos needs to be relative to box's vertices, not its pos
-            self.contentBox.pos = self.pos + self.size * self.box._vertices.anchorAdjust
+            # set content box pos with offset for anchor (accounting for orientation)
+            self.contentBox.pos = self.pos + np.dot(self.size * self.box._vertices.anchorAdjust, self._rotationMatrix)
             self.contentBox._needVertexUpdate = True
         if hasattr(self, "_placeholder"):
             self._placeholder.pos = self._pos
@@ -609,19 +618,6 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
         Convenience function to get self._letterHeight.pix and be guaranteed a return that is a single integer
         """
         return self._letterHeight.pix[1]
-
-    @property
-    def lineSpacing(self):
-        if hasattr(self.glFont, "lineSpacing"):
-            return self.glFont.lineSpacing
-
-    @lineSpacing.setter
-    def lineSpacing(self, value):
-        if hasattr(self, "_placeholder"):
-            self._placeholder.lineSpacing = value
-        if hasattr(self.glFont, "lineSpacing"):
-            self.glFont.lineSpacing = value
-        self._needVertexUpdate = True
 
     @attributeSetter
     def letterSpacing(self, value):
@@ -930,6 +926,9 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
 
                 # are we wrapping the line?
                 if charcode == "\n":
+                    # check if we have stored the top/bottom of the previous line yet
+                    if lineN + 1 > len(_lineBottoms):
+                        _lineBottoms.append(current[1])
                     lineWPix = current[0]
                     current[0] = 0
                     current[1] -= font.height
@@ -1176,8 +1175,11 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
             # Adjust vertices
             vertices[:, 0] = vertices[:, 0] + adjustX
 
-        # Convert the vertices to be relative to content box and set
-        self.vertices = vertices / self.contentBox._size.pix + (-0.5, 0.5)
+        # convert the vertices to be relative to content box and set
+        vertices = vertices / self.contentBox._size.pix + (-0.5, 0.5)
+        # apply orientation
+        self.vertices = (vertices * self.size).dot(self._rotationMatrix) / self.size
+
         if len(_lineBottoms):
             if self.flipVert:
                 self._lineBottoms = min(self.contentBox._vertices.pix[:, 1]) - np.array(_lineBottoms)
@@ -1193,6 +1195,20 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
             self.glFont.upload()
             self.glFont._dirty = False
         self._needVertexUpdate = True
+
+    @attributeSetter
+    def ori(self, value):
+        # get previous orientaiton
+        lastOri = self.__dict__.get("ori", 0)
+        # set new value
+        BaseVisualStim.ori.func(self, value)
+        # set on all boxes
+        self.box.ori = value
+        self.boundingBox.ori = value
+        self.contentBox.ori = value
+        # trigger layout if value has changed
+        if lastOri != value:
+            self._layout()
 
     def draw(self):
         """Draw the text to the back buffer"""
@@ -1628,6 +1644,8 @@ class Caret(ColorMixin):
             self.index = len(self.textbox._lineNs)
         # Get line of index
         if self.index >= len(self.textbox._lineNs):
+            if len(self.textbox._lineBottoms) - 1 > self.textbox._lineNs[-1]:
+                return len(self.textbox._lineBottoms) - 1
             return self.textbox._lineNs[-1]
         else:
             return self.textbox._lineNs[self.index]
@@ -1718,9 +1736,12 @@ class Caret(ColorMixin):
         else:
             # Otherwise, get caret position from character vertices
             if self.index >= len(textbox._lineNs):
-                # If the caret is after the last char, position it to the right
-                chrVerts = textbox._vertices.pix[range((ii-1) * 4, (ii-1) * 4 + 4)]
-                x = chrVerts[2, 0]  # x-coord of left edge (of final char)
+                if len(textbox._lineBottoms) - 1 > textbox._lineNs[-1]:
+                    x = textbox._lineWidths[len(textbox._lineBottoms) - 1]
+                else:
+                    # If the caret is after the last char, position it to the right
+                    chrVerts = textbox._vertices.pix[range((ii-1) * 4, (ii-1) * 4 + 4)]
+                    x = chrVerts[2, 0]  # x-coord of left edge (of final char)
             else:
                 # Otherwise, position it to the left
                 chrVerts = textbox._vertices.pix[range(ii * 4, ii * 4 + 4)]

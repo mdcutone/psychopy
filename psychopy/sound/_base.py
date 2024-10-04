@@ -116,12 +116,26 @@ class _SoundBase(AttributeGetSetMixin):
     # def _setSndFromArray(self, thisArray):
 
     def _parseSpeaker(self, speaker):
+        from psychopy.hardware.speaker import SpeakerDevice
+        # if already a SpeakerDevice, great!
+        if isinstance(speaker, SpeakerDevice):
+            return speaker
+        # if no device, populate from prefs
         if speaker is None:
-            # if no device, populate from prefs
             pref = prefs.hardware['audioDevice']
             if isinstance(pref, (list, tuple)):
                 pref = pref[0]
             speaker = pref
+        # if first pref is defualt, use first device
+        if speaker in ("default", "", None):
+            for profile in DeviceManager.getAvailableDevices("psychopy.hardware.speaker.SpeakerDevice"):
+                # log
+                logging.debug("Using speaker %(deviceName)s as defaultSpeaker" % profile)
+                # initialise as defaultSpeaker
+                profile['deviceName'] = "defaultSpeaker"
+                device = DeviceManager.addDevice(**profile)
+                
+                return device
         # look for device if initialised
         device = DeviceManager.getDevice(speaker)
         # if no matching name, try matching index
@@ -169,10 +183,12 @@ class _SoundBase(AttributeGetSetMixin):
         """
         # Re-init sound to ensure bad values will raise error during setting:
         self._snd = None
-
+        # make references to default stim into absolute paths
         if isinstance(value, str) and value in defaultStim:
             value = defaultStimRoot / defaultStim[value]
-
+        # if directly given a Microphone, get its last recording
+        if hasattr(value, "lastClip"):
+            value = value.lastClip
         # Coerces pathlib obj to string, else returns inputted value
         value = pathToString(value)
         try:
@@ -210,10 +226,27 @@ class _SoundBase(AttributeGetSetMixin):
         elif isinstance(value, (list, numpy.ndarray,)):
             # create a sound from the input array/list
             self._setSndFromArray(numpy.array(value))
-        elif isinstance(value, AudioClip):
-            # from an audio clip object
-            self.sampleRate = value.sampleRateHz
+        elif isinstance(value, AudioClip):  # from an audio clip object
+            # check if we should resample the audio clip to match the device
+            if self.sampleRate is None:
+                logging.warning(
+                    "Sound output sample rate not set. The provided AudioClip "
+                    "requires a sample rate of {} Hz for playback which may "
+                    "not match the device settings.".format(value.sampleRateHz)) 
+
+                self.sampleRate = value.sampleRateHz
+
+            if self.sampleRate != value.sampleRateHz:
+                logging.warning(
+                    "Resampling to match sound device sample rate (from {} "
+                    "to {} Hz), distortion may occur.".format(
+                        value.sampleRateHz, self.sampleRate))
+
+                # resample with the new sample rate using the AudioClip method
+                value = value.resample(self.sampleRate, copy=True)
+
             self._setSndFromArray(value.samples)
+
         # did we succeed?
         if self._snd is None:
             pass  # raise ValueError, "Could not make a "+value+" sound"
