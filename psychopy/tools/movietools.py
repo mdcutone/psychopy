@@ -27,6 +27,7 @@ import queue
 import atexit
 import numpy as np
 import psychopy.logging as logging
+import sys
 
 # constants for specifying encoders for the movie writer
 MOVIE_WRITER_FFPYPLAYER = MOVIE_READER_FFPYPLAYER = u'ffpyplayer'
@@ -67,6 +68,86 @@ _openMovieWriters = set()
 # they are presently reading from.
 _openMovieReaders = set()
 
+
+class MovieMetadata:
+    """Class for storing metadata about a movie file.
+
+    This class is used to store metadata about a movie file. This includes
+    information about the video and audio tracks in the movie. Metadata is
+    extracted from the movie file when the movie reader is opened.
+
+    This class is not intended to be used directly by users. It is used
+    internally by the `MovieFileReader` class to store metadata about the movie
+    file being read.
+
+    Parameters
+    ----------
+    filename : str
+        The name (or path) of the movie file to extract metadata from.
+    size : tuple
+        The size of the movie in pixels (width, height).
+    frameRate : float
+        The frame rate of the movie in frames per second.
+    duration : float
+        The duration of the movie in seconds.
+    
+    """
+    def __init__(self, filename, size, frameRate, duration, colorFormat):
+        self._filename = filename
+        self._size = size
+        self._frameRate = frameRate
+        self._duration = duration
+        self._colorFormat = colorFormat
+
+    def __repr__(self):
+        return (
+            f"MovieMetadata(filename={self.filename}, "
+            f"size={self.size}, "
+            f"frameRate={self.frameRate}, "
+            f"duration={self.duration})")
+        
+    def __str__(self):
+        return (
+            f"MovieMetadata(filename={self.filename}, "
+            f"size={self.size}, "
+            f"frameRate={self.frameRate}, "
+            f"duration={self.duration})")
+
+    @property
+    def filename(self):
+        """The name (path) of the movie file (`str`).
+
+        """
+        return self._filename
+
+    @property
+    def size(self):
+        """The size of the movie in pixels (`tuple`).
+
+        """
+        return self._size
+
+    @property
+    def frameRate(self):
+        """The frame rate of the movie in frames per second (`float`).
+
+        """
+        return self._frameRate
+    
+    @property
+    def duration(self):
+        """The duration of the movie in seconds (`float`).
+
+        """
+        return self._duration
+
+    @property
+    def colorFormat(self):
+        """The color format of the movie (`str`).
+
+        """
+        return self._colorFormat
+    
 
 class MovieFileReader:
     """Read movie frames from file.
@@ -112,7 +193,7 @@ class MovieFileReader:
                  filename, 
                  decoderLib='ffpyplayer', 
                  decoderOpts=None, 
-                 maxQueueSize=0):
+                 maxQueueSize=32):
         
         if maxQueueSize < 0:
             raise ValueError('`maxQueueSize` must be >=0.')
@@ -125,8 +206,17 @@ class MovieFileReader:
         self._player = None  # player interface object
         self._readerThread = None
         self._lastFrame = None
+        self._lastFrameInterval = (-1.0, 0.0)
         self._exitEvent = threading.Event()  # signal to exit the reader thread
         self._exitEvent.clear()
+
+        # movie information
+        self._frameInterval = -1.0
+        self._srcFrameSize = (-1, -1)
+        self._frameRate = -1.0
+        self._frameInterval = -1.0
+        self._duration = -1.0
+        self._srcPixelFormat = None
 
         # queues for video and audio frames
         self._frameQueue = queue.Queue(maxsize=maxQueueSize)
@@ -156,6 +246,50 @@ class MovieFileReader:
         """
         with self._frameQueue.mutex:
             self._frameQueue.queue.clear()
+
+    @property
+    def decoderLib(self):
+        """The library used to decode the movie (`str`).
+
+        """
+        return self._decoderLib
+
+    @property
+    def frameSize(self):
+        """The frame size of the movie in pixels (`tuple`).
+
+        This is only valid after calling `open()`. If not, the value is 
+        `(-1, -1)`.
+
+        """
+        return self._srcFrameSize
+
+    @property
+    def frameInterval(self):
+        """The interval between frames in the movie in seconds (`float`).
+
+        This is only valid after calling `open()`. If not, the value is `-1`.
+
+        """
+        return self._frameInterval
+
+    @property
+    def frameRate(self):
+        """The frame rate of the movie in frames per second (`float`).
+
+        This is only valid after calling `open()`. If not, the value is `-1`.
+
+        """
+        return self._frameRate
+
+    @property
+    def duration(self):
+        """The duration of the movie in seconds (`float`).
+
+        This is only valid after calling `open()`. If not, the value is `-1`.
+
+        """
+        return self._duration
     
     @property
     def filename(self):
@@ -242,28 +376,22 @@ class MovieFileReader:
 
             """
             # wait until initialized
-            while moviePlayer.get_metadata()['src_vid_size'] == (0, 0):
-                time.sleep(0.01)
-            
-            if warmupBarrier is not None:
-                warmupBarrier.wait()
-
             while not exitEvent.is_set():  # quit if signaled
-                # pull a frame from the stream, we keep this running 'hot' so
-                # that we don't miss frames, we just discard them if we don't
-                # need them
                 with readLock:
-                    frame, val = moviePlayer.get_frame(show=True)
+                    frame, status = moviePlayer.get_frame(show=True)
 
                 if frame is None:
                     continue
 
-                frameQueue.put((frame, val))
+                # waits for queue to have space before adding more frames, this
+                # will govern the rate of which frames are read from the movie
+                img, pts = frame
+                frameQueue.put((img, pts, status))
                     
-                if val == 'eof':  # thread should exit if stream is done
+                if status == 'eof':  # thread should exit if stream is done
                     break
-                elif val == 'paused':
-                    continue
+                elif status == 'paused':
+                    time.sleep(0.001)
 
             # if we're here, the reader thread should exit
             with readLock:
@@ -286,12 +414,30 @@ class MovieFileReader:
         self._player = MediaPlayer(
             self._filename,
             ff_opts=self._decoderOpts)
-        
+
+        # wait for valid metadata to be available
+        logging.debug("Waiting for movie metadata...")
+        while 1:
+            movieMetadata = self._player.get_metadata()
+            if movieMetadata['src_vid_size'] != (0, 0):
+                break
+
+        # movie metadata
+        numer, denom = movieMetadata['frame_rate']
+        self._srcFrameSize = movieMetadata['src_vid_size']
+        self._frameRate = numer / denom
+        self._frameInterval = 1.0 / self._frameRate
+        self._duration = movieMetadata['duration']
+        self._srcPixelFormat = movieMetadata['src_pix_fmt']
+        if isinstance(self._srcPixelFormat, bytes):
+            self._srcPixelFormat = self._srcPixelFormat.decode('utf-8')
+
+        logging.debug("Movie metadata: {}".format(movieMetadata))
+
         # initialize the thread, the thread will wait on frames to be added to
         # the queue
         logging.debug("Starting movie reader thread...")
 
-        self._warmupBarrier = threading.Barrier(2)  # hold thread until ready
         self._readerThread = threading.Thread(
             target=_asyncFrameReader,
             args=(
@@ -304,7 +450,6 @@ class MovieFileReader:
         logging.debug("Waiting for movie reader thread to start...")
 
         self._readerThread.start()
-        self._warmupBarrier.wait()
 
         logging.debug("Movie reader thread started.")
 
@@ -388,7 +533,7 @@ class MovieFileReader:
 
         return False
 
-    def start(self, initialPTS=0.0):
+    def startDecoding(self, initialPTS=0.0):
         """Start decoding movie frames in background thread.
 
         This begins decoding movie frames from the movie file and adding them to
@@ -418,12 +563,11 @@ class MovieFileReader:
         # the media reader object
         with self._readLock:
             if self._decoderLib == 'ffpyplayer':
-                if initialPTS is not None:
-                    self.seek(initialPTS, relative=False, pause=False)
-                    
-                # unpause the movie to play it
-                if self._player.get_pause():
-                    self._player.set_pause(False)
+                # seek to the initial PTS
+                self._player.set_pause(True)
+                self._player.seek(initialPTS, relative=False, accurate=True)
+                # unpause the movie to begin decoding frames
+                self._player.set_pause(False)
             elif self._decoderLib == 'opencv':
                 raise NotImplementedError(
                     'The `opencv` library is not supported for movie reading.')
@@ -431,14 +575,22 @@ class MovieFileReader:
                 raise ValueError(
                     'Unknown decoder library: {}'.format(self._decoderLib))
 
-    def stop(self):
+    def stopDecoding(self):
         """Stop decoding movie frames in background thread.
 
         This halts the decoding of movie frames from the movie file and stops
         adding them to the frame queue. This will not close the movie file.
 
         """
-        self.pause()
+        with self._readLock:
+            if self._decoderLib == 'ffpyplayer':
+                self._player.set_pause(True)
+            elif self._decoderLib == 'opencv':
+                raise NotImplementedError(
+                    'The `opencv` library is not supported for movie reading.')
+            else:
+                raise ValueError(
+                    'Unknown decoder library: {}'.format(self._decoderLib))
 
     @property
     def isDecoding(self):
@@ -450,8 +602,9 @@ class MovieFileReader:
         """
         return self.isPlaying
 
+    @property
     def memoryUsed(self):
-        """Get the amount of memory used by the movie reader.
+        """Get the amount of memory used to store decoded frames.
 
         Returns
         -------
@@ -459,7 +612,12 @@ class MovieFileReader:
             The amount of memory used by the movie reader in bytes.
 
         """
-        return self._frameQueue.qsize() * 3 * np.prod(self.getSize())
+        # sum of bytes used by video segments
+        totalFramesDecoded = self._frameQueue.qsize() + len(self._videoSegments)
+        pixelSize = 3 if 'rgb' in self._srcPixelFormat else 4
+        pixelCount = self._srcFrameSize[0] * self._srcFrameSize[1]
+
+        return totalFramesDecoded * pixelCount * pixelSize
 
     def clearSegments(self):
         """Clear all buffered video segments.
@@ -470,495 +628,169 @@ class MovieFileReader:
         """
         self._videoSegments = []
 
-    def getFrame(self, pts=0.0, dropFrame=True):
-        """Get a frame from the movie file.
+    def _dequeueFrames(self):
+        """Dequeue frames from the frame queue.
+
+        This function dequeues frames from the frame queue and stores them in the
+        video segment buffer. This is used to store frames in memory for quick
+        access when seeking to a specific frame.
+
+        Returns
+        -------
+        list
+            A list of frames that have been dequeued from the frame queue.
+
+        """
+        queuedFrames = []
+        while self._frameQueue.qsize() > 0:
+            try:
+                frameData = self._frameQueue.get_nowait()
+            except queue.Empty:
+                break
+
+            queuedFrames.append(frameData)
         
+        return queuedFrames
+
+    def _getFrameFFPyPlayer(self, pts=0.0, dropFrame=True):
+        """Get a frame from the movie file using FFPyPlayer.
+
         This must be called after `start()` to get frames from the movie file.
 
         Parameters
         ----------
         pts : float or None
             The presentation timestamp (PTS) of the frame to get in seconds.
+            Timestamps can be as precise as 6 decimal places.
         dropFrame : bool
             If `True`, the frame is dropped if it is not available, and the 
             most recent frame will be returned immediately. If `False`, the 
             function will block until the desired frame is returned.
-
-        Returns
-        -------
-        dict
-            A mapping of video and audio frames to their respective presentation
-            timestamps (PTS) in seconds.
-
-        """
-        with self._readLock:
-            if not self._frameInSegmentBuffer(pts):
-                self.seek(pts, relative=False, pause=False)
-            
-            if not dropFrame:
-                while not self._frameInSegmentBuffer(pts):
-                    time.sleep(0.01)
-            
-            self._defragVideoSegments()
-            
-            for segment in self._videoSegments:
-                if segment[0] <= pts < segment[1]:
-                    return segment
-
-    # -------------------------------------------------------------------------
-    # Video playback controls
-    #
-
-    def play(self):
-        """Play the movie.
-
-        Start decoding frames from the movie file and add them to the frame
-        queue. If an audio track is present, it will be played as well.
-
-        """
-        if not self.isOpen:
-            return
-        
-        with self._readLock:
-            # unpause the movie to play it
-            if self._player.get_pause():
-                self._player.set_pause(False)
-
-    @property
-    def isPlaying(self):
-        """Whether the movie is playing (`bool`).
-
-        If `True`, the movie is playing. If `False`, the movie is paused.
-
-        """
-        return not self.isPaused
-    
-    @property
-    def isPaused(self):
-        """Whether the movie is paused (`bool`).
-
-        If `True`, the movie is paused. If `False`, the movie is playing.
-
-        """
-        if not self.isOpen:
-            return False
-        
-        with self._readLock:
-            return self._player.get_pause()
-
-    def pause(self):
-        """Pause the movie.
-
-        """
-        if not self.isOpen:
-            return
-        
-        with self._readLock:
-            self._player.set_pause(True)
-
-    def stop(self):
-        """Stop the movie.
-
-        Stop the movie and reset the playback position to the beginning of the
-        movie.
-
-        """
-        if not self.isOpen:
-            return
-        
-        self._clearFrameQueue()
-
-        with self._readLock:
-            self._player.set_pause(True)
-            self._player.seek(0.0, relative=False)
-
-    def seek(self, pts, relative=False, pause=False):
-        """Seek to a specific time in the movie.
-
-        Seeking invalidates all the frames in the frame queue since they are no
-        longer in sequence. This means that any frames in the queue will be
-        discarded. If you want to seek to a specific frame, you should call
-        `getFrames()` after seeking to get the frame at the new position.
-
-        Parameters
-        ----------
-        pts : float
-            Presentation timestamp (PTS) to seek to in seconds.
-        relative : bool
-            If `True`, `pts` is interpreted as a relative time offset from the
-            current position. If `False`, `pts` is interpreted as an absolute
-            time offset from the beginning of the movie.
-        pause : bool
-            If `True`, the movie will be paused after seeking. If `False`, the
-            movie will continue playing after seeking.
-
-        """
-        if not self.isOpen:
-            return
-
-        if pause:
-            self._player.set_pause(True)
-
-        self._clearFrameQueue()
-
-        with self._readLock:
-            self._player.seek(
-                pts, 
-                relative=relative, 
-                seek_by_bytes='auto', 
-                accurate=True)
-            
-    # -------------------------------------------------------------------------
-    # Audio playback controls
-    #
-            
-    @property
-    def volume(self):
-        """The volume of the movie (`float`).
-
-        This value is in the range [0, 1].
-
-        """
-        if not self.isOpen:
-            return 0.0
-        
-        with self._readLock:
-            return self._player.get_volume()
-        
-    @volume.setter
-    def volume(self, volume):
-        if not self.isOpen:
-            return
-        
-        self.setVolume(volume)
-    
-    def setVolume(self, volume):
-        """Set the volume of the movie.
-
-        Parameters
-        ----------
-        volume : float
-            The volume of the movie. Must be in the range [0, 1].
-
-        """
-        if not self.isOpen:
-            return
-        
-        # ensure volume is in the range [0, 1]
-        volume = max(0.0, min(1.0, volume))
-        
-        with self._readLock:
-            self._player.set_volume(volume)
-
-    @property
-    def mute(self):
-        """Whether the movie is muted (`bool`).
-
-        If `True`, the movie is muted. If `False`, the movie is unmuted.
-
-        """
-        if not self.isOpen:
-            return False
-        
-        with self._readLock:
-            return self._player.get_mute()
-    
-    @mute.setter
-    def mute(self, mute):
-        if not self.isOpen:
-            return
-        
-        self.setMute(mute)
-
-    def setMute(self, mute):
-        """Mute or unmute the movie.
-
-        Parameters
-        ----------
-        mute : bool
-            If `True`, the movie will be muted. If `False`, the movie will be
-            unmuted.
-
-        """
-        if not self.isOpen:
-            return
-        
-        with self._readLock:
-            self._player.set_mute(mute)
-
-    # -------------------------------------------------------------------------
-    # Video frame access
-    #
-
-    def _enqueueFrame(self):
-        """Grab a queued frame from the decoder.
-        
-        Returns
-        -------
-        bool 
-            `True` if a frame has been enqueued. Returns `False` if the decoder 
-            has not acquired a new frame yet.
-        
-        """
-        if not self.isOpen:
-            return False
-        
-        try:
-            frameData = self._frameQueue.get_nowait()
-        except queue.Empty:
-            return False
-        
-        frame, val = frameData  # update the frame
-
-        if val == 'eof':  # handle end of stream
-            print('End of stream')
-            return False
-        elif val == 'paused':  # handle when paused
-            return False
-        elif frame is None:  # handle when no frame is available
-            return False
-        
-        frameImage, pts = frame  # otherwise, unpack the frame
-
-        # if we have a new frame, update the frame information
-        videoBuffer = frameImage.to_bytearray()[0]
-        videoFrameArray = np.frombuffer(videoBuffer, dtype=np.uint8)
-
-        self._lastFrame = videoFrameArray, pts
-
-        return True
-    
-    @property
-    def framesWaiting(self):
-        """The number of frames waiting to be written to disk (`int`).
-
-        This value increases when you call `addFrame()` and decreases when the
-        frame is written to disk. This number can be reduced to zero by calling
-        `flush()`.
-
-        """
-        return self._frameQueue.qsize()
-    
-    @property
-    def duration(self):
-        """The duration of the movie in seconds (`float`).
-
-        This is the total duration of the movie in seconds based on the number 
-        of frames that have been added to the movie and the frame rate. This 
-        does not represent the actual duration of the movie file on disk, which
-        may be longer if frames are still being written to disk.
-
-        """
-        if not self.isOpen:
-            return 0.0
-        
-        with self._readLock:
-            return self._player.get_metadata()['src_duration']
-        
-    def _bufferFrames(self, numFrames):
-        """Buffer frames in the queue.
-
-        This function is used to buffer frames in the queue. This is useful if
-        you want to ensure that there are frames in the queue before calling
-        `getFrames()`.
-
-        Parameters
-        ----------
-        numFrames : int
-            The number of frames to buffer.
-
-        """
-        if not self.isOpen:
-            return
-        
-        while self.framesWaiting < numFrames:
-            # should warn if this returns False to tell the user we're not
-            # keeping up with playback
-            self._enqueueFrame()   
-
-    def getFrames(self):
-        """Get most recently decoded frames from the movie file.
-
-        Returns a list of frames obtained from the decoder since the last call
-        to `getFrames()`.
-
-        Returns
-        -------
-        frame : list
-            List of movie frames. Each element in the list is a tuple containing
-            the frame data and the presentation timestamp (PTS) of the frame in
-            seconds. The frame data is a numpy array of shape `(w, h, 3)` or
-            `(w, h, 4)` depending on the pixel format of the movie.
-
-        """
-        frames = []
-        while self._enqueueFrame():
-            frames.append(self._lastFrame)
-
-        return frames
-    
-    def getCurrentFrame(self):
-        """Get the frame whose presentation timestamp (PTS) is closest to the
-        current time. Use this function for getting frames for real-time 
-        presentation.
-
-        This only works if the movie is playing and if presentation timestamps 
-        are synced to the video's audio track or external clock. If the movie is 
-        paused, this function will return the most recently decoded frame.
-
-        Parameters
-        ----------
-        absTime : float or None
-            The absolute time in seconds to get the frame at.
-        dropFrame : bool
-            If `True`, the frame is dropped if it is not available, and the 
-            most recent frame will be returned immediately. If `False`, the 
-            function will block until the desired frame is returned.
-
-        Returns
-        -------
-        frame : tuple
-            A tuple containing the frame data and the presentation timestamp 
-            (PTS) of the frame in seconds. The frame data is a numpy array of 
-            shape `(w, h, 3)` or `(w, h, 4)` depending on the pixel format of 
-            the movie.
-
-        """
-        if not self.isOpen:
-            return None
-        
-        ptsNow = self.pts
-
-        if self._lastFrame is None:  # get the frame if we don't have one yet
-            self._enqueueFrame()
-
-        frameInterval = self.frameInterval
-        while ptsNow - self._lastFrame[1] > frameInterval:
-            self._enqueueFrame()
-            
-        return self._lastFrame[0]  # color data only
-            
-    # -------------------------------------------------------------------------
-    # Video metadata access
-    #
-    
-    @property
-    def size(self):
-        """The size `(w, h)` of the movie in pixels (`tuple`).
-
-        """
-        return self.getSize()
-    
-    def getSize(self):
-        """Get the size of the movie in pixels (`tuple`).
 
         Returns
         -------
         tuple
-            The size of the movie in pixels (width, height). If the movie is not
-            open, this returns (-1, -1).
+            Video data.
 
         """
-        if not self.isOpen:
-            return (-1, -1)
-        
-        with self._readLock:
-            return self._player.get_metadata()['src_vid_size']
-        
-    @property
-    def fps(self):
-        """The frame rate of the movie (`float`).
+        # round the PTS to 6 decimal places
+        pts = round(pts, 6)
 
-        """
-        return self.getFrameRate()
-    
-    @property
-    def frameRate(self):
-        """The frame rate of the movie (`float`).
+        # check if the frame is within the range of the movie
+        if pts >= self.duration:
+            toReturn = self._videoSegments[-1]
+            return toReturn
 
-        This is an alias for `fps` to synchronize naming with other video
-        classes around PsychoPy.
+        # do we have any frames in the queue?
+        if self._frameQueue.qsize() > 0:
+            with self._readLock:
+                self._videoSegments += self._dequeueFrames()
 
-        """
-        return self.getFrameRate()
-    
-    def getFrameRate(self):
-        """Get the frame rate of the movie (`float`).
-
-        Returns
-        -------
-        float
-            The frame rate of the movie in frames per second.
-
-        """
-        if not self.isOpen:
-            return None
-        
-        with self._readLock:
-            val = self._player.get_metadata()['frame_rate']
-        
-        # handle different formats fps comes in
-        if isinstance(val, tuple):
-            val = val[0] / float(val[1])
+        # check if we need to seek first
+        if self._videoSegments:
+            # we have a segment, but wee need to check if the frame is in the
+            # segment buffer. If not, we'll need to seek to the frame
+            segmentStart = self._videoSegments[0][1]
+            segmentEnd = self._videoSegments[-1][1] + self._frameInterval
+            # is the pts outside the current segment buffer? seek if so
+            needSeek = not segmentStart <= pts < segmentEnd
         else:
-            val = float(val)
-            
-        return val
-    
-    @property
-    def frameInterval(self):
-        """The frame interval of the movie in seconds (`float`).
+            # check the position of the movie
+            with self._readLock:
+                currentPos = self._player.get_pts()
+            # check if the requested pts is within the current position
+            needSeek = not currentPos <= pts < currentPos + self._frameInterval
 
-        """
-        return self.getFrameInterval()
-    
-    def getFrameInterval(self):
-        """Get the frame interval of the movie in seconds (`float`).
+        # do we need to seek to the frame?
+        if needSeek:
+            with self._readLock:
+                self._player.set_pause(True)
+                self._player.seek(
+                    pts, relative=False, seek_by_bytes=False, accurate=True)
+                # clear out the frame queue
+                _ = self._dequeueFrames()
+                self._videoSegments.clear()
+                self._player.set_pause(False)
+
+                # seeking gets us close to the frame, so we need to pull down
+                # the frames until we get to the desired frame
+                while 1:
+                    frame, status = self._player.get_frame(show=True)
+                    if frame is None:
+                        continue
+
+                    img, curPts = frame
+                    curPts = round(curPts, 6)
+                    
+                    # check if the pts falls within the interval of this frame
+                    if curPts <= pts < curPts + self._frameInterval:
+                        self._videoSegments.append((img, curPts, status))
+                        break  
+                    elif status == 'eof':  # handle this case at some point
+                        break
+
+        # get the PTS of the last video frame to be decoded
+        endPts = self._videoSegments[-1][1] if self._videoSegments else -1.0
+
+        if pts >= endPts:
+            print('Frame not available. End of stream.')
+            if self._videoSegments:
+                return self._videoSegments[-1]
+            return None
+
+        # estimate the frame index that contains the desired frame, this is used
+        # to avoid needing to iterate over all the frames in the video segment
+        # find one with the closest PTS
+        segmentStartIdx = int(self._videoSegments[0][1] / self.frameInterval)
+        estFrameIndex = int(pts / self.frameInterval) - segmentStartIdx
+
+        # get the frame from the video segment buffer
+        try:
+            toReturn = self._videoSegments[estFrameIndex]
+        except IndexError:
+            toReturn = self._videoSegments[-1]
+
+        # get the next frame that falls within the interval
+        for i, segment in enumerate(self._videoSegments[estFrameIndex:]):
+            beginFrameTime = segment[1]
+
+            # look ahead to get the next frame start time
+            if i + 1 >= len(self._videoSegments):  
+                toReturn = self._videoSegments[-1]
+                break
+
+            nextFrame = self._videoSegments[estFrameIndex + i + 1]
+            nextFrameTime = nextFrame[1]
+
+            # check if it falls within the interval for the current frame index
+            if beginFrameTime <= pts < nextFrameTime:
+                toReturn = segment
+                break
+
+        return toReturn
+
+    def getFrame(self, pts=0.0, dropFrame=True):
+        """Get a frame from the movie file at the specified presentation 
+        timestamp.
+
+        Parameters
+        ----------
+        pts : float or None
+            The presentation timestamp (PTS) of the frame to get in seconds.
+            Timestamps can be as precise as six decimal places.
+        dropFrame : bool
+            If `True`, the frame is dropped if it is not available, and the 
+            most recent frame will be returned immediately. If `False`, the 
+            function will block until the desired frame is returned.
 
         Returns
         -------
-        float
-            The frame interval of the movie in seconds.
+        tuple
+            Video data.
 
         """
-        if not self.isOpen:
-            return None
-        
-        with self._readLock:
-            val = self._player.get_metadata()['frame_rate']
-        
-        # handle different formats fps comes in
-        if isinstance(val, tuple):
-            val = val[1] / float(val[0])
-        else:
-            val = 1.0 / float(val)
-            
-        return val
-    
-    @property
-    def pts(self):
-        """The presentation timestamp (PTS) of the most recent frame in seconds
-        (`float`).
-
-        """
-        return self.getPTS()
-
-    def getPTS(self):
-        """Get the presentation timestamp (PTS) of the most recent frame in
-        seconds (`float`).
-
-        Returns
-        -------
-        float
-            The presentation timestamp (PTS) of the most recent frame in
-            seconds.
-
-        """
-        if not self.isOpen:
-            return None
-        
-        with self._readLock:
-            return self._player.get_pts()
+        if self._decoderLib == 'ffpyplayer':
+            return self._getFrameFFPyPlayer(pts, dropFrame)
 
     def __del__(self):
         """Close the movie file when the object is deleted.
