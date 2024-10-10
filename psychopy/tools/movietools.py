@@ -380,23 +380,23 @@ class MovieFileReader:
                 with readLock:
                     frame, status = moviePlayer.get_frame(show=True)
 
-                if frame is None:
+                if frame is None or status == 'paused':
+                    time.sleep(0.001)
                     continue
 
                 # waits for queue to have space before adding more frames, this
                 # will govern the rate of which frames are read from the movie
                 img, pts = frame
                 frameQueue.put((img, pts, status))
-                    
-                if status == 'eof':  # thread should exit if stream is done
-                    break
-                elif status == 'paused':
-                    time.sleep(0.001)
 
+                if status == 'eof':  # thread should exit if stream is done
+                    with readLock:
+                        frame, status = moviePlayer.seek(0.0, relative=False)
+                    
             # if we're here, the reader thread should exit
-            with readLock:
-                moviePlayer.set_pause(True)
-                moviePlayer.close_player()
+            # with readLock:
+            #     moviePlayer.set_pause(True)
+            #     moviePlayer.close_player()
 
         logging.info("Opening movie file: {}".format(self._filename))
 
@@ -500,38 +500,6 @@ class MovieFileReader:
         # remove the reader from the global list of open movie readers
         if self in _openMovieReaders:
             _openMovieReaders.remove(self)
-
-    def _defragVideoSegments(self):
-        """Defragment the video segment buffer.
-
-        This function defragments the video segment buffer by removing segments
-        which are no longer needed. This is used to prevent the video segment
-        buffer from growing indefinitely.
-
-        """
-        if not self._videoSegments:
-            return
-
-    def _frameInSegmentBuffer(self, pts):
-        """Check if a frame is in the video segment buffer.
-
-        Parameters
-        ----------
-        pts : float
-            The presentation timestamp (PTS) of the frame to check.
-
-        Returns
-        -------
-        bool
-            `True` if the frame is in the video segment buffer. `False` if the
-            frame is not in the buffer.
-
-        """
-        for segment in self._videoSegments:
-            if segment[0] <= pts < segment[1]:
-                return True
-
-        return False
 
     def startDecoding(self, initialPTS=0.0):
         """Start decoding movie frames in background thread.
@@ -673,8 +641,8 @@ class MovieFileReader:
             Video data.
 
         """
-        # round the PTS to 6 decimal places
-        pts = round(pts, 6)
+        # round and constrain the PTS to the duration of the movie
+        pts = min(max(0.0, round(pts, 6)), self.duration)
 
         # check if the frame is within the range of the movie
         if pts >= self.duration:
@@ -706,7 +674,10 @@ class MovieFileReader:
             with self._readLock:
                 self._player.set_pause(True)
                 self._player.seek(
-                    pts, relative=False, seek_by_bytes=False, accurate=True)
+                    pts, 
+                    relative=False, 
+                    seek_by_bytes=False, 
+                    accurate=True)
                 # clear out the frame queue
                 _ = self._dequeueFrames()
                 self._videoSegments.clear()
@@ -716,7 +687,11 @@ class MovieFileReader:
                 # the frames until we get to the desired frame
                 while 1:
                     frame, status = self._player.get_frame(show=True)
-                    if frame is None:
+
+                    if status == 'eof':
+                        break
+                    elif frame is None or status == 'paused':
+                        time.sleep(0.001)
                         continue
 
                     img, curPts = frame
@@ -725,8 +700,6 @@ class MovieFileReader:
                     # check if the pts falls within the interval of this frame
                     if curPts <= pts < curPts + self._frameInterval:
                         self._videoSegments.append((img, curPts, status))
-                        break  
-                    elif status == 'eof':  # handle this case at some point
                         break
 
         # get the PTS of the last video frame to be decoded
@@ -769,7 +742,7 @@ class MovieFileReader:
 
         return toReturn
 
-    def getFrame(self, pts=0.0, dropFrame=True):
+    def getFrame(self, pts=0.0, dropFrame=True, discard=False):
         """Get a frame from the movie file at the specified presentation 
         timestamp.
 
