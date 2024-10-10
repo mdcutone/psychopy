@@ -680,16 +680,6 @@ class Routine(list):
                 '\n# --- Run Routine "{name}" ---\n')
         buff.writeIndentedLines(code.format(name=self.name,
                                             clockName=self._clockName))
-        # check for the trials loop ending this Routine
-        if len(self.exp.flow._loopList):
-            loop = self.exp.flow._loopList[-1]
-            code = (
-                "# if trial has changed, end Routine now\n"
-                "if isinstance({name}, data.TrialHandler2) and {thisName}.thisN != {"
-                "name}.thisTrial.thisN:\n"
-                "    continueRoutine = False\n"
-            ).format(name=loop.name, thisName=loop.thisName)
-            buff.writeIndentedLines(code)
 
         # initial value for forceRoutineEnded (needs to happen now as Code components will have executed
         # their Begin Routine code)
@@ -705,6 +695,15 @@ class Routine(list):
         buff.writeIndented(code)
 
         buff.setIndentLevel(1, True)
+        # check for the trials loop ending this Routine
+        if len(self.exp.flow._loopList):
+            loop = self.exp.flow._loopList[-1]
+            code = (
+                "# if trial has changed, end Routine now\n"
+                "if hasattr({thisName}, 'status') and {thisName}.status == STOPPING:\n"
+                "    continueRoutine = False\n"
+            ).format(thisName=loop.thisName)
+            buff.writeIndentedLines(code)
         # on each frame
         code = ('# get current time\n'
                 't = {clockName}.getTime()\n'
@@ -754,7 +753,7 @@ class Routine(list):
             "    pauseExperiment(\n"
             "        thisExp=thisExp, \n"
             "        win=win, \n"
-            "        timers=[routineTimer], \n"
+            "        timers=[routineTimer, globalClock], \n"
             "        playbackComponents=[{playbackComponentsStr}]\n"
             "    )\n"
             "    # skip the frame we paused on\n"
@@ -824,7 +823,6 @@ class Routine(list):
         code = ("TrialHandler.fromSnapshot(snapshot); // ensure that .thisN vals are up to date\n\n"
                 "//--- Prepare to start Routine '%(name)s' ---\n"
                 "t = 0;\n"
-                "%(name)sClock.reset(); // clock\n"
                 "frameN = -1;\n"
                 "continueRoutine = true; // until we're told otherwise\n"
                 % self.params)
@@ -1008,9 +1006,9 @@ class Routine(list):
         if useNonSlip:
             code = (
                 "if (%(name)sMaxDurationReached) {{\n"
-                "    routineTimer.add(%(name)sMaxDuration);\n"
+                "    %(name)sClock.add(%(name)sMaxDuration);\n"
                 "}} else {{\n"
-                "    routineTimer.add(-{:f});\n"
+                "    %(name)sClock.add({:f});\n"
                 "}}\n"
             ).format(maxTime)
             buff.writeIndented(code % self.params)
@@ -1078,8 +1076,8 @@ class Routine(list):
                     nonSlipSafe = False
                 if duration == FOREVER:
                     # only the *start* of an unlimited event should contribute
-                    # to maxTime
-                    duration = 0  # plus some minimal duration so it's visible
+                    # to maxTime, plus some minimal duration so it's visible
+                    duration = 0 if self.settings.params['forceNonSlip'] else 1
                 # now see if we have a end t value that beats the previous max
                 try:
                     # will fail if either value is not defined:

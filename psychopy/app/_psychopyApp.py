@@ -123,7 +123,7 @@ class MenuFrame(wx.Frame, themes.handlers.ThemeMixin):
 class IDStore(dict):
     """A simpe class that works like a dict but you can access attributes
     like standard python attrs. Useful to replace the previous pre-made
-    app.IDs (wx.NewID() is no longer recommended or safe)
+    app.IDs (wx.NewIdRef(count=1) is no longer recommended or safe)
     """
     def __getattr__(self, attr):
         return self[attr]
@@ -532,6 +532,8 @@ class PsychoPyApp(wx.App, handlers.ThemeMixin):
             if self.prefs.app['defaultView'] == 'all':
                 startView = ["builder", "coder", "runner"]
             elif self.prefs.app['defaultView'] == "last":
+                if self.prefs.appData['lastFrame'] == "both":
+                    self.prefs.appData['lastFrame'] = "builder-coder-runner"
                 startView = self.prefs.appData['lastFrame'].split("-")
             elif self.prefs.app['defaultView'] in ["builder", "coder", "runner"]:
                 startView = self.prefs.app['defaultView']
@@ -542,11 +544,19 @@ class PsychoPyApp(wx.App, handlers.ThemeMixin):
             startView = [startView]
         
         # get files to open from commandline args
-        for arg in sys.argv:
+        for argn, arg in enumerate(sys.argv):
+            # first argument is calling script, ignore it
+            if argn < 1:
+                continue
+            # subsequent arguments are files to open
             if arg.endswith(".psyexp"):
                 exps.append(arg)
             if arg.endswith(".py"):
-                scripts.append(arg)
+                if arg.endswith("psychopyApp.py"):
+                    # this is called erroneously when starting standalone app
+                    continue
+                else:
+                    scripts.append(arg)
             if "runner" not in startView and arg.endswith(".psyrun"):
                 runlist.append(arg)
         

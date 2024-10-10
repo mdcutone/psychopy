@@ -8,7 +8,7 @@ import copy
 import numpy as np
 import pandas as pd
 
-from psychopy import logging
+from psychopy import logging, constants
 from psychopy.tools.filetools import (openOutputFile, genDelimiter,
                                       genFilenameFromDelimiter)
 from .utils import importConditions
@@ -172,6 +172,8 @@ class TrialHandler(_BaseTrialHandler):
 
         self.originPath, self.origin = self.getOriginPathAndFile(originPath)
         self._exp = None  # the experiment handler that owns me!
+        # starting status
+        self.status = constants.NOT_STARTED
 
     def __iter__(self):
         return self
@@ -756,6 +758,8 @@ class Trial(dict):
         self.thisRepN = thisRepN
         self.thisTrialN = thisTrialN
         self.thisIndex = thisIndex
+        # add status
+        self.status = constants.NOT_STARTED
         # data for this trial
         if data is None:
             data = {}
@@ -781,6 +785,13 @@ class Trial(dict):
         # ... and set each value from the given dict
         for key, val in value.items():
             self[key] = val
+    
+    @property
+    def skipped(self):
+        """
+        Has this Trial been skipped?
+        """
+        return self.data.get('skipped', False)
     
     def getDict(self):
         """
@@ -1071,6 +1082,15 @@ class TrialHandler2(_BaseTrialHandler):
     next = __next__  # allows user to call without a loop `val = trials.next()`
 
     @property
+    def thisIndex(self):
+        if self.thisTrial is None:
+            if len(self.elapsedTrials):
+                return self.elapsedTrials[-1].thisIndex
+            else:
+                return -1
+        return self.thisTrial.thisIndex
+
+    @property
     def thisN(self):
         if self.thisTrial is None:
             if len(self.elapsedTrials):
@@ -1108,7 +1128,7 @@ class TrialHandler2(_BaseTrialHandler):
         # start off at 0 trial
         thisTrialN = 0
         thisN = 0
-        thisRepN = 0
+        thisRepN = -1
         # empty array to store indices once taken
         prevIndices = []
         # empty array to store remaining indices
@@ -1226,6 +1246,8 @@ class TrialHandler2(_BaseTrialHandler):
         n : int
             Number of trials to skip ahead
         """
+        # account for the fact current trial will end once skipped
+        n -= 1
         # if skipping past last trial, print warning and skip to last trial
         if n > len(self.upcomingTrials):
             logging.warn(
@@ -1233,15 +1255,20 @@ class TrialHandler2(_BaseTrialHandler):
                 f"Skipping to the last upcoming trial."
             )
             n = len(self.upcomingTrials)
-        # iterate n times
+        # mark as skipping so routines end
+        self.thisTrial.status = constants.STOPPING
+        # before iterating, add "skipped" to data
+        self.addData("skipped", True)
+        # iterate n times (-1 to account for current trial)
         for i in range(n):
+            self.__next__()
             # before iterating, add "skipped" to data
             self.addData("skipped", True)
             # advance row in data file
             if self.getExp() is not None:
                 self.getExp().nextEntry()
-            # iterate
-            self.__next__()
+
+        return self.thisTrial   
 
     def rewindTrials(self, n=1):
         """
@@ -1255,6 +1282,8 @@ class TrialHandler2(_BaseTrialHandler):
         """
         # treat -n as n
         n = abs(n)
+        # account for the fact current trial will end once skipped
+        n += 1
         # if rewinding past first trial, print warning and rewind to first trial
         if n > len(self.elapsedTrials):
             logging.warn(
@@ -1262,6 +1291,8 @@ class TrialHandler2(_BaseTrialHandler):
                 f"elapsed. Rewinding to the first trial."
             )
             n = len(self.elapsedTrials)
+        # mark current trial as skipping so it ends
+        self.thisTrial.status = constants.STOPPING
         # start with no trials
         rewound = [self.thisTrial]
         # pop the last n values from elapsed trials
@@ -1271,6 +1302,8 @@ class TrialHandler2(_BaseTrialHandler):
         self.thisTrial = rewound.pop(0)
         # prepend rewound trials to upcoming array
         self.upcomingTrials = rewound + self.upcomingTrials
+
+        return self.thisTrial
     
     def getCurrentTrial(self):
         """

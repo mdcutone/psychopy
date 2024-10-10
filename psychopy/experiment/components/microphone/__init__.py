@@ -48,6 +48,10 @@ class MicrophoneComponent(BaseDeviceComponent):
     onlineTranscribers = {
         "Google": "google",
     }
+    # dict mapping transcriber names to importable paths
+    transcriberPaths = {
+        'google': "psychopy.sound.transcribe:GoogleCloudTranscriber"
+    }
 
     def __init__(self, exp, parentName, name='mic',
                  startType='time (s)', startVal=0.0,
@@ -56,6 +60,7 @@ class MicrophoneComponent(BaseDeviceComponent):
                  channels='auto', device=None,
                  sampleRate='DVD Audio (48kHz)', maxSize=24000,
                  outputType='default', speakTimes=False, trimSilent=False,
+                 policyWhenFull='warn',
                  transcribe=False, transcribeBackend="none",
                  transcribeLang="en-US", transcribeWords="",
                  transcribeWhisperModel="base",
@@ -142,6 +147,7 @@ class MicrophoneComponent(BaseDeviceComponent):
         )
         self.params['maxSize'] = Param(
             maxSize, valType='num', inputType="single", categ='Device',
+            updates="set every repeat",
             label=_translate("Max recording size (kb)"),
             hint=_translate(
                 "To avoid excessively large output files, what is the biggest file size you are "
@@ -158,7 +164,21 @@ class MicrophoneComponent(BaseDeviceComponent):
             hint=msg,
             label=_translate("Output file type")
         )
-
+        self.params['policyWhenFull'] = Param(
+            policyWhenFull, valType="str", inputType="choice", categ="Data",
+            updates="set every repeat",
+            allowedVals=["warn", "roll", "error"],
+            allowedLabels=[
+                _translate("Discard incoming data"), 
+                _translate("Clear oldest data"), 
+                _translate("Raise error"),
+            ],
+            label=_translate("Full buffer policy"),
+            hint=_translate(
+                "What to do when we reach the max amount of audio data which can be safely stored "
+                "in memory?"
+            )
+        )
         msg = _translate(
             "Tick this to save times when the participant starts and stops speaking")
         self.params['speakTimes'] = Param(
@@ -352,13 +372,18 @@ class MicrophoneComponent(BaseDeviceComponent):
 
     def writeRunOnceInitCode(self, buff):
         inits = getInitVals(self.params)
+        # get transcriber path
+        if inits['transcribeBackend'].val in MicrophoneComponent.transcriberPaths:
+            inits['transcriberPath'] = MicrophoneComponent.transcriberPaths[inits['transcribeBackend'].val]
+        else:
+            inits['transcriberPath'] = inits['transcribeBackend'].val
         # check if the user wants to do transcription
         if inits['transcribe'].val:
             code = (
                 "# Setup speech-to-text transcriber for audio recordings\n"
                 "from psychopy.sound.transcribe import setupTranscriber\n"
                 "setupTranscriber(\n"
-                "    '%(transcribeBackend)s'")
+                "    '%(transcriberPath)s'")
         
             # handle advanced config options
             if inits['transcribeBackend'].val == 'Whisper':
@@ -382,6 +407,9 @@ class MicrophoneComponent(BaseDeviceComponent):
             "    recordingFolder=%(name)sRecFolder,\n"
             "    recordingExt='%(outputType)s'\n"
             ")\n"
+            "# tell the experiment handler to save this Microphone's clips if the experiment is "
+            "force ended\n"
+            "runAtExit.append(%(name)s.saveClips)\n"
         )
         buff.writeIndentedLines(code % inits)
 
@@ -417,15 +445,6 @@ class MicrophoneComponent(BaseDeviceComponent):
         """Write the code that will be called every frame"""
         inits = getInitVals(self.params)
         inits['routine'] = self.parentName
-
-        # If stop time is blank, substitute max stop
-        if self.params['stopVal'] in ('', None, -1, 'None'):
-            self.params['stopVal'].val = at.audioMaxDuration(
-                bufferSize=float(self.params['maxSize'].val) * 1000,
-                freq=float(sampleRates[self.params['sampleRate'].val])
-            )
-            # Show alert
-            alert(4125, strFields={'name': self.params['name'].val, 'stopVal': self.params['stopVal'].val})
 
         # Start the recording
         indented = self.writeStartTestCode(buff)

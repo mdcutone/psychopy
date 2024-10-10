@@ -116,12 +116,26 @@ class _SoundBase(AttributeGetSetMixin):
     # def _setSndFromArray(self, thisArray):
 
     def _parseSpeaker(self, speaker):
+        from psychopy.hardware.speaker import SpeakerDevice
+        # if already a SpeakerDevice, great!
+        if isinstance(speaker, SpeakerDevice):
+            return speaker
+        # if no device, populate from prefs
         if speaker is None:
-            # if no device, populate from prefs
             pref = prefs.hardware['audioDevice']
             if isinstance(pref, (list, tuple)):
                 pref = pref[0]
             speaker = pref
+        # if first pref is defualt, use first device
+        if speaker in ("default", "", None):
+            for profile in DeviceManager.getAvailableDevices("psychopy.hardware.speaker.SpeakerDevice"):
+                # log
+                logging.debug("Using speaker %(deviceName)s as defaultSpeaker" % profile)
+                # initialise as defaultSpeaker
+                profile['deviceName'] = "defaultSpeaker"
+                device = DeviceManager.addDevice(**profile)
+                
+                return device
         # look for device if initialised
         device = DeviceManager.getDevice(speaker)
         # if no matching name, try matching index
@@ -169,10 +183,12 @@ class _SoundBase(AttributeGetSetMixin):
         """
         # Re-init sound to ensure bad values will raise error during setting:
         self._snd = None
-
+        # make references to default stim into absolute paths
         if isinstance(value, str) and value in defaultStim:
             value = defaultStimRoot / defaultStim[value]
-
+        # if directly given a Microphone, get its last recording
+        if hasattr(value, "lastClip"):
+            value = value.lastClip
         # Coerces pathlib obj to string, else returns inputted value
         value = pathToString(value)
         try:

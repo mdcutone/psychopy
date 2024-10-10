@@ -53,7 +53,6 @@
     <Param val="CONTINUOUS" valType="str" updates="None" name="mgMove"/>
     <Param val="0.5" valType="num" updates="None" name="mgSaccade"/>
     <Param val="0.6" valType="num" updates="None" name="plConfidenceThreshold"/>
-    <Param val="True" valType="bool" updates="None" name="plPupilCaptureRecordingEnabled"/>
     <Param val="" valType="str" updates="None" name="plPupilCaptureRecordingLocation"/>
     <Param val="127.0.0.1" valType="str" updates="None" name="plPupilRemoteAddress"/>
     <Param val="50020" valType="num" updates="None" name="plPupilRemotePort"/>
@@ -482,7 +481,7 @@
         <Param val="" valType="code" updates="None" name="durationEstim"/>
         <Param val="False" valType="bool" updates="constant" name="flipHoriz"/>
         <Param val="False" valType="bool" updates="constant" name="flipVert"/>
-        <Param val="default.png" valType="file" updates="set during: Images_2AFC.ISI_load_images" name="image"/>
+        <Param val="default.png" valType="file" updates="set during: images_2afc.ISI_load_images" name="image"/>
         <Param val="linear" valType="str" updates="constant" name="interpolate"/>
         <Param val="" valType="str" updates="constant" name="mask"/>
         <Param val="left_img" valType="code" updates="None" name="name"/>
@@ -522,7 +521,7 @@
         <Param val="" valType="code" updates="None" name="durationEstim"/>
         <Param val="False" valType="bool" updates="constant" name="flipHoriz"/>
         <Param val="False" valType="bool" updates="constant" name="flipVert"/>
-        <Param val="default.png" valType="file" updates="set during: Images_2AFC.ISI_load_images" name="image"/>
+        <Param val="default.png" valType="file" updates="set during: images_2afc.ISI_load_images" name="image"/>
         <Param val="linear" valType="str" updates="constant" name="interpolate"/>
         <Param val="" valType="str" updates="constant" name="mask"/>
         <Param val="right_img" valType="code" updates="None" name="name"/>
@@ -598,7 +597,7 @@
         <Param val="" valType="code" updates="None" name="durationEstim"/>
         <Param val="False" valType="bool" updates="constant" name="flipHoriz"/>
         <Param val="False" valType="bool" updates="constant" name="flipVert"/>
-        <Param val="default.png" valType="file" updates="set during: Images_2AFC.ISI_load_images" name="image"/>
+        <Param val="default.png" valType="file" updates="set during: images_2afc.ISI_load_images" name="image"/>
         <Param val="linear" valType="str" updates="constant" name="interpolate"/>
         <Param val="" valType="str" updates="constant" name="mask"/>
         <Param val="top_left_img" valType="code" updates="None" name="name"/>
@@ -638,7 +637,7 @@
         <Param val="" valType="code" updates="None" name="durationEstim"/>
         <Param val="False" valType="bool" updates="constant" name="flipHoriz"/>
         <Param val="False" valType="bool" updates="constant" name="flipVert"/>
-        <Param val="default.png" valType="file" updates="set during: Images_2AFC.ISI_load_images" name="image"/>
+        <Param val="default.png" valType="file" updates="set during: images_2afc.ISI_load_images" name="image"/>
         <Param val="linear" valType="str" updates="constant" name="interpolate"/>
         <Param val="" valType="str" updates="constant" name="mask"/>
         <Param val="top_right_img" valType="code" updates="None" name="name"/>
@@ -665,7 +664,7 @@
         <Param val="" valType="code" updates="None" name="durationEstim"/>
         <Param val="False" valType="bool" updates="constant" name="flipHoriz"/>
         <Param val="False" valType="bool" updates="constant" name="flipVert"/>
-        <Param val="default.png" valType="file" updates="set during: Images_2AFC.ISI_load_images" name="image"/>
+        <Param val="default.png" valType="file" updates="set during: images_2afc.ISI_load_images" name="image"/>
         <Param val="linear" valType="str" updates="constant" name="interpolate"/>
         <Param val="" valType="str" updates="constant" name="mask"/>
         <Param val="bott_left_img" valType="code" updates="None" name="name"/>

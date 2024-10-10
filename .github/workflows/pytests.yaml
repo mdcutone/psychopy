@@ -91,7 +91,6 @@ jobs:
           brew install swig vlc portaudio portmidi liblo sdl2
         fi
         # install optional components
-        pip install psychopy-sounddevice psychopy-pyo psychopy-legacy-mic psychopy-connect psychopy-crs psychopy-emotiv psychopy-gammasci psychopy-mri-emulator
         pip install moviepy
 
 #    - name: test docs to pdf
@@ -162,7 +161,7 @@ jobs:
 
     - name: Upload coverage to Codecov
       if: always()
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         fail_ci_if_error: false
 

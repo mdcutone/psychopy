@@ -249,11 +249,28 @@ class _MasterStream(audio.Stream):
                       .format(device, mode+8, audioLatencyClass, sampleRate, channels))
                 raise e
             except Exception as e:
-                audio.Stream.__init__(self, mode=mode+8,
-                                      latency_class=audioLatencyClass,
-                                      freq=sampleRate,
-                                      channels=channels,
-                                      )
+                if deviceID == -1:
+                    # if default device doesn't setup from ptb, pick first device
+                    for device in audio.get_devices(device_type=13):
+                        logging.error(
+                            f"System default audio device failed to connect, so using first found "
+                            f"device: {device['DeviceName']}"
+                        )
+                        audio.Stream.__init__(
+                            self,mode=mode+8,
+                            device_id=device['DeviceIndex'],
+                            freq=device['DefaultSampleRate'],
+                            channels=device['NrOutputChannels']
+                        )
+                        break
+                else:
+                    # any other problem, try with no device ID
+                    audio.Stream.__init__(
+                        self, mode=mode+8,
+                        latency_class=audioLatencyClass,
+                        freq=sampleRate,
+                        channels=channels,
+                    )
 
                 if "there isn't any audio output device" in str(e):
                     print("Failed to load audio device:\n"
@@ -386,7 +403,12 @@ class SoundPTB(_SoundBase):
 
     @stereo.setter
     def stereo(self, val):
+        # if auto, get from speaker
+        if val == -1:
+            val = self.speaker.channels > 1
+        # store value
         self.__dict__['stereo'] = val
+        # convert to n channels
         if val is True:
             self.__dict__['channels'] = 2
         elif val is False:
@@ -496,6 +518,13 @@ class SoundPTB(_SoundBase):
         self.seek(0)
         self.sourceType = "array"
 
+        # catch when array is empty
+        if not len(self.sndArr):
+            logging.warning(
+                "Received a blank array for sound, playing nothing instead."
+            )
+            self.sndArr = np.zeros(shape=(self.blockSize, self.channels))
+
         if not self.track:  # do we have one already?
             self.track = audio.Slave(self.stream.handle, data=self.sndArr,
                                      volume=self.volume)
@@ -556,7 +585,7 @@ class SoundPTB(_SoundBase):
         self._isFinished = False
         # time.sleep(0.)
         if log and self.autoLog:
-            logging.exp(u"Sound %s started" % (self.name), obj=self, t=logTime)
+            logging.exp(u"Playing sound %s on speaker %s" % (self.name, self.speaker.deviceName), obj=self, t=logTime)
 
     def pause(self, log=True):
         """Stops the sound without reset, so that play will continue from here if needed

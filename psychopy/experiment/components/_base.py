@@ -712,6 +712,19 @@ class BaseComponent:
         # write if statement and indent
         buff.writeIndentedLines(code % params)
         buff.setIndentLevel(+1, relative=True)
+        # store stop
+        code = (
+            "// keep track of stop time/frame for later\n"
+            "%(name)s.tStop = t;  // not accounting for scr refresh\n"
+            "%(name)s.frameNStop = frameN;  // exact frame index\n"
+        )
+        buff.writeIndentedLines(code % params)
+        # set status
+        code = (
+            "// update status\n"
+            "%(name)s.status = PsychoJS.Status.FINISHED;\n"
+        )
+        buff.writeIndentedLines(code % params)
 
         # Return True if stop test was written
         return buff.indentLevel - startIndent
@@ -1034,8 +1047,17 @@ class BaseComponent:
 
     def getStartAndDuration(self, params=None):
         """Determine the start and duration of the stimulus
+
+        When nonSlipSafe is False, the outputs of this function are used
         purely for Routine rendering purposes in the app (does not affect
-        actual drawing during the experiment)
+        actual drawing during the experiment).
+
+        When nonSlipSafe is True or when `forceNonSlip` is True, the outputs
+        of this function are used to determine maxTime of routine, which is
+        written into the generated script during writeMainCode() to as a part
+        of the stopping criteria of the routine while loop. In these two cases,
+        the outputs of this function does affect actual during during the
+        experiment (not only for Routine rendering purposes in the app).
 
         start, duration, nonSlipSafe = component.getStartAndDuration()
 
@@ -1052,18 +1074,18 @@ class BaseComponent:
             params = self.params
 
         # If has a start, calculate it
-        if 'startType' in self.params:
+        if 'startType' in params:
             startTime, numericStart = self.getStart()
         else:
             startTime, numericStart = None, False
 
         # If has a stop, calculate it
-        if 'stopType' in self.params:
+        if 'stopType' in params:
             duration, numericStop = self.getDuration(startTime=startTime)
         else:
             duration, numericStop = 0, False
 
-        nonSlipSafe = numericStop and (numericStart or self.params['stopType'].val == 'time (s)')
+        nonSlipSafe = numericStop and (numericStart or params['stopType'].val == 'time (s)')
         return startTime, duration, nonSlipSafe
 
     def getPosInRoutine(self):
