@@ -193,7 +193,7 @@ class MovieFileReader:
                  filename, 
                  decoderLib='ffpyplayer', 
                  decoderOpts=None, 
-                 maxQueueSize=32):
+                 maxQueueSize=8):
         
         if maxQueueSize < 0:
             raise ValueError('`maxQueueSize` must be >=0.')
@@ -387,7 +387,7 @@ class MovieFileReader:
                 # waits for queue to have space before adding more frames, this
                 # will govern the rate of which frames are read from the movie
                 img, pts = frame
-                frameQueue.put((img, pts, status))
+                frameQueue.put((img, round(pts, 6), status))
 
                 if status == 'eof':  # thread should exit if stream is done
                     with readLock:
@@ -570,6 +570,81 @@ class MovieFileReader:
         """
         return self.isPlaying
 
+    def _seekFFPyPlayer(self, pts):
+        """FFPyPlayer specific seek routine.
+
+        This is called by `seek()` when the `ffpyplayer` backend is in use.
+
+        Parameters
+        ----------
+        pts : float
+            The presentation timestamp (PTS) to seek to in seconds.
+
+        """
+        pts = min(max(0.0, pts), self.duration)  # normalize PTS
+
+        with self._readLock:
+            self._player.set_pause(True)
+            self._player.seek(
+                pts, relative=False, seek_by_bytes=False, accurate=True)
+
+            # clear out the frame queue
+            _ = self._dequeueFrames()
+            self._videoSegments.clear()
+            self._player.set_pause(False)
+
+            # clear the frame queue and segement buffer
+            _ = self._dequeueFrames()
+            self._videoSegments.clear()
+
+            # check if we arrived at the desired frame
+            while 1:
+                frame, status = self._player.get_frame(show=True)
+
+                if status == 'eof':
+                    break
+                elif frame is None or status == 'paused':
+                    time.sleep(0.001)
+                    continue
+
+                img, curPts = frame
+                curPts = round(curPts, 6)
+
+                # check if the pts falls within the interval of this frame
+                if curPts <= pts < curPts + self._frameInterval:
+                    self._videoSegments.append((img, curPts, status))
+                    break
+
+        # decoding thread will resume here
+    
+    def seek(self, pts):
+        """Seek to a specific presentation timestamp (PTS) in the movie.
+
+        This function seeks to a specific presentation timestamp (PTS) in the
+        movie file. The decoder will begin decoding frames from the specified
+        PTS. If the PTS is outside the range of the movie, the decoder will seek
+        to the end of the movie.
+
+        Seeking blocks the main thread until the desired frame is found.
+
+        Parameters
+        ----------
+        pts : float
+            The presentation timestamp (PTS) to seek to in seconds.
+
+        """
+        self._lastFrame = None
+        self._lastFrameInterval = (-1.0, 0.0)
+
+        if self._decoderLib == 'ffpyplayer':
+            self._seekFFPyPlayer(pts)
+        elif self._decoderLib == 'opencv':  # rough in support for opencv
+            raise NotImplementedError(
+                'The `opencv` library is not supported for movie reading.')
+        else:
+            raise ValueError(
+                'Unknown decoder library: {}'.format(self._decoderLib))
+
     @property
     def memoryUsed(self):
         """Get the amount of memory used to store decoded frames.
@@ -619,8 +694,8 @@ class MovieFileReader:
             queuedFrames.append(frameData)
         
         return queuedFrames
-
-    def _getFrameFFPyPlayer(self, pts=0.0, dropFrame=True):
+    
+    def _getFrameFFPyPlayer(self, pts=0.0, dropFrame=False):
         """Get a frame from the movie file using FFPyPlayer.
 
         This must be called after `start()` to get frames from the movie file.
@@ -644,104 +719,55 @@ class MovieFileReader:
         # round and constrain the PTS to the duration of the movie
         pts = min(max(0.0, round(pts, 6)), self.duration)
 
+        if self._lastFrame is not None:
+            print('use last frame')
+            print(self._lastFrameInterval)
+            lastFrameStart, lastFrameEnd = self._lastFrameInterval
+            if lastFrameStart <= pts < lastFrameEnd:
+                return self._lastFrame
+
         # check if the frame is within the range of the movie
         if pts >= self.duration:
             toReturn = self._videoSegments[-1]
             return toReturn
 
         # do we have any frames in the queue?
-        if self._frameQueue.qsize() > 0:
+        if len(self._videoSegments) <= 1:
             with self._readLock:
-                self._videoSegments += self._dequeueFrames()
+                self._videoSegments.extend(self._dequeueFrames())
 
         # check if we need to seek first
         if self._videoSegments:
+            if pts < self._videoSegments[0][1]:
+                return self._videoSegments[0]
+
             # we have a segment, but wee need to check if the frame is in the
             # segment buffer. If not, we'll need to seek to the frame
             segmentStart = self._videoSegments[0][1]
             segmentEnd = self._videoSegments[-1][1] + self._frameInterval
-            # is the pts outside the current segment buffer? seek if so
-            needSeek = not segmentStart <= pts < segmentEnd
-        else:
-            # check the position of the movie
-            with self._readLock:
-                currentPos = self._player.get_pts()
-            # check if the requested pts is within the current position
-            needSeek = not currentPos <= pts < currentPos + self._frameInterval
 
-        # do we need to seek to the frame?
-        if needSeek:
-            with self._readLock:
-                self._player.set_pause(True)
-                self._player.seek(
-                    pts, 
-                    relative=False, 
-                    seek_by_bytes=False, 
-                    accurate=True)
-                # clear out the frame queue
-                _ = self._dequeueFrames()
-                self._videoSegments.clear()
-                self._player.set_pause(False)
+            if pts < segmentStart:
+                return self._videoSegments[0]  
+            elif pts > segmentEnd + self._frameInterval:
+                return self._videoSegments[-1] # last frame
 
-                # seeking gets us close to the frame, so we need to pull down
-                # the frames until we get to the desired frame
-                while 1:
-                    frame, status = self._player.get_frame(show=True)
+            # check if we have the frame in the segment buffer
+            for idx, segment in enumerate(self._videoSegments):
+                frameStartTime = segment[1]
+                if idx < len(self._videoSegments) - 1:
+                    nextFrameTime = self._videoSegments[idx + 1][1]
+                else:
+                    nextFrameTime = min(
+                        frameStartTime + self._frameInterval, self.duration)
 
-                    if status == 'eof':
-                        break
-                    elif frame is None or status == 'paused':
-                        time.sleep(0.001)
-                        continue
-
-                    img, curPts = frame
-                    curPts = round(curPts, 6)
-                    
-                    # check if the pts falls within the interval of this frame
-                    if curPts <= pts < curPts + self._frameInterval:
-                        self._videoSegments.append((img, curPts, status))
-                        break
-
-        # get the PTS of the last video frame to be decoded
-        endPts = self._videoSegments[-1][1] if self._videoSegments else -1.0
-
-        if pts >= endPts:
-            print('Frame not available. End of stream.')
-            if self._videoSegments:
-                return self._videoSegments[-1]
-            return None
-
-        # estimate the frame index that contains the desired frame, this is used
-        # to avoid needing to iterate over all the frames in the video segment
-        # find one with the closest PTS
-        segmentStartIdx = int(self._videoSegments[0][1] / self.frameInterval)
-        estFrameIndex = int(pts / self.frameInterval) - segmentStartIdx
-
-        # get the frame from the video segment buffer
-        try:
-            toReturn = self._videoSegments[estFrameIndex]
-        except IndexError:
-            toReturn = self._videoSegments[-1]
-
-        # get the next frame that falls within the interval
-        for i, segment in enumerate(self._videoSegments[estFrameIndex:]):
-            beginFrameTime = segment[1]
-
-            # look ahead to get the next frame start time
-            if i + 1 >= len(self._videoSegments):  
-                toReturn = self._videoSegments[-1]
-                break
-
-            nextFrame = self._videoSegments[estFrameIndex + i + 1]
-            nextFrameTime = nextFrame[1]
-
-            # check if it falls within the interval for the current frame index
-            if beginFrameTime <= pts < nextFrameTime:
-                toReturn = segment
-                break
-
-        return toReturn
-
+                if frameStartTime <= pts < nextFrameTime:
+                    # cache the frame for faster access
+                    self._lastFrame = segment
+                    self._lastFrameInterval = (frameStartTime, nextFrameTime)
+                    self._videoSegments = self._videoSegments[idx:]
+                    return segment
+        
+        
     def getFrame(self, pts=0.0, dropFrame=True, discard=False):
         """Get a frame from the movie file at the specified presentation 
         timestamp.
