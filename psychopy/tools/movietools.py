@@ -529,19 +529,19 @@ class MovieFileReader:
 
         # use the read lock to prevent the reader thread from interacting with
         # the media reader object
-        with self._readLock:
-            if self._decoderLib == 'ffpyplayer':
+        if self._decoderLib == 'ffpyplayer':
+            with self._readLock:
                 # seek to the initial PTS
                 self._player.set_pause(True)
                 self._player.seek(initialPTS, relative=False, accurate=True)
                 # unpause the movie to begin decoding frames
                 self._player.set_pause(False)
-            elif self._decoderLib == 'opencv':
-                raise NotImplementedError(
-                    'The `opencv` library is not supported for movie reading.')
-            else:
-                raise ValueError(
-                    'Unknown decoder library: {}'.format(self._decoderLib))
+        elif self._decoderLib == 'opencv':
+            raise NotImplementedError(
+                'The `opencv` library is not supported for movie reading.')
+        else:
+            raise ValueError(
+                'Unknown decoder library: {}'.format(self._decoderLib))
 
     def stopDecoding(self):
         """Stop decoding movie frames in background thread.
@@ -766,7 +766,9 @@ class MovieFileReader:
                     self._lastFrameInterval = (frameStartTime, nextFrameTime)
                     self._videoSegments = self._videoSegments[idx:]
                     return segment
-        
+        else:
+            if dropFrame:
+                return self._lastFrame
         
     def getFrame(self, pts=0.0, dropFrame=True, discard=False):
         """Get a frame from the movie file at the specified presentation 
@@ -1827,6 +1829,44 @@ def addAudioToMovie(outputFile, videoFile, audioFile, useThreads=True,
               removeFiles,
               moviePyOpts))
     compositorThread.start()
+
+
+def extractAudioFromMovie(videoFile, audioFile, removeFiles=False):
+    """Extract the audio track from a video file.
+
+    This function will extract the audio track from a video file and save it to
+    a separate audio file. The audio file will be saved in the same format as
+    the audio track in the video file.
+
+    Parameters
+    ----------
+    videoFile : str
+        Path to the input video file.
+    audioFile : str
+        Path to the output audio file where the audio track will be saved.
+    removeFiles : bool
+        If `True`, the input video file (`videoFile`) will be removed (i.e.
+        deleted from disk) after the audio has been extracted. Defaults to
+        `False`.
+
+    Examples
+    --------
+    Extract the audio track from a video file::
+
+        from psychopy.tools.movietools import extractAudioFromMovie
+        extractAudioFromMovie('video.mp4', 'audio.mp3')
+
+    """
+    from moviepy.video.io.VideoFileClip import VideoFileClip
+
+    # extract the audio track from the video file
+    videoClip = VideoFileClip(videoFile)
+    audioClip = videoClip.audio
+    audioClip.write_audiofile(audioFile)
+
+    if removeFiles:
+        # remove the input video file
+        os.remove(videoFile)
 
 
 if __name__ == "__main__":
