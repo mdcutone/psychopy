@@ -172,11 +172,10 @@ class MovieFileReader:
         the `decoderLib` in use. If `None`, the reader will use the default
         options for the backend.
     maxQueueSize : int
-        The maximum number of frames to queue in memory. If the queue is full,
-        the reader will wait until a frame is removed from the queue before
-        adding a new frame. Consider reducing this value to reduce CPU usage if
-        you are presenting frames slower than they are being read from the movie
-        file. If `0`, the queue size is unlimited. Value must be >=0.
+        The maximum number of frames the decoder is allowed to buffer in memory
+        between reads. This is used to control the rate at which frames are read
+        from the movie file. If the queue is full, the decoder thread is blocked
+        until space is available. The default is `3`.
 
     Notes
     -----
@@ -190,10 +189,10 @@ class MovieFileReader:
 
     """
     def __init__(self, 
-                 filename, 
+                 filename,
                  decoderLib='ffpyplayer', 
                  decoderOpts=None, 
-                 maxQueueSize=8):
+                 maxQueueSize=3):
         
         if maxQueueSize < 0:
             raise ValueError('`maxQueueSize` must be >=0.')
@@ -338,80 +337,12 @@ class MovieFileReader:
 
         self.open()
 
-    def _startFFPyPlayer(self):
-        """Start decoding video frames using FFPyPlayer.
-
-        This function spawns the background thread to begin reading frames from
-        the movie file. If the thread is already running, this function will
-        do nothing.
-
-        """
-        def _asyncFrameReader(moviePlayer, frameQueue, readLock, exitEvent,
-                              warmupBarrier=None):
-            """Local function used to read frames from the movie file.
-
-            This is executed in a thread to allow the main thread to continue
-            adding frames to the movie while the movie is being written to
-            disk.
-
-            Parameters
-            ----------
-            moviePlayer : ffpyplayer.player.MediaPlayer
-                The movie player object used to read frames from the movie file.
-            frameQueue : queue.Queue
-                A queue containing the frames read from the movie file.
-            readLock : threading.Lock
-                A lock used to synchronize access to the movie reader object for
-                accessing playback controls.
-            exitEvent : threading.Event
-                An event used to signal the reader thread to exit.
-            warmupBarrier : threading.Barrier or None
-                A `threading.Barrier` object used to synchronize the movie
-                reader with other threads. This guarantees that the movie reader
-                is ready before frames are passed te the queue. If `None`,
-                no synchronization is performed.
-
-            """
-            # wait until initialized
-            stopped = False
-            while not exitEvent.is_set():  # quit if signaled
-                with readLock:
-                    frame, status = moviePlayer.get_frame(show=True)
-                    print('Frame:', frame, 'Status:', status)
-
-                if status == 'paused':
-                    time.sleep(0.001)
-                    continue
-                elif status == 'eof':
-                    with readLock:
-                        moviePlayer.set_pause(True)
-                        # moviePlayer.seek(0.0, relative=False, accurate=True)
-                    break
-
-                if frame is None:
-                    time.sleep(0.001)  # no frame available yet or paused
-                    continue
-
-                # waits for queue to have space before adding more frames, this
-                # will govern the rate of which frames are read from the movie
-                img, pts = frame
-                frameQueue.put((img, round(pts, 6), status))
-
-        # check if the thread is alive or started
-        if self._readerThread is None or not self._readerThread.is_alive():
-            self._readerThread = threading.Thread(
-                target=_asyncFrameReader,
-                args=(self._player, 
-                      self._frameQueue, 
-                      self._readLock, 
-                      self._exitEvent))
-            self._readerThread.start()
-
     def _openFFPyPlayer(self):
         """Open a movie reader using FFPyPlayer.
 
         This function opens the movie file and extracts metadata about the movie
-        file. Call `start()` to begin decoding frames in a background thread.
+        file. Call `startDecoding()` to begin decoding frames in a background 
+        thread.
 
         """
         # import in the class too avoid hard dependency on ffpyplayer
@@ -427,7 +358,11 @@ class MovieFileReader:
         # default options
         defaultFFOpts = {
             'paused': True,
-            # 'loop': 1
+            'sync': 'video',
+            'an': False,
+            'volume': 0.0,
+            'loop': 1,
+            'infbuf': True
         }
 
         # merge user settings with defaults, user settings take precedence
@@ -460,9 +395,27 @@ class MovieFileReader:
 
         # initialize the thread, the thread will wait on frames to be added to
         # the queue
-        logging.debug("Starting movie reader thread...")
-        # self._startFFPyPlayer()  # start the background frame decoder
-        logging.debug("Waiting for movie reader thread to start...")
+        # logging.debug("Starting movie reader thread...")
+        # # self._startFFPyPlayer()  # start the background frame decoder
+        # logging.debug("Waiting for movie reader thread to start...")
+
+        # preload frames
+        # logging.debug("Preloading frames...")
+        # with self._readLock:
+        #     self._player.set_pause(False)
+        #     nFrames = 0
+        #     while nFrames < 3:
+        #         frame, status = self._player.get_frame(show=True)
+        #         if frame is None:
+        #             time.sleep(0.001)
+        #             continue
+        #         img, pts = frame
+        #         self._videoSegments.append((img, pts, status))
+        #         nFrames += 1
+
+        #     self._player.set_pause(True)
+        
+        # print("PRELOADING DONE:", self._videoSegments)
 
         logging.debug("Movie reader thread started.")
 
@@ -499,7 +452,7 @@ class MovieFileReader:
         it.
 
         """
-        return self._readerThread is not None and self._readerThread.is_alive()
+        return self in _openMovieReaders
 
     def close(self):
         """Close the movie file.
@@ -515,6 +468,81 @@ class MovieFileReader:
         # remove the reader from the global list of open movie readers
         if self in _openMovieReaders:
             _openMovieReaders.remove(self)
+
+    # --------------------------------------------------------------------------
+    # Backend-specific decoding routines
+    #
+
+    def _startFFPyPlayer(self):
+        """Start decoding video frames using FFPyPlayer.
+
+        This function spawns the background thread to begin reading frames from
+        the movie file. If the thread is already running, this function will
+        do nothing.
+
+        """
+        def _asyncFrameReader(moviePlayer, frameQueue, readLock, exitEvent):
+            """Local function used to read frames from the movie file.
+
+            This is executed in a thread to allow the main thread to continue
+            adding frames to the movie while the movie is being written to
+            disk.
+
+            Parameters
+            ----------
+            moviePlayer : ffpyplayer.player.MediaPlayer
+                The movie player object used to read frames from the movie file.
+            frameQueue : queue.Queue
+                A queue containing the frames read from the movie file.
+            readLock : threading.Lock
+                A lock used to synchronize access to the movie reader object for
+                accessing playback controls.
+            exitEvent : threading.Event
+                An event used to signal the thread to exit.
+
+            """
+            # stays in loop until EOF or exit event, governed by queue size
+            while not exitEvent.is_set():  
+                with readLock:
+                    frame, status = moviePlayer.get_frame(show=True)
+
+                if status == 'paused':
+                    time.sleep(0.001)
+                    continue
+                elif status == 'eof':
+                    with readLock:
+                        moviePlayer.set_pause(True)
+                        moviePlayer.seek(0.0, relative=False, accurate=True)
+                    break
+
+                if frame is None:
+                    time.sleep(0.001)  # no frame available yet or paused
+                    continue
+
+                # waits for queue to have space before adding more frames, this
+                # will govern the rate of which frames are read from the movie
+                img, pts = frame
+                frameQueue.put((img, round(pts, 6), status))
+
+        if not self.isOpen:
+            raise ValueError('Movie reader is not open. Cannot start decoding.')
+
+        # check if the thread is alive or started
+        if self._readerThread is not None and self._readerThread.is_alive():
+            return
+
+        self._exitEvent.clear()  # clear the exit event
+
+        # start the reader thread
+        self._readerThread = threading.Thread(
+            target=_asyncFrameReader,
+            args=(self._player, 
+                    self._frameQueue, 
+                    self._readLock,
+                    self._exitEvent),
+            daemon=True)
+
+        self._readerThread.start()
 
     def startDecoding(self, initialPTS=0.0):
         """Start decoding movie frames in background thread.
@@ -545,19 +573,52 @@ class MovieFileReader:
         # use the read lock to prevent the reader thread from interacting with
         # the media reader object
         if self._decoderLib == 'ffpyplayer':
-            with self._readLock:
-                # seek to the initial PTS
-                self._player.set_pause(True)
-                self._player.seek(initialPTS, relative=False, accurate=True)
-                # unpause the movie to begin decoding frames
-                self._player.set_pause(False)
-                self._startFFPyPlayer()
+            self.seek(initialPTS)
         elif self._decoderLib == 'opencv':
             raise NotImplementedError(
                 'The `opencv` library is not supported for movie reading.')
         else:
             raise ValueError(
                 'Unknown decoder library: {}'.format(self._decoderLib))
+
+    def _frameIndexToTimestamp(self, frameIndex):
+        """Convert a frame index to a presentation timestamp (PTS).
+
+        This function converts a frame index to a presentation timestamp (PTS)
+        in seconds. The frame index is the index of the frame in the movie file.
+
+        Parameters
+        ----------
+        frameIndex : int
+            The index of the frame in the movie file.
+
+        Returns
+        -------
+        float
+            The presentation timestamp (PTS) of the frame in seconds.
+
+        """
+        return frameIndex * self._frameInterval
+
+    def _timestampToFrameIndex(self, pts):
+        """Convert a presentation timestamp (PTS) to a frame index.
+
+        This function converts a presentation timestamp (PTS) in seconds to a
+        frame index. The frame index is the index of the frame in the movie 
+        file.
+
+        Parameters
+        ----------
+        pts : float
+            The presentation timestamp (PTS) of the frame in seconds.
+
+        Returns
+        -------
+        int
+            The index of the frame in the movie file.
+
+        """
+        return int(pts / self._frameInterval)
 
     def stopDecoding(self):
         """Stop decoding movie frames in background thread.
@@ -734,25 +795,25 @@ class MovieFileReader:
         """
         # round and constrain the PTS to the duration of the movie
         pts = min(max(0.0, round(pts, 6)), self.duration)
-        print('Requested PTS:', pts)
+        # print('Requested PTS:', pts)
 
         if self._lastFrame is not None:
-            print('Current frame interval:', self._lastFrameInterval)
             lastFrameStart, lastFrameEnd = self._lastFrameInterval
             if lastFrameStart <= pts < lastFrameEnd:
                 print('use last frame')
                 return self._lastFrame
 
         # do we have any frames in the queue?
-        with self._readLock:
-            self._videoSegments.extend(self._dequeueFrames())
-
+        if len(self._videoSegments) <= 1:
+            with self._readLock:
+                self._videoSegments.extend(self._dequeueFrames())
+        
         # check if the frame is within the range of the movie
         if pts >= self.duration:
             toReturn = self._videoSegments[-1]
             return toReturn
 
-        print('Video segments:', self._videoSegments)
+        # print('Video segments:', self._videoSegments)
 
         # check if we need to seek first
         if self._videoSegments:
