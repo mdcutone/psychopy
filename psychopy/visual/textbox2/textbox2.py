@@ -18,6 +18,7 @@ some more added:
 from ast import literal_eval
 
 import numpy as np
+import sys
 from arabic_reshaper import ArabicReshaper
 from pyglet import gl
 from bidi import algorithm as bidi
@@ -25,7 +26,7 @@ import re
 
 from ..aperture import Aperture
 from ..basevisual import (
-    BaseVisualStim, ColorMixin, ContainerMixin, WindowMixin, DraggingMixin
+    BaseVisualStim, ColorMixin, ContainerMixin, WindowMixin, DraggingMixin, PointerMixin
 )
 from psychopy.tools.attributetools import attributeSetter, setAttribute
 from psychopy.tools import mathtools as mt
@@ -66,10 +67,13 @@ debug = False
 # If text is ". " we don't want to start next line with single space?
 
 
-class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
+class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, ColorMixin):
     def __init__(self, win, text,
                  font="Open Sans",
-                 pos=(0, 0), units=None, letterHeight=None,
+                 pos=(0, 0),
+                 units=None,
+                 letterHeight=None,
+                 ori=0,
                  size=None,
                  color=(1.0, 1.0, 1.0), colorSpace='rgb',
                  fillColor=None, fillColorSpace=None,
@@ -96,13 +100,16 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
                  autoLog=None,
                  autoDraw=False,
                  depth=0,
-                 onTextCallback=None):
+                 onTextCallback=None,
+                 clickable=True):
         """
 
         Parameters
         ----------
-        win
-        text
+        win : Window
+            The window this stimulus is associated with.
+        text : str
+            The text to display in the TextBox.
         font
         pos
         units
@@ -146,6 +153,7 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
         self.colorSpace = colorSpace
         ColorMixin.foreColor.fset(self, color)  # Have to call the superclass directly on init as text has not been set
         self.onTextCallback = onTextCallback
+        self.clickable = clickable
         self.draggable = draggable
 
         # Box around the whole textbox - drawn
@@ -247,6 +255,9 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
         self.languageStyle = languageStyle
         self._text = ''
         self.text = self.startText = text if text is not None else ""
+
+        # now that we have text, set orientation
+        self.ori = ori
 
         # Initialise arabic reshaper
         arabic_config = {'delete_harakat': False,  # if present, retain any diacritics
@@ -472,8 +483,8 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
         if hasattr(self, "box"):
             self.box.size = self._pos
         if hasattr(self, "contentBox"):
-            # Content box should be anchored center relative to box, but its pos needs to be relative to box's vertices, not its pos
-            self.contentBox.pos = self.pos + self.size * self.box._vertices.anchorAdjust
+            # set content box pos with offset for anchor (accounting for orientation)
+            self.contentBox.pos = self.pos + np.dot(self.size * self.box._vertices.anchorAdjust, self._rotationMatrix)
             self.contentBox._needVertexUpdate = True
         if hasattr(self, "_placeholder"):
             self._placeholder.pos = self._pos
@@ -1169,8 +1180,11 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
             # Adjust vertices
             vertices[:, 0] = vertices[:, 0] + adjustX
 
-        # Convert the vertices to be relative to content box and set
-        self.vertices = vertices / self.contentBox._size.pix + (-0.5, 0.5)
+        # convert the vertices to be relative to content box and set
+        vertices = vertices / self.contentBox._size.pix + (-0.5, 0.5)
+        # apply orientation
+        self.vertices = (vertices * self.size).dot(self._rotationMatrix) / self.size
+
         if len(_lineBottoms):
             if self.flipVert:
                 self._lineBottoms = min(self.contentBox._vertices.pix[:, 1]) - np.array(_lineBottoms)
@@ -1186,6 +1200,20 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
             self.glFont.upload()
             self.glFont._dirty = False
         self._needVertexUpdate = True
+
+    @attributeSetter
+    def ori(self, value):
+        # get previous orientaiton
+        lastOri = self.__dict__.get("ori", 0)
+        # set new value
+        BaseVisualStim.ori.func(self, value)
+        # set on all boxes
+        self.box.ori = value
+        self.boundingBox.ori = value
+        self.contentBox.ori = value
+        # trigger layout if value has changed
+        if lastOri != value:
+            self._layout()
 
     def draw(self):
         """Draw the text to the back buffer"""
@@ -1474,6 +1502,59 @@ class TextBox2(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin):
             pass
         else:
             print("Received unhandled cursor motion type: ", key)
+
+    def getCharAtPos(self, pos):
+        """Get the character index at a given position.
+        
+        This can be used to determine what character is under the specified 
+        position in the stimulus.
+
+        Parameters
+        ----------
+        pos : list, tuple
+            Position in stimulus units.
+
+        Returns
+        -------
+        int or None
+            Index of character at the given position. Returns None if no 
+            character is at the given position or if the position is outside
+            the stimulus bounds.
+            
+        """
+        px, py = pos[0] * 2.0, pos[1] * 2.0   # why x2?
+
+        # read verticies in blocks of 4
+        for i in range(0, len(self.vertices), 4):
+            # get the four corners of the character
+            charVertices = self.vertices[i:i + 4]
+            
+            x0, y0 = charVertices[0]  # top-left
+            x1, y1 = charVertices[2]  # bottom-right
+
+            # check if the mouse is within the bounds of the character
+            if x0 <= px <= x1 and y0 >= py >= y1:
+                toReturn = i // 4
+                return toReturn
+
+        return None
+
+    def _onMouse(self):
+        """Called by the window when the mouse is inside the stimulus.
+        """
+
+        if not self.editable:
+            return
+
+        # get button state
+        buttons = self.mouse.getPressed()
+        leftMbDn, middleMbDn, rightMbDn = buttons
+        if leftMbDn:
+            # get the character index at the given position
+            charIdxAtPointer = self.getCharAtPos(self.mouse.getPos())
+
+            if charIdxAtPointer:
+                self.caret.index = charIdxAtPointer
 
     @property
     def hasFocus(self):

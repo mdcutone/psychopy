@@ -28,9 +28,10 @@ from .dlgsConditions import DlgConditions
 from .dlgsCode import DlgCodeComponentProperties, CodeBox
 from .findDlg import BuilderFindDlg
 from . import paramCtrls
+from psychopy.app.utils import HyperLinkCtrl
 from psychopy import data, logging, exceptions
 from psychopy.localization import _translate
-from psychopy.tools import versionchooser as vc
+from psychopy.tools import versionchooser as vc, pkgtools
 from psychopy.alerts import alert
 from ...colorpicker import PsychoColorPicker
 from pathlib import Path
@@ -212,8 +213,7 @@ class ParamCtrls():
         elif param.inputType == 'table':
             self.valueCtrl = paramCtrls.TableCtrl(
                 parent, 
-                val=param.val, 
-                valType=param.valType,
+                param=param,
                 fieldName=fieldName, 
                 size=wx.Size(int(self.valueWidth), 24))
         elif param.inputType == 'color':
@@ -479,6 +479,7 @@ class StartStopCtrls(wx.GridBagSizer):
                 # Add ctrl
                 self.ctrls[name] = wx.TextCtrl(parent,
                                                value=str(param.val), size=wx.Size(-1, 24))
+                self.ctrls[name].SetToolTip(param.hint)
                 self.ctrls[name].Bind(wx.EVT_TEXT, self.updateCodeFont)
                 self.updateCodeFont(self.ctrls[name])
                 self.label = wx.StaticText(parent, label=param.label)
@@ -522,6 +523,9 @@ class StartStopCtrls(wx.GridBagSizer):
             self.estimLabel.Show(visible)
         if hasattr(self, "label"):
             self.label.Show(visible)
+        # show/hide dollars
+        if hasattr(self, "dollar"):
+            self.dollar.Show(visible)
         # Set value to None if hidden (specific to start/stop)
         if not visible:
             if "startVal" in self.ctrls:
@@ -876,6 +880,7 @@ class _BaseParamsDlg(wx.Dialog):
         self.showAdvanced = showAdvanced
         self.order = element.order
         self.depends = element.depends
+        self.plugin = element.plugin
         self.data = []
         # max( len(str(self.params[x])) for x in keys )
         self.maxFieldLength = 10
@@ -904,11 +909,25 @@ class _BaseParamsDlg(wx.Dialog):
 
         self.mainSizer.Add(self.ctrls,  # ctrls is the notebook of params
                            proportion=1, flag=wx.EXPAND | wx.ALL, border=5)
+        # if element came from a plugin that's not installed, add button to open plugins dlg
+        self.pluginBtn = HyperLinkCtrl(
+            self, label=_translate("Requires plugin {}, click here to install.").format(self.plugin)
+        )
+        self.pluginBtn.Bind(wx.EVT_BUTTON, self.jumpToPlugin)
+        self.mainSizer.Add(self.pluginBtn, border=6, flag=wx.CENTER | wx.ALL)
+        # show/hide button according to whether the plugin is installed or not
+        self.pluginBtn.Show(
+            self.plugin not in (None, "None", "") and self.plugin not in dict(pkgtools.getInstalledPackages())
+        )
 
         self.SetSizerAndFit(self.mainSizer)
 
     def getParams(self):
         return self.ctrls.getParams()
+
+    def jumpToPlugin(self, evt):
+        dlg = self.frame.openPluginManager()
+        dlg.jumpToPlugin(self.plugin)
 
     def openMonitorCenter(self, event):
         self.app.openMonitorCenter(event)
@@ -1675,7 +1694,7 @@ class DlgLoopProperties(_BaseParamsDlg):
                             style=wx.FD_OPEN, defaultDir=str(self.expPath))
         if dlg.ShowModal() == wx.ID_OK:
             self.conditionsFile = dlg.GetPath()
-            self.constantsCtrls['conditionsFile'].valueCtrl.SetValue(
+            self.currentCtrls['conditionsFile'].valueCtrl.SetValue(
                 self.conditionsFile
             )
             self.updateSummary()
@@ -1692,10 +1711,7 @@ class DlgLoopProperties(_BaseParamsDlg):
         or message, as appropriate. Upon completion this will disable the update button as
         we are now up to date.
         """
-        if "MultiStairHandler" in self.type:
-            self.conditionsFile = self.multiStairCtrls['conditionsFile'].valueCtrl.GetValue()
-        else:
-            self.conditionsFile = self.constantsCtrls['conditionsFile'].valueCtrl.GetValue()
+        self.conditionsFile = self.currentCtrls['conditionsFile'].valueCtrl.GetValue()
         # Check whether the file and path are the same as previously
         isSameFilePathAndName = self.conditionsFileAbs == self.conditionsFileOrig
         # Start off with no message and assumed valid

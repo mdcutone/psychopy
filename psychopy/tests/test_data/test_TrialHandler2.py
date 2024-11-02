@@ -28,6 +28,26 @@ class TestTrialHandler2:
 
     def teardown_class(self):
         shutil.rmtree(self.temp_dir)
+    
+    def test_th1_indexing_unchanged(self):
+        """
+        Checks that indexing style is the same for TrialHandler2 as TrialHandler
+        """
+        # make both trial handlers
+        th1 = data.trial.TrialHandler(self.conditions, nReps=3, method="sequential")
+        th2 = data.trial.TrialHandler2(self.conditions, nReps=3, method="sequential")
+        # start a trials loop
+        for n in range(9):
+            # iterate trial
+            th1.next()
+            th2.next()
+            # make sure thisN is the same
+            for attr in ("thisN", "thisIndex", "thisRepN", "thisTrialN"):
+                assert getattr(th1, attr) == getattr(th2, attr), (
+                    f"Expected `.{attr}` to be the same between TrialHandler and TrialHandler2, "
+                    f"but on iteration {n} got {getattr(th1, attr)} for TrialHandler and "
+                    f"{getattr(th2, attr)} for TrialHandler2."
+                )
 
     def test_underscores_in_datatype_names2(self):
         trials = data.TrialHandler2([], 1, autoLog=False)
@@ -245,6 +265,45 @@ class TestTrialHandler2:
         t_loaded = fromFile(path)
         assert t == t_loaded
     
+    def test_getAllTrials(self):
+        """
+        Check that TrialHandler2.getAllTrials returns as expected
+        """
+        # make a trial handler
+        t = data.TrialHandler2(
+            self.conditions, 
+            nReps=2,
+            method="sequential"
+        )
+        # check that calling now (before upcoming trials are calculated) doesn't break anything
+        trials, i = t.getAllTrials()
+        assert trials == [None]
+        assert i == 0
+        # move on to the first trial, triggering upcoming trials to be calculated
+        t.__next__()
+        # get an exemplar array of what trials should look like
+        exemplar, _ = t.getAllTrials()
+        # define array of cases to try
+        cases = [
+            {'advance': 2, 'i': 2},
+            {'advance': 1, 'i': 3},
+            {'advance': -2, 'i': 1},
+        ]
+        # try cases
+        for case in cases:
+            # account for current iteration ending (as if in experiment)
+            t.__next__()
+            # move forwards/backwards according to case values
+            if case['advance'] >= 0:
+                t.skipTrials(case['advance'])
+            else:
+                t.rewindTrials(case['advance'])
+            # get trials
+            trials, i = t.getAllTrials()
+            # make sure array is unchanged and i is as we expect
+            assert trials == exemplar
+            assert i == case['i']
+    
     def test_getFutureTrials(self):
         """
         Check that TrialHandler2 can return future trials correctly.
@@ -255,15 +314,19 @@ class TestTrialHandler2:
             nReps=2,
             method="sequential"
         )
+        # check that calling now (before upcoming trials are calculated) doesn't break anything
+        up1 = t.getFutureTrial(1)
+        ups3 = t.getFutureTrials(3)
+        # move on to the first trial, triggering upcoming trials to be calculated
         t.__next__()
         # define array of answers
         answers = [
-            {'thisN': 5, 'thisRepN': 2, 'thisTrialN': 2, 'thisIndex': 2},
-            {'thisN': 1, 'thisRepN': 1, 'thisTrialN': 1, 'thisIndex': 1},
-            {'thisN': 2, 'thisRepN': 1, 'thisTrialN': 2, 'thisIndex': 2},
-            {'thisN': 3, 'thisRepN': 2, 'thisTrialN': 0, 'thisIndex': 0},
-            {'thisN': 4, 'thisRepN': 2, 'thisTrialN': 1, 'thisIndex': 1},
-            {'thisN': 5, 'thisRepN': 2, 'thisTrialN': 2, 'thisIndex': 2},
+            {'thisN': 5, 'thisRepN': 1, 'thisTrialN': 2, 'thisIndex': 2},
+            {'thisN': 1, 'thisRepN': 0, 'thisTrialN': 1, 'thisIndex': 1},
+            {'thisN': 2, 'thisRepN': 0, 'thisTrialN': 2, 'thisIndex': 2},
+            {'thisN': 3, 'thisRepN': 1, 'thisTrialN': 0, 'thisIndex': 0},
+            {'thisN': 4, 'thisRepN': 1, 'thisTrialN': 1, 'thisIndex': 1},
+            {'thisN': 5, 'thisRepN': 1, 'thisTrialN': 2, 'thisIndex': 2},
             None,
         ]
         # get future trials
@@ -280,7 +343,7 @@ class TestTrialHandler2:
         trials = t.getFutureTrials(None)
         for i in range(len(trials)):
             assert trials[i] == t.upcomingTrials[i]
-
+    
     def test_skipTrials_rewindTrials(self):
         # make trial hancler
         t = data.TrialHandler2(
@@ -292,19 +355,22 @@ class TestTrialHandler2:
         # some values to move forwards/backwards by and the values at that point
         cases = [
             # move backwards and forwards and check we land in the right place
-            (+4, {'thisN': 4, 'thisRepN': 2, 'thisTrialN': 1, 'thisIndex': 1}),
-            (-1, {'thisN': 3, 'thisRepN': 2, 'thisTrialN': 0, 'thisIndex': 0}),
-            (-3, {'thisN': 0, 'thisRepN': 1, 'thisTrialN': 0, 'thisIndex': 0}),
-            (+2, {'thisN': 2, 'thisRepN': 1, 'thisTrialN': 2, 'thisIndex': 2}),
-            (-1, {'thisN': 1, 'thisRepN': 1, 'thisTrialN': 1, 'thisIndex': 1}),
-            (+2, {'thisN': 3, 'thisRepN': 2, 'thisTrialN': 0, 'thisIndex': 0}),
+            (+4, {'thisN': 4, 'thisRepN': 1, 'thisTrialN': 1, 'thisIndex': 1}),
+            (-1, {'thisN': 3, 'thisRepN': 1, 'thisTrialN': 0, 'thisIndex': 0}),
+            (-3, {'thisN': 0, 'thisRepN': 0, 'thisTrialN': 0, 'thisIndex': 0}),
+            (+2, {'thisN': 2, 'thisRepN': 0, 'thisTrialN': 2, 'thisIndex': 2}),
+            (-1, {'thisN': 1, 'thisRepN': 0, 'thisTrialN': 1, 'thisIndex': 1}),
+            (+2, {'thisN': 3, 'thisRepN': 1, 'thisTrialN': 0, 'thisIndex': 0}),
             # move back past the start and check we land at the start
-            (-10, {'thisN': 0, 'thisRepN': 1, 'thisTrialN': 0, 'thisIndex': 0}),
+            (-10, {'thisN': 0, 'thisRepN': 0, 'thisTrialN': 0, 'thisIndex': 0}),
             # move forwards past the end and check we land at the end
-            (+10, {'thisN': 5, 'thisRepN': 2, 'thisTrialN': 2, 'thisIndex': 2}),
+            (+10, {'thisN': 5, 'thisRepN': 1, 'thisTrialN': 2, 'thisIndex': 2}),
         ]
         # iterate through cases
         for inc, answer in cases:
+            # account for current iteration ending (as if in experiment)
+            t.__next__()
+            
             if inc < 0:
                 # if increment is negative, rewind
                 t.rewindTrials(inc)

@@ -79,13 +79,13 @@ class BaseCodeEditor(wx.stc.StyledTextCtrl, handlers.ThemeMixin):
 
         if not hasattr(self, "UndoID"):
             # Create a new ID for all items
-            self.UndoID = wx.NewId()
-            self.RedoID = wx.NewId()
-            self.CutID = wx.NewId()
-            self.CopyID = wx.NewId()
-            self.PasteID = wx.NewId()
-            self.DeleteID = wx.NewId()
-            self.SelectAllID = wx.NewId()
+            self.UndoID = wx.NewIdRef(count=1)
+            self.RedoID = wx.NewIdRef(count=1)
+            self.CutID = wx.NewIdRef(count=1)
+            self.CopyID = wx.NewIdRef(count=1)
+            self.PasteID = wx.NewIdRef(count=1)
+            self.DeleteID = wx.NewIdRef(count=1)
+            self.SelectAllID = wx.NewIdRef(count=1)
 
         # Bind items to relevant method
         self.Bind(wx.EVT_MENU, self.onUndo, id=self.UndoID)
@@ -106,14 +106,6 @@ class BaseCodeEditor(wx.stc.StyledTextCtrl, handlers.ThemeMixin):
         deleteItem = wx.MenuItem(menu, self.DeleteID, _translate("Delete"))
         selectItem = wx.MenuItem(menu, self.SelectAllID, _translate("Select All"))
 
-        # Check whether items should be enabled
-        undoItem.Enable(self.CanUndo())
-        redoItem.Enable(self.CanRedo())
-        cutItem.Enable(self.CanCut())
-        copyItem.Enable(self.CanCopy())
-        pasteItem.Enable(self.CanPaste())
-        deleteItem.Enable(self.CanCopy())
-
         # Append items to menu
         menu.Append(undoItem)
         menu.Append(redoItem)
@@ -124,6 +116,14 @@ class BaseCodeEditor(wx.stc.StyledTextCtrl, handlers.ThemeMixin):
         menu.AppendSeparator()
         menu.Append(deleteItem)
         menu.Append(selectItem)
+
+        # Check whether items should be enabled
+        undoItem.Enable(self.CanUndo())
+        redoItem.Enable(self.CanRedo())
+        cutItem.Enable(self.CanCut())
+        copyItem.Enable(self.CanCopy())
+        pasteItem.Enable(self.CanPaste())
+        deleteItem.Enable(self.CanCopy())
 
         self.PopupMenu(menu)
         menu.Destroy()

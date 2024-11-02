@@ -8,7 +8,7 @@ import copy
 import numpy as np
 import pandas as pd
 
-from psychopy import logging
+from psychopy import logging, constants
 from psychopy.tools.filetools import (openOutputFile, genDelimiter,
                                       genFilenameFromDelimiter)
 from .utils import importConditions
@@ -172,6 +172,8 @@ class TrialHandler(_BaseTrialHandler):
 
         self.originPath, self.origin = self.getOriginPathAndFile(originPath)
         self._exp = None  # the experiment handler that owns me!
+        # starting status
+        self.status = constants.NOT_STARTED
 
     def __iter__(self):
         return self
@@ -282,7 +284,7 @@ class TrialHandler(_BaseTrialHandler):
         inputArray = np.asarray(inputArray, 'O')
         # get some simple variables for later
         dims = inputArray.shape
-        dimsProd = np.product(dims)
+        dimsProd = np.prod(dims)
         dimsN = len(dims)
         dimsList = list(range(dimsN))
         listOfLists = []
@@ -291,7 +293,7 @@ class TrialHandler(_BaseTrialHandler):
 
         # for each dimension create list of its indices (using modulo)
         for thisDim in dimsList:
-            prevDimsProd = np.product(dims[:thisDim])
+            prevDimsProd = np.prod(dims[:thisDim])
             # NB this means modulus in python
             thisDimVals = np.arange(dimsProd) / prevDimsProd % dims[thisDim]
             listOfLists.append(thisDimVals)
@@ -420,10 +422,12 @@ class TrialHandler(_BaseTrialHandler):
             for thisDataOut in dataOut:
                 # make a string version of the data and then format it
                 tmpData = dataAnal[thisDataOut][stimN]
+                replaceNone = False
                 if hasattr(tmpData, 'tolist'):  # is a numpy array
                     strVersion = str(tmpData.tolist())
                     # for numeric data replace None with a blank cell
-                    if tmpData.dtype.kind not in ['SaUV']:
+                    if tmpData.dtype.kind not in 'SaUV':
+                        replaceNone = True
                         strVersion = strVersion.replace('None', '')
                 elif tmpData in [None, 'None']:
                     strVersion = ''
@@ -435,18 +439,25 @@ class TrialHandler(_BaseTrialHandler):
                     strVersion = "--"
                 # handle list of values (e.g. rt_raw )
                 if (len(strVersion) and
-                            strVersion[0] in '[(' and
-                            strVersion[-1] in '])'):
+                        strVersion[0] in '[(' and
+                        strVersion[-1] in '])'):
                     strVersion = strVersion[1:-1]  # skip first and last chars
                 # handle lists of lists (e.g. raw of multiple key presses)
                 if (len(strVersion) and
-                            strVersion[0] in '[(' and
-                            strVersion[-1] in '])'):
+                        strVersion[0] in '[(' and
+                        strVersion[-1] in '])'):
+                    if replaceNone:
+                        # Add None back so that the str is valid for eval
+                        strVersion = strVersion.replace('[,', '[None,')
+                        strVersion = strVersion.replace(', ,', ', None,')
                     tup = eval(strVersion)  # convert back to a tuple
                     for entry in tup:
                         # contents of each entry is a list or tuple so keep in
                         # quotes to avoid probs with delim
-                        thisLine.append(str(entry))
+                        currentEntry = str(entry)
+                        if replaceNone:
+                            currentEntry = currentEntry.replace('None', '')
+                        thisLine.append(currentEntry)
                 else:
                     thisLine.extend(strVersion.split(','))
 
@@ -747,6 +758,8 @@ class Trial(dict):
         self.thisRepN = thisRepN
         self.thisTrialN = thisTrialN
         self.thisIndex = thisIndex
+        # add status
+        self.status = constants.NOT_STARTED
         # data for this trial
         if data is None:
             data = {}
@@ -772,6 +785,13 @@ class Trial(dict):
         # ... and set each value from the given dict
         for key, val in value.items():
             self[key] = val
+    
+    @property
+    def skipped(self):
+        """
+        Has this Trial been skipped?
+        """
+        return self.data.get('skipped', False)
     
     def getDict(self):
         """
@@ -1051,10 +1071,24 @@ class TrialHandler2(_BaseTrialHandler):
             msg = 'New trial (rep=%i, index=%i): %s'
             vals = (self.thisRepN, self.thisTrialN, self.thisTrial)
             logging.exp(msg % vals, obj=self.thisTrial)
+
+        # update experiment handler entry
+        exp = self.getExp()
+        if exp is not None:
+            exp.updateEntryFromLoop(self)
         
         return self.thisTrial
 
     next = __next__  # allows user to call without a loop `val = trials.next()`
+
+    @property
+    def thisIndex(self):
+        if self.thisTrial is None:
+            if len(self.elapsedTrials):
+                return self.elapsedTrials[-1].thisIndex
+            else:
+                return -1
+        return self.thisTrial.thisIndex
 
     @property
     def thisN(self):
@@ -1094,7 +1128,7 @@ class TrialHandler2(_BaseTrialHandler):
         # start off at 0 trial
         thisTrialN = 0
         thisN = 0
-        thisRepN = 0
+        thisRepN = -1
         # empty array to store indices once taken
         prevIndices = []
         # empty array to store remaining indices
@@ -1212,6 +1246,8 @@ class TrialHandler2(_BaseTrialHandler):
         n : int
             Number of trials to skip ahead
         """
+        # account for the fact current trial will end once skipped
+        n -= 1
         # if skipping past last trial, print warning and skip to last trial
         if n > len(self.upcomingTrials):
             logging.warn(
@@ -1219,15 +1255,20 @@ class TrialHandler2(_BaseTrialHandler):
                 f"Skipping to the last upcoming trial."
             )
             n = len(self.upcomingTrials)
-        # iterate n times
+        # mark as skipping so routines end
+        self.thisTrial.status = constants.STOPPING
+        # before iterating, add "skipped" to data
+        self.addData("skipped", True)
+        # iterate n times (-1 to account for current trial)
         for i in range(n):
+            self.__next__()
             # before iterating, add "skipped" to data
             self.addData("skipped", True)
             # advance row in data file
             if self.getExp() is not None:
                 self.getExp().nextEntry()
-            # iterate
-            self.__next__()
+
+        return self.thisTrial   
 
     def rewindTrials(self, n=1):
         """
@@ -1241,6 +1282,8 @@ class TrialHandler2(_BaseTrialHandler):
         """
         # treat -n as n
         n = abs(n)
+        # account for the fact current trial will end once skipped
+        n += 1
         # if rewinding past first trial, print warning and rewind to first trial
         if n > len(self.elapsedTrials):
             logging.warn(
@@ -1248,6 +1291,8 @@ class TrialHandler2(_BaseTrialHandler):
                 f"elapsed. Rewinding to the first trial."
             )
             n = len(self.elapsedTrials)
+        # mark current trial as skipping so it ends
+        self.thisTrial.status = constants.STOPPING
         # start with no trials
         rewound = [self.thisTrial]
         # pop the last n values from elapsed trials
@@ -1257,6 +1302,33 @@ class TrialHandler2(_BaseTrialHandler):
         self.thisTrial = rewound.pop(0)
         # prepend rewound trials to upcoming array
         self.upcomingTrials = rewound + self.upcomingTrials
+
+        return self.thisTrial
+    
+    def getCurrentTrial(self):
+        """
+        Returns the current trial (`.thisTrial`)
+
+        Returns
+        -------
+        Trial
+            The current trial
+        """
+        return self.thisTrial
+    
+    def getAllTrials(self):
+        """
+        Returns all trials (elapsed, current and upcoming) with an index indicating which trial is 
+        the current trial.
+
+        Returns
+        -------
+        list[Trial]
+            List of trials, in order (oldest to newest)
+        int
+            Index of the current trial in this list
+        """
+        return (self.elapsedTrials or []) + [self.thisTrial] + (self.upcomingTrials or []), len(self.elapsedTrials)
 
     def getFutureTrial(self, n=1):
         """
@@ -1273,7 +1345,7 @@ class TrialHandler2(_BaseTrialHandler):
         if isinstance(n, str) and n.isnumeric():
             n = int(n)
         # return None if requesting beyond last trial
-        if n > len(self.upcomingTrials):
+        if self.upcomingTrials is None or n > len(self.upcomingTrials):
             return None
         # return the corresponding trial from upcoming trials array
         return self.upcomingTrials[n-1]
@@ -1297,6 +1369,9 @@ class TrialHandler2(_BaseTrialHandler):
         list[Trial or None]
             List of Trial objects n long. Any trials beyond the last trial are None.
         """
+        # if there are no future trials, return a blank list
+        if self.upcomingTrials is None:
+            return []
         # if None, get all future trials
         if n is None:
             n = len(self.upcomingTrials) - start
@@ -1320,7 +1395,7 @@ class TrialHandler2(_BaseTrialHandler):
         if n > 0:
             n = n * -1
         # return None if requesting before first trial
-        if abs(n) > len(self.upcomingTrials):
+        if self.upcomingTrials is None or abs(n) > len(self.upcomingTrials):
             return None
         # return the corresponding trial from elapsed trials array
         return self.elapsedTrials[n]

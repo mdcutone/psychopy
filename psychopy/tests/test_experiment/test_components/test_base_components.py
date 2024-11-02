@@ -3,12 +3,16 @@ import esprima
 import re
 from pathlib import Path
 
+import esprima.error_handler
 import pytest
+import tempfile
 
 from psychopy import experiment
 from psychopy.experiment.loops import TrialHandler
 from psychopy.experiment.components import BaseComponent
 from psychopy.experiment.exports import IndentingBuffer
+from psychopy.constants import FOREVER
+from psychopy.tests import utils
 
 
 def _find_global_resource_in_js_experiment(script, resource):
@@ -25,7 +29,7 @@ def _find_global_resource_in_js_experiment(script, resource):
         return present
 
     # Extract resources def at start of experiment
-    resourcesStr = re.search("(?<=resources: \[)[^\]]*", script).group(0)
+    resourcesStr = re.search(r"(?<=resources: \[)[^\]]*", script).group(0)
     # Return bool for whether specified resource is present
     return resource in resourcesStr
 
@@ -41,6 +45,7 @@ class BaseComponentTests:
         """
         # make blank experiment
         exp = experiment.Experiment()
+        exp.name = "Test" + self.comp.__name__ + "MinimalExp"
         # add a Routine
         rt = exp.addRoutine(routineName='TestRoutine')
         exp.flow.addRoutine(rt, 0)
@@ -65,6 +70,16 @@ class BaseComponentTests:
         yield
     
     # --- Heritable tests ---
+
+    def test_syntax_errors(self):
+        """
+        Create a basic implementation of this Component with everything set to defaults and check 
+        whether the resulting code has syntax errors
+        """
+        # create minimal experiment
+        comp, rt, exp = self.make_minimal_experiment()
+        # check syntax
+        utils.checkSyntax(exp, targets=self.comp.targets)
 
     def test_icons(self):
         """
@@ -147,6 +162,58 @@ class BaseComponentTests:
             assert buff.indentLevel == 0, errMsg.format(
                 "experiment end", buff.indentLevel
             )
+    
+    def test_blank_timing(self):
+        """
+        Check that this Component can handle blank start/stop values.
+        """
+        # make minimal experiment just for this test
+        comp, rt, exp = self.make_minimal_experiment()
+        # skip if Component doesn't have the relevant params (e.g. Code Component)
+        for key in ("startVal", "startType", "stopVal", "stopType"):
+            if key not in comp.params:
+                pytest.skip()
+        # StaticComponent has entirely bespoke start/stop tests so skip it here
+        if type(comp).__name__ == "StaticComponent":
+            pytest.skip()
+        # make sure start and stop are as times
+        comp.params['startType'].val = "time (s)"
+        comp.params['stopType'].val = "duration (s)"
+        # define cases and expected start/dur
+        cases = [
+            # blank start
+            {'name': "NoStart", 'startVal': "", 'stopVal': "1", 'startTime': None, 'duration': 1},
+            # blank stop
+            {'name': "NoStop", 'startVal': "0", 'stopVal': "", 'startTime': 0, 'duration': FOREVER},
+            # blank both
+            {'name': "NoStartStop", 'startVal': "", 'stopVal': "", 'startTime': None, 'duration': FOREVER},
+        ]
+        # run all cases
+        for case in cases:
+            # apply values from case
+            comp.params['startVal'].val = case['startVal']
+            comp.params['stopVal'].val = case['stopVal']
+            # get values from start and duration method
+            startTime, duration, nonSlipSafe = comp.getStartAndDuration()
+            # check against expected
+            assert startTime == case['startTime']
+            assert duration == case['duration']
+            # check that it's never non-slip safe
+            assert not nonSlipSafe
+            # update experiment name to indicate what case we're in
+            case['name'] = self.comp.__name__ + case['name']
+            exp.name = "Test%(name)sExp" % case
+            # check that it still writes syntactially valid code
+            try:
+                utils.checkSyntax(exp, targets=self.comp.targets)
+            except SyntaxError as err:
+                # raise error
+                case['err'] = err
+                raise AssertionError(
+                    "Syntax error in compiled Builder code when startVal was '%(startVal)s' and "
+                    "stopVal was '%(stopVal)s'. Failed script saved in psychopy/tests/fails. "
+                    "Original error: %(err)s" % case
+                )
 
     def test_disabled_default_val(self):
         """

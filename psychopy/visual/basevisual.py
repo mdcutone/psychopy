@@ -1661,6 +1661,69 @@ class WindowMixin:
         self._updateListShaders()
 
 
+class PointerMixin:
+    """Mixin class to handle mouse/pointer interaction with an object.
+
+    Attributes
+    ==========
+    clickable : bool
+        This attribute determines whether the stimulus can be clicked on and 
+        trigger the `onMouse` method. 
+
+    Methods
+    =======
+    containsPointer
+        Check if the mouse is within the stimulus boundaries.
+    doClickActions
+        Handle mouse interaction with the stimulus. This is called by the 
+        `Window` object each frame to update the stimulus based on mouse
+        interactions.
+
+    """ 
+    def containsPointer(self):
+        """Check if the mouse is within the stimulus boundaries.
+
+        Returns
+        -------
+        bool
+            Whether the mouse is within the stimulus.
+
+        """
+        if not isinstance(self.mouse, Mouse):
+            self.mouse = Mouse(visible=self.win.mouseVisible, win=self.win)
+
+        # Check if mouse is within vertices
+        return self.mouse.isPressedIn(self, buttons=[0])
+    
+    def doPointerActions(self):
+        """Handle mouse interaction with the stimulus.
+
+        This method should be called each frame to update the stimulus based
+        on mouse interactions.
+
+        """
+        # If the stimulus is clickable and the mouse is within the stimulus
+        if self.clickable and self.containsPointer():
+            if not hasattr(self, '_onMouse'):
+                return  
+                
+            self._onMouse()
+             
+    @attributeSetter
+    def clickable(self, value):
+        """Whether the stimulus can be clicked on.
+
+        If set to `True`, the stimulus will be checked for mouse clicks
+        and the `_onMouse` method will be called if the stimulus is clicked.
+
+        """
+        # if we don't have reference to a mouse, make one
+        if not isinstance(self.mouse, Mouse):
+            self.mouse = Mouse(visible=self.win.mouseVisible, win=self.win)
+
+        self.__dict__['clickable'] = value
+
+
 class DraggingMixin:
     """
     Mixin to give an object innate dragging behaviour.
@@ -1724,7 +1787,7 @@ class DraggingMixin:
         """
         # if we don't have reference to a mouse, make one
         if not isinstance(self.mouse, Mouse):
-            self.mouse = Mouse(win=self.win)
+            self.mouse = Mouse(visible=self.win.mouseVisible, win=self.win)
             # make sure it has an initial pos for rel pos comparisons
             self.mouse.lastPos = self.mouse.getPos()
         # store value
@@ -1762,17 +1825,10 @@ class BaseVisualStim(MinimalStim, WindowMixin, LegacyVisualMixin):
         (transparent). :ref:`Operations <attrib-operations>` are supported.
         Precisely how this is used depends on the :ref:`blendMode`.
         """
-        alphas = []
-        if hasattr(self, '_foreColor'):
-            alphas.append(self._foreColor.alpha)
-        if hasattr(self, '_fillColor'):
-            alphas.append(self._fillColor.alpha)
-        if hasattr(self, '_borderColor'):
-            alphas.append(self._borderColor.alpha)
-        if alphas:
-            return mean(alphas)
-        else:
+        if not hasattr(self, "_opacity"):
             return 1
+        
+        return self._opacity 
 
     @opacity.setter
     def opacity(self, value):
@@ -1780,6 +1836,7 @@ class BaseVisualStim(MinimalStim, WindowMixin, LegacyVisualMixin):
         if value is None:
             # If opacity is set to be None, this indicates that each color should handle its own opacity
             return
+        self._opacity = value
         if hasattr(self, '_foreColor'):
             if self._foreColor != None:
                 self._foreColor.alpha = value

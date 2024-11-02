@@ -23,7 +23,7 @@ import numpy
 import requests
 import io
 
-from pkg_resources import parse_version
+from packaging.version import Version
 import wx.stc
 from wx.lib import scrolledpanel
 from wx.lib import platebtn
@@ -50,7 +50,7 @@ try:
 except ImportError:
     from wx import PseudoDC
 
-if parse_version(wx.__version__) < parse_version('4.0.3'):
+if Version(wx.__version__) < Version('4.0.3'):
     wx.NewIdRef = wx.NewId
 
 from psychopy.localization import _translate
@@ -64,7 +64,7 @@ from psychopy.tools.filetools import mergeFolder
 from .dialogs import (DlgComponentProperties, DlgExperimentProperties,
                       DlgCodeComponentProperties, DlgLoopProperties,
                       ParamNotebook, DlgNewRoutine, BuilderFindDlg)
-from ..utils import (BasePsychopyToolbar, HoverButton, WindowFrozen,
+from ..utils import (BasePsychopyToolbar, HoverButton, ThemedPanel, WindowFrozen,
                      FileDropTarget, FrameSwitcher, updateDemosMenu,
                      ToggleButtonArray, HoverMixin)
 
@@ -314,7 +314,7 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
             _translate("Save &as...\t%s") % keys['saveAs'],
             _translate("Save current experiment file as..."))
         # export html
-        self.menuIDs.ID_EXPORT_HTML = wx.NewId()
+        self.menuIDs.ID_EXPORT_HTML = wx.NewIdRef(count=1)
         menu.Append(
             self.menuIDs.ID_EXPORT_HTML,
             _translate("Export HTML...\t%s") % keys['exportHTML'],
@@ -322,7 +322,7 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
         )
         self.Bind(wx.EVT_MENU, self.fileExport, id=self.menuIDs.ID_EXPORT_HTML)
         # reveal folder
-        self.menuIDs.ID_REVEAL = wx.NewId()
+        self.menuIDs.ID_REVEAL = wx.NewIdRef(count=1)
         menu.Append(
             self.menuIDs.ID_REVEAL,
             _translate("Reveal in file explorer..."),
@@ -348,7 +348,7 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
             wx.ID_ANY, _translate("Reset preferences...")
         )
         self.Bind(wx.EVT_MENU, self.resetPrefs, item)
-        # item = menu.Append(wx.NewId(), "Plug&ins")
+        # item = menu.Append(wx.NewIdRef(count=1), "Plug&ins")
         # self.Bind(wx.EVT_MENU, self.pluginManager, item)
         self.fileMenu.AppendSeparator()
         self.fileMenu.Append(wx.ID_EXIT,
@@ -863,6 +863,10 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
             self.filename = newPath
             self.fileExists = True
             self.fileSave(event=None, filename=newPath)
+            # enable/disable reveal button
+            if hasattr(self, "menuIDs"):
+                self.fileMenu.Enable(self.menuIDs.ID_REVEAL, True)
+            # update pavlovia project
             self.project = pavlovia.getProject(filename)
             returnVal = 1
         dlg.Destroy()
@@ -1355,7 +1359,7 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
         # update icons
         self.updateRunModeIcons()
         # update experiment mode
-        if self.exp is not None:
+        if self.exp is not None and self.exp.runMode != mode:
             self.exp.runMode = mode
             # mark as modified
             self.setIsModified(True)
@@ -1560,8 +1564,8 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
     def openPluginManager(self, evt=None):
         dlg = psychopy.app.plugin_manager.dialog.EnvironmentManagerDlg(self)
         dlg.Show()
-        # Do post-close checks
-        dlg.onClose()
+        
+        return dlg
 
     def onPavloviaCreate(self, evt=None):
         if Path(self.filename).is_file():
@@ -1631,10 +1635,6 @@ class BuilderFrame(BaseAuiFrame, handlers.ThemeMixin):
         runner.addTask(fileName=self.filename)
         # Run debug function from runner
         self.app.runner.panel.runOnlineDebug(evt=evt)
-
-    def setPavloviaUser(self, user):
-        # TODO: update user icon on button to user avatar
-        pass
 
     @property
     def project(self):
@@ -3289,6 +3289,8 @@ class ComponentsPanel(scrolledpanel.ScrolledPanel, handlers.ThemeMixin):
         self.pluginBtn.SetBitmapPressed(icon)
         self.pluginBtn.SetBitmapFocus(icon)
 
+        self.Refresh()
+
     def addToFavorites(self, comp):
         name = comp.__name__
         # Mark component as a favorite
@@ -3478,7 +3480,7 @@ class FlowPanel(wx.Panel, handlers.ThemeMixin):
         self.sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.SetSizer(self.sizer)
         # buttons panel
-        self.btnPanel = wx.Panel(self)
+        self.btnPanel = ThemedPanel(self)
         self.btnPanel.sizer = wx.BoxSizer(wx.VERTICAL)
         self.btnPanel.SetSizer(self.btnPanel.sizer)
         self.sizer.Add(self.btnPanel, border=6, flag=wx.EXPAND | wx.ALL)
@@ -3539,7 +3541,7 @@ class FlowCanvas(wx.ScrolledWindow, handlers.ThemeMixin):
 
         # create a PseudoDC to record our drawing
         self.pdc = PseudoDC()
-        if parse_version(wx.__version__) < parse_version('4.0.0a1'):
+        if Version(wx.__version__) < Version('4.0.0a1'):
             self.pdc.DrawRoundedRectangle = self.pdc.DrawRoundedRectangleRect
         self.pen_cache = {}
         self.brush_cache = {}
@@ -4213,7 +4215,7 @@ class FlowCanvas(wx.ScrolledWindow, handlers.ThemeMixin):
 
     def drawLineStart(self, dc, pos):
         # draw bar at start of timeline; circle looked bad, offset vertically
-        tmpId = wx.NewId()
+        tmpId = wx.NewIdRef(count=1)
         dc.SetId(tmpId)
         ptSize = (9, 9, 12)[self.appData['flowSize']]
         thic = (1, 1, 2)[self.appData['flowSize']]
@@ -4227,7 +4229,7 @@ class FlowCanvas(wx.ScrolledWindow, handlers.ThemeMixin):
 
     def drawLineEnd(self, dc, pos):
         # draws arrow at end of timeline
-        tmpId = wx.NewId()
+        tmpId = wx.NewIdRef(count=1)
         dc.SetId(tmpId)
         dc.SetBrush(wx.Brush(colors.app['fl_flowline_bg']))
         dc.SetPen(wx.Pen(colors.app['fl_flowline_bg']))

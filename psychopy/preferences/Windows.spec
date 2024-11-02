@@ -56,7 +56,7 @@
     # display tips when starting PsychoPy
     showStartupTips = boolean(default='True')
     # what windows to display when PsychoPy starts
-    defaultView = option('builder', 'coder', 'runner', 'all', default='all')
+    defaultView = option('last', 'builder', 'coder', 'runner', 'all', default='last')
     # reset preferences to defaults on next restart of PsychoPy
     resetPrefs = boolean(default='False') # default must be False!
     # save any unsaved preferences before closing the window
@@ -138,6 +138,8 @@
     audioDriver = list(default=list('Primary Sound','ASIO','Audigy'))
     # audio device to use (if audioLib allows control)
     audioDevice = list(default=list('default'))
+    # exclude non-WASAPI audio devices
+    audioWASAPIOnly = boolean(default=True)
     # a list of parallel ports
     parallelPorts = list(default=list('0x0378', '0x03BC'))
     # The name of the Qmix pump configuration to use
@@ -149,8 +151,10 @@
     forceWindowed = boolean(default=True)
     # What window size to use when forced to windowed mode
     forcedWindowSize = list(default=list(800, 600))
-    # How much output to include in the log files when piloting ('error' is fewest messages, 'debug' is most)
+    # How much output to include in the log file when piloting ('error' is fewest messages, 'debug' is most)
     pilotLoggingLevel = option('error', 'warning', 'data', 'exp', 'info', 'debug', default='debug')
+    # How much output to display in the console / app when piloting ('error' is fewest messages, 'debug' is most).
+    pilotConsoleLoggingLevel = option('error', 'warning', 'data', 'exp', 'info', 'debug', default='warning')
     # Show an orange border around the window when in piloting mode
     showPilotingIndicator = boolean(default=True)
     # Prevent experiment from enabling rush mode when piloting
