@@ -10,12 +10,18 @@
 
 __all__ = [
     "BaseAuiFrame", 
-    "BaseNotebook", 
-    "BasePropertyGrid"]
+    "BaseAuiNotebookPanel",
+    "BaseAuiPropertyPanel",
+    "PHI_RATIO",
+    "INV_PHI_RATIO"]
 
 from psychopy.app.ui.frame import BaseAuiFrame
-from psychopy.app.ui.notebook import BaseNotebook
-from psychopy.app.ui.propertyGrid import BasePropertyGrid
+from psychopy.app.ui.notebook import BaseAuiNotebookPanel
+from psychopy.app.ui.propertyGrid import BaseAuiPropertyPanel
+
+# constants for golden ratio used for layout
+PHI_RATIO = (1 + 5 ** 0.5) / 2
+INV_PHI_RATIO = PHI_RATIO - 1
 
 
 if __name__ == "__main__":
