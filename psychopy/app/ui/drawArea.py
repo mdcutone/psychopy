@@ -109,6 +109,7 @@ class BaseCustomDrawArea(wx.Panel):
         # pens and brushes
         self._pens = {}
         self._brushes = {}
+        self._fonts = {}
 
         # clear color and brush
         if isinstance(clearColor, wx.Colour):
@@ -410,6 +411,93 @@ class BaseCustomDrawArea(wx.Panel):
         """
         self._brushes[name] = wx.Brush(color, style)
 
+    def addFontFromParams(self, name, pointSize=12, family='default', 
+            style='normal', weight='normal', underline=False, faceName=None):
+        """Add a font to memory for later use in drawing using parameters.
+
+        Parameters
+        ----------
+        name : str
+            Name of the font.
+        pointSize : int
+            Point size of the font.
+        family : str
+            Font family.
+        style : str
+            Font style.
+        weight : str    
+            Font weight.
+        underline : bool
+            Underline flag.
+        faceName : str, None
+            Font face name (e.g. Arial, Monospace, etc.) If `None`, the default
+            system font is used.
+        
+        """
+        # get default system font
+        if faceName is None:
+            faceName = wx.SystemSettings.GetFont(
+                wx.SYS_DEFAULT_GUI_FONT).GetFaceName()
+
+        # font families mapped to wx constants
+        familyMapping = {
+            'default': wx.FONTFAMILY_DEFAULT,
+            'roman': wx.FONTFAMILY_ROMAN,
+            'swiss': wx.FONTFAMILY_SWISS,
+            'modern': wx.FONTFAMILY_MODERN,
+            'script': wx.FONTFAMILY_SCRIPT,
+            'decorative': wx.FONTFAMILY_DECORATIVE
+        }
+
+        # font styles mapped to wx constants
+        styleMapping = {
+            'normal': wx.FONTSTYLE_NORMAL,
+            'italic': wx.FONTSTYLE_ITALIC,
+            'slant': wx.FONTSTYLE_SLANT
+        }
+
+        # font weights mapped to wx constants
+        weightMapping = {
+            'normal': wx.FONTWEIGHT_NORMAL,
+            'light': wx.FONTWEIGHT_LIGHT,
+            'bold': wx.FONTWEIGHT_BOLD
+        }
+
+        # check if the family is valid
+        if family in familyMapping:
+            family = familyMapping[family]
+        else:
+            raise ValueError("Invalid font family.")
+
+        # check if the style is valid
+        if style in styleMapping:
+            style = styleMapping[style]
+        else:
+            raise ValueError("Invalid font style.")
+
+        # check if the weight is valid
+        if weight in weightMapping:
+            weight = weightMapping[weight]
+        else:
+            raise ValueError("Invalid font weight.")
+
+        font = wx.Font(pointSize, family, style, weight, underline, faceName)
+
+        self.addFont(name, font)
+
+    def addFont(self, name, font):
+        """Add a font to memory for later use in drawing.
+
+        Parameters
+        ----------
+        name : str
+            Name of the font.
+        font : wx.Font
+            Font to add.
+
+        """
+        self._fonts[name] = font
+
     def removePen(self, name):
         """Remove a pen from memory.
 
@@ -433,6 +521,18 @@ class BaseCustomDrawArea(wx.Panel):
         """
         if name in self._brushes:
             del self._brushes[name]
+
+    def removeFont(self, name):
+        """Remove a font from memory.
+
+        Parameters
+        ----------
+        name : str
+            Name of the font to remove.
+
+        """
+        if name in self._fonts:
+            del self._fonts[name]
 
     def beginDrawing(self):
         """Aquire a device context and start drawing.
@@ -699,6 +799,49 @@ class BaseCustomDrawArea(wx.Panel):
         assert self._dc is not None, "Must call `beginDrawing` before drawing."
         if name in self._brushes:
             self._dc.SetBrush(self._brushes[name])
+
+    def setFontForeground(self, color):
+        """Set the font foreground color.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        color : wx.Colour
+            Font color.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.SetTextForeground(color)
+
+    def setFontBackground(self, color):
+        """Set the font background color.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        color : wx.Colour
+            Font background color.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        self._dc.SetTextBackground(color)
+
+    def setFont(self, name='default'):
+        """Use a saved font for successive drawing operations.
+
+        Must be called after `beginDrawing` and before `endDrawing`.
+
+        Parameters
+        ----------
+        name : str
+            Name of the font to use as was added with `addFont`.
+
+        """
+        assert self._dc is not None, "Must call `beginDrawing` before drawing."
+        if name in self._fonts:
+            self._dc.SetFont(self._fonts[name])
 
     def setBackground(self, color, style=wx.SOLID):
         """Set the background color.
