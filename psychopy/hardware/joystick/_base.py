@@ -8,6 +8,70 @@
 """Base classes for joystick and gamepad interfaces.
 """
 
+class JoystickState:
+    """Class representing the state of a joystick device.
+
+    This class stores the state of a joystick device at a given point in time.
+    The state includes the device index, button states, hat states, axis
+    values, and the timestamp of the sample.
+
+    Parameters
+    ----------
+    device : int
+        The index of the joystick device.
+    absSampleTime : float
+        The time at which the sample was taken.
+    buttons : list
+        A list of button states.
+    hats : list
+        A list of hat states.
+    axes : list
+        A list of axis values.
+    trackerData : dict
+        A dictionary containing tracking data. This is optional and is only
+        used if the joystick device supports tracking.
+
+    """
+    __slots__ = [
+        '_device', 
+        '_buttons', 
+        '_hats', 
+        '_axes', 
+        '_absSampleTime',
+        '_trackerData'
+        ]
+    
+    def __init__(
+            self, 
+            device, 
+            absSampleTime, 
+            buttons,
+            hats, 
+            axes, 
+            trackerData=None):
+        
+        self._device = device
+        self._trackerData = trackerData
+        self._buttons = buttons
+        self._hats = hats
+        self._axes = axes
+        self._absSampleTime = float(absSampleTime)
+
+    def __repr__(self):
+        return f"JoystickState({self.device}, {self.buttons}, {self.hats}, {self.axes}, {self.timestamp})"
+
+    def __str__(self):
+        return f"JoystickState({self.device}, {self.buttons}, {self.hats}, {self.axes}, {self.timestamp})"
+
+    def __eq__(self, other):
+        return self.device == other.device
+    
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return hash((self.device, self.timestamp))
+
 
 class BaseJoystickInterface:
     """Class for defining an interface for joystick and gamepad devices.
@@ -21,6 +85,7 @@ class BaseJoystickInterface:
     """
     _inputLib = None
     _trackerData = None
+    _joystickSamples = []  # buffer for storing joystick samples
     def __init__(self, device=0, **kwargs):
         self._device = device
 
@@ -195,7 +260,7 @@ class BaseJoystickInterface:
         raise NotImplementedError
 
     def poll(self):
-        """Check for new joystick events.
+        """Get the most recent joystick state.
 
         Returns
         -------
@@ -203,7 +268,7 @@ class BaseJoystickInterface:
             The time the joystick state was sampled.
 
         """
-        pass
+        return -1
 
     def update(self):
         """Update the joystick state.
