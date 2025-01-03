@@ -753,6 +753,7 @@ class Joystick:
     # --------------------------------------------------------------------------
     # Hat methods
     #
+    
     def getNumHats(self):
         """Get the number of hats on this joystick.
 
@@ -797,6 +798,40 @@ class Joystick:
             return [self.getHat(h) for h in hatId]
 
         return self._joy.getHat(hatId)
+    
+    # --------------------------------------------------------------------------
+    # Haptics and motion tracking methods
+    #
+
+    def setVibration(self, motor, strength=1.0):
+        """Set the vibration motors of the device.
+
+        Parameters
+        ----------
+        motor : int
+            Index of the motor to set the vibration strength for.
+        strength : float
+            The strength of the vibration motor. This should be a value
+            between 0.0 and 1.0.
+
+        """
+        self._joy.setVibration(motor, strength)
+
+    def setVibrationSamples(self, motor, samples, sampleRate=None):
+        """Set the vibration motor samples.
+
+        Parameters
+        ----------
+        motor : int
+            Index of the motor to set the vibration samples for.
+        samples : list
+            A list of vibration samples to play. These will be uploaded to the
+            device's sample buffer.
+        sampleRate : int
+            The rate at which the samples should be played (if supported).
+
+        """
+        self._joy.setVibrationSamples(motor, samples, sampleRate)
 
 
 class XboxController(Joystick):
