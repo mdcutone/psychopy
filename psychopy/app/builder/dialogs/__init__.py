@@ -29,7 +29,7 @@ from .dlgsCode import DlgCodeComponentProperties, CodeBox
 from .findDlg import BuilderFindDlg
 from . import paramCtrls
 from psychopy.app.utils import HyperLinkCtrl
-from psychopy import data, logging, exceptions
+from psychopy import data, logging, exceptions, plugins
 from psychopy.localization import _translate
 from psychopy.tools import versionchooser as vc, pkgtools
 from psychopy.alerts import alert
@@ -917,7 +917,7 @@ class _BaseParamsDlg(wx.Dialog):
         self.mainSizer.Add(self.pluginBtn, border=6, flag=wx.CENTER | wx.ALL)
         # show/hide button according to whether the plugin is installed or not
         self.pluginBtn.Show(
-            self.plugin not in (None, "None", "") and self.plugin not in dict(pkgtools.getInstalledPackages())
+            self.plugin not in (None, "None", "") and self.plugin not in plugins.listPlugins()
         )
 
         self.SetSizerAndFit(self.mainSizer)
