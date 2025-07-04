@@ -126,7 +126,7 @@ class BaseDevice:
             cls = type(self)
             mro = inspect.getmodule(cls).__name__ + "." + cls.__name__
             # iterate through available devices for this class
-            for profile in self.getAvailableDevices():
+            for profile in self.getAvailableDevices(best=False):
                 if self.isSameDevice(profile):
                     # if current profile is this device, add deviceClass and return it
                     profile['deviceClass'] = mro
