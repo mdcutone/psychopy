@@ -581,7 +581,7 @@ class CameraDevice(BaseDevice):
             return False
 
     @staticmethod
-    def getAvailableDevices(best=False):
+    def getAvailableDevices(best=True):
         """
         Get all available devices of this type.
 
@@ -1390,12 +1390,12 @@ class Camera:
                 break
             # if there are none, set one up
             if self._capture is None:
-                for profile in CameraDevice.getAvailableDevices():
+                for profile in CameraDevice.getAvailableDevices(best=True):
                     self._capture = DeviceManager.addDevice(**profile)
                     break
         elif isinstance(device, str):
             # get available devices
-            availableDevices = CameraDevice.getAvailableDevices()
+            availableDevices = CameraDevice.getAvailableDevices(best=False)
             # if given a device name, try to find it
             for profile in availableDevices:
                 if profile['deviceName'] != device:
