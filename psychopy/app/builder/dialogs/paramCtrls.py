@@ -83,7 +83,6 @@ class BaseParamCtrl(wx.Panel):
     def __init__(self, parent, field, param, element=None, warnings=None):
         # initialise
         wx.Panel.__init__(self, parent)
-        self.SetMinSize((256, 24))
         # store details
         self.parent = parent
         self.field = field
@@ -1469,6 +1468,27 @@ class DictCtrl(BaseParamCtrl):
             self.parent.onChange(evt)
     
     class DictValue(SingleLineCtrl):
+        def validate(self):
+            # update param label so the error reports the value of keyctrl
+            if hasattr(self, "keyCtrl"):
+                self.param.label = f"{self.parent.param.label}:{self.keyCtrl.getValue()}"
+
+            # validate first as code
+            self.param.valType = "code"
+            self.dollarLbl.Show()
+            self.warnings.clearWarning(self)
+            self.validateCode()
+            # if this failed, try as string
+            if self.warnings.getWarning(self):
+                self.warnings.clearWarning(self)
+                self.param.valType = "str"
+                self.validateStr()
+            
+            self.dollarLbl.Show(self.param.valType == "code")
+            
+            self.Refresh()
+            self.Layout()
+
         def onChange(self, evt=None):
             SingleLineCtrl.onChange(self, evt)
             self.parent.onChange(evt)
@@ -1493,6 +1513,7 @@ class DictCtrl(BaseParamCtrl):
                 element=parent.element,
                 warnings=parent.warnings
             )
+            self.valueCtrl.keyCtrl = self.keyCtrl
             # add delete button
             self.deleteBtn = wx.Button(parent, style=wx.BU_EXACTFIT)
             self.deleteBtn.SetBitmap(
@@ -1652,8 +1673,9 @@ class DeviceCtrl(ChoiceCtrl):
     def onElementOk(self, evt=None):
         # get the device manager
         from psychopy.preferences import prefs
+        from psychopy.app.deviceManager import AddDeviceDlg
         # if not setup, ask the user whether they want to set it up
-        if self.getValue() not in prefs.devices:
+        if self.getValue() and self.getValue() not in prefs.devices:
             # create dialog
             dlg = wx.MessageDialog(
                 self.GetTopLevelParent(),
@@ -1664,4 +1686,10 @@ class DeviceCtrl(ChoiceCtrl):
             )
             # open device manager if yes
             if dlg.ShowModal() == wx.ID_YES:
-                self.openDeviceManager()
+                dlg = AddDeviceDlg(self, deviceName=self.getValue())
+                # on OK, add device and refresh list
+                if dlg.ShowModal() == wx.ID_OK:
+                    device = dlg.getDevice()
+                    prefs.devices[device.name] = device
+                    prefs.devices.save()
+                    self.populate()
