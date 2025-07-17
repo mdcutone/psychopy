@@ -122,16 +122,19 @@ class DevicePanel(ScrolledPanel):
             self.profileLbl, border=6, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP
         )
         # profile ctrl
-        self.profileCtrl = wx.propgrid.PropertyGrid(self)
+        self.profileCtrl = wx.propgrid.PropertyGrid(
+            self, 
+            style=wx.propgrid.PG_STATIC_SPLITTER
+        )
         for key, val in device.profile.items():
             prop = wx.propgrid.StringProperty(key, key, str(val))
             self.profileCtrl.Append(prop)
             prop.ChangeFlag(wx.propgrid.PG_PROP_READONLY, True)
-        self.profileCtrl.FitColumns()
         self.profileCtrl.SetMinSize((-1, 128))
         self.sizer.Add(
             self.profileCtrl, border=6, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM
         )
+        self.profileCtrl.FitColumns()
         # delete button
         self.deleteBtn = wx.Button(self, label="Remove device")
         self.deleteBtn.SetMinSize((-1, 24))
