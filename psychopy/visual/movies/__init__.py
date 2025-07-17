@@ -18,7 +18,7 @@ from pathlib import Path
 import tempfile
 import time
 
-from psychopy import prefs
+from psychopy import layout, prefs
 from psychopy.tools.filetools import pathToString, defaultStim
 from psychopy.visual.basevisual import (
     BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin
@@ -1102,6 +1102,37 @@ class MovieStim(BaseVisualStim, DraggingMixin, ColorMixin, ContainerMixin):
             self.loadMovie(self._filename)
 
         self.autoLog = autoLog
+    
+    @property
+    def size(self):
+        return BaseVisualStim.size.fget(self)
+    
+    @size.setter
+    def size(self, value):
+        # store requested size
+        self._requestedSize = value
+        # if player isn't initialsied yet, do no more
+        if not self._hasPlayer:
+            return
+        # duplicate if necessary
+        if isinstance(value, (float, int)):
+            value = [value, value]
+        # make sure value is a list so we can assign indices
+        if isinstance(value, tuple):
+            value = [val for val in value]
+        # handle aspect ratio
+        if value[0] is None and value[1] is None:
+            # if both values are none, use original size
+            value = layout.Size(self.frameSize, units="pix", win=self.win)
+        elif value[0] is None:
+            # if width is None, use height and maintain aspect ratio
+            value[0] = (self.frameSize[0] / self.frameSize[1]) * value[1]
+        elif value[1] is None:
+            # if height is None, use width and maintain aspect ratio
+            value[1] = (self.frameSize[1] / self.frameSize[0]) * value[0]
+        # set as normal
+        BaseVisualStim.size.fset(self, value)
+            
 
     @property
     def filename(self):
@@ -1138,7 +1169,7 @@ class MovieStim(BaseVisualStim, DraggingMixin, ColorMixin, ContainerMixin):
         """
         # use this property to check if the player instance is started in
         # methods which require it
-        return self._player is not None
+        return hasattr(self, "_player") and self._player is not None
     
     # --------------------------------------------------------------------------
     # Movie file handlers
@@ -1232,6 +1263,9 @@ class MovieStim(BaseVisualStim, DraggingMixin, ColorMixin, ContainerMixin):
 
         self._freeTextureBuffers()  # free buffers (if any) before creating a new one
         self._setupTextureBuffers()
+
+        # update size in case frame size has changed
+        self.size = self._requestedSize
 
         self._isLoaded = True
 
@@ -1328,9 +1362,10 @@ class MovieStim(BaseVisualStim, DraggingMixin, ColorMixin, ContainerMixin):
             Log this event.
 
         """
-        self._player.close()
-        self._freeTextureBuffers()  # free buffer before creating a new one
-        self._isLoaded = False
+        if self._isLoaded:
+            self._player.close()
+            self._freeTextureBuffers()  # free buffer before creating a new one
+            self._isLoaded = False
 
     # --------------------------------------------------------------------------
     # Time and frame management
@@ -1976,10 +2011,7 @@ class MovieStim(BaseVisualStim, DraggingMixin, ColorMixin, ContainerMixin):
         """Size of the video `(w, h)` in pixels (`tuple`). Returns `(0, 0)` if
         no video is loaded.
         """
-        if not self._player:
-            return 0, 0
-
-        return self._player.getSize()
+        return self.frameSize
 
     @property
     def origSize(self):
@@ -2040,8 +2072,7 @@ class MovieStim(BaseVisualStim, DraggingMixin, ColorMixin, ContainerMixin):
         player and frees any resources used by the object.
 
         """
-        self.close()
-        self._freeTextureBuffers()
+        self.unload()
     
 
 def _closeAllMovieReaders():
