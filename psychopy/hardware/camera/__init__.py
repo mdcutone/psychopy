@@ -854,7 +854,7 @@ class CameraDevice(BaseDevice):
         return np.asarray(frame, dtype=np.uint8)
     
     # --------------------------------------------------------------------------
-    # Platform-specific camera frame aquisition methods
+    # Platform-specific camera frame acquisition methods
     #
     # These methods are used to open, close, and read frames from the camera
     # stream. They are platform-specific and are called depending on the
@@ -1051,6 +1051,39 @@ class CameraDevice(BaseDevice):
                 curPts))
 
         return recentFrames
+
+    def _startRecordingFFPyPlayer(self):
+        """Start recording the camera stream opened with FFmpeg (ffpyplayer).
+        
+        This method should be called to start recording the camera stream. It
+        will start capturing frames from the camera and store them in the frame
+        store.
+
+        """
+        if self._capture is None:
+            raise PlayerNotAvailableError(
+                "Camera stream is not open. Call `open()` first.")
+        
+        self._isRecording = True
+        self._absRecStreamStartTime = time.time()  # use current time as start
+        self._absRecExpStartTime = core.getTime()  # experiment start time in
+        self._clearFrameStore()  # clear the frame store
+
+    def _stopRecordingFFPyPlayer(self):
+        """Stop recording the camera stream opened with FFmpeg (ffpyplayer).
+        
+        This method should be called to stop recording the camera stream. It
+        will stop capturing frames from the camera and store them in the frame
+        store.
+
+        """
+        if self._capture is None:
+            raise PlayerNotAvailableError(
+                "Camera stream is not open. Call `open()` first.")
+        
+        self._isRecording = False
+        self._absRecStreamStartTime = -1.0  # reset the recording start
+        self._absRecExpStartTime = -1.0  # reset the experiment start
     
     # --------------------------------------------------------------------------
     # OpenCV-specific methods
@@ -1086,7 +1119,79 @@ class CameraDevice(BaseDevice):
         It should initialize the camera and prepare it for reading frames.
 
         """
-        pass
+        import cv2
+
+        # open the camera stream using OpenCV
+        self._capture = cv2.VideoCapture(self._device, cv2.CAP_ANY)
+        if not self._capture.isOpened():
+            raise CameraNotReadyError(
+                "Failed to open camera stream with OpenCV. "
+                "Check if the camera is available and not used by another application.")
+        
+        # set the frame size and frame rate
+        if self._frameSize is not None:
+            self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, self._frameSize[0])
+            self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self._frameSize[1])
+        if self._frameRate is not None:
+            self._capture.set(cv2.CAP_PROP_FPS, self._frameRate)
+        # set the buffer size
+        if self._bufferSecs > 0:
+            bufferSize = int(self._bufferSecs * self._frameRate)
+            self._capture.set(cv2.CAP_PROP_BUFFERSIZE, bufferSize)
+        # set the pixel format if specified
+        if self._pixelFormat:
+            # OpenCV does not support setting pixel format directly, so we will
+            # handle this in the frame conversion method.
+            pass
+        else:
+            self._pixelFormat = 'BGR'
+
+        # set the codec format if specified
+        if self._codecFormat:
+            # OpenCV does not support setting codec format directly, so we will
+            # handle this in the frame conversion method.
+            pass
+
+        # warmup
+        # timeout
+        tStart = time.time()  # start time for the stream
+        while tStart - time.time() < 5.0:
+            ret, frame = self._capture.read()
+            if not ret or frame is None:
+                continue
+
+            break  # if we got a frame, break the loop
+        else:
+            msg = (
+                "Failed to obtain stream metadata (possibly caused by a device "
+                "already in use by other application)."
+            )
+            logging.error(msg)
+            raise CameraNotReadyError(msg)
+
+        # compute the frame interval, needed for generating timestamps
+        self._frameInterval = 1.0 / self._frameRate if self._frameRate else 1.0
+        # get the absolute recording start time
+        self._absRecStreamStartTime = time.time()  # use current time as start
+        self._absRecExpStartTime = core.getTime()  # experiment start time in
+        self._isRecording = False  # initially not recording
+        self._frameCount = 0  # reset the frame count
+        self._frameSizeBytes = (
+            self._frameSize[0] * self._frameSize[1] * 3) if self._frameSize else 0
+        # store metadata about the camera stream
+        self._metadata = {
+            'src_vid_size': self._frameSize,
+            'src_vid_fps': self._frameRate,
+            'src_pixel_format': self._pixelFormat,
+            'src_codec_format': self._codecFormat,
+            'capture_lib': self._captureLib,
+            'capture_api': self._cameraAPI
+        }
+        logging.debug(
+            "Opened camera stream with OpenCV: {}x{} at {} fps".format(
+                self._frameSize[0], self._frameSize[1], self._frameRate))
+        logging.debug(
+            "Camera metadata: {}".format(self._metadata))
 
     def _closeOpenCV(self):
         """Close the camera stream opened with OpenCV.
@@ -1095,7 +1200,9 @@ class CameraDevice(BaseDevice):
         resources associated with it.
 
         """
-        pass
+        if self._capture is not None:
+            self._capture.release()
+            self._capture = None  # reset the capture object
 
     def _getFramesOpenCV(self):
         """Get the most recent frames from the camera stream opened with OpenCV.
@@ -1111,7 +1218,36 @@ class CameraDevice(BaseDevice):
             raise PlayerNotAvailableError(
                 "Camera stream is not open. Call `open()` first.")
         
-        pass
+        import cv2
+
+        recentFrames = []
+        while True:
+            ret, frame = self._capture.read()
+            if not ret or frame is None:  # if no frame is available, break
+                break
+            
+            # get the current timestamp in seconds
+            curPts = self._capture.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+
+            if self._isRecording:
+                # get the current timestamp in seconds
+                if curPts < self._absRecStreamStartTime:
+                    del frame  # free the memory used by the frame
+                    continue  # skip frames before the recording start
+
+                # convert the frame to RGB format
+                frame = self._convertFrameToRGBOpenCV(frame)
+
+                # append the frame to the recent frames list
+                recentFrames.append((
+                    frame, 
+                    curPts - self._absRecStreamStartTime,  # relative time
+                    curPts))    
+
+                # increment the frame count
+                self._frameCount += 1
+            
+        return recentFrames  # return the list of recent frames
 
     # --------------------------------------------------------------------------
     # Public methods for camera stream management
@@ -1129,7 +1265,16 @@ class CameraDevice(BaseDevice):
 
         """
         if self._captureLib == 'ffpyplayer':
+            print('opening with ffpyplayer')
+            print('captureLib:', self._captureLib)
             self._openFFPyPlayer()
+        elif self._captureLib == 'opencv':
+            print('using opencv')
+            self._openOpenCV()
+        else:
+            raise ValueError(
+                "Unsupported camera library '{}'. Supported libraries are: "
+                "'ffpyplayer', 'opencv'.".format(self._captureLib))
 
         global _openCaptureInterfaces
         _openCaptureInterfaces.add(self)
@@ -1148,6 +1293,12 @@ class CameraDevice(BaseDevice):
 
         if self._captureLib == 'ffpyplayer':
             self._closeFFPyPlayer()
+        elif self._captureLib == 'opencv':
+            self._closeOpenCV()
+        else:
+            raise ValueError(
+                "Unsupported camera library '{}'. Supported libraries are: "
+                "'ffpyplayer', 'opencv'.".format(self._captureLib))
 
         self._capture = None  # reset the capture object
 
@@ -1273,8 +1424,15 @@ class CameraDevice(BaseDevice):
 
         """
         if self._captureLib == 'ffpyplayer':
+            # print('using ffpyplayer')
             return self._getFramesFFPyPlayer()
-        
+        elif self._captureLib == 'opencv':
+            print('using opencv')
+            return self._getFramesOpenCV()
+        else:
+            raise ValueError(
+                "Unsupported camera library '{}'. Supported libraries are: "
+                "'ffpyplayer', 'opencv'.".format(self._captureLib))
 
 # class name alias for legacy support
 CameraInterface = CameraDevice
@@ -2105,7 +2263,8 @@ class Camera:
         recording frames to memory.
 
         """
-        return self.record(clearLastRecording=False, waitForStart=waitForStart)
+        return self.record(
+            clearLastRecording=False, waitForStart=waitForStart)
 
     def stop(self):
         """Stop recording frames and audio (if available).
@@ -2354,9 +2513,9 @@ class Camera:
                 # merge audio and video tracks using FFMPEG
                 mergedVideo = self._mergeAudioVideoTracks(
                     videoTrackFile, 
-                   audioTrackFile, 
-                   filename, 
-                   writerOpts=writerOpts)
+                    audioTrackFile, 
+                    filename, 
+                    writerOpts=writerOpts)
                 
                 os.remove(audioTrackFile)  # remove the temp file
 
@@ -2494,6 +2653,53 @@ class Camera:
             ofmt='rgb24').scale(frame)
         
         return rgbImg
+
+    def _convertFrameToRGBOpenCV(self, frame):
+        """Convert a frame to RGB format using OpenCV.
+
+        This function converts a frame to RGB format using OpenCV. The frame is
+        returned as a Numpy array. The resulting array will be in the correct
+        format to upload to OpenGL as a texture.
+
+        Parameters
+        ----------
+        frame : numpy.ndarray
+            The frame to convert.
+
+        Returns
+        -------
+        numpy.ndarray
+            The converted frame in RGB format.
+
+        """
+        import cv2
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    def _convertFrameToRGB(self, frame):
+        """Convert a frame to RGB format.
+
+        This function converts a frame to RGB format. The frame is returned as
+        a Numpy array. The resulting array will be in the correct format to
+        upload to OpenGL as a texture.
+
+        Parameters
+        ----------
+        frame : numpy.ndarray or FFPyPlayer frame
+            The frame to convert.
+
+        Returns
+        -------
+        numpy.ndarray
+            The converted frame in RGB format.
+
+        """
+        if self._cameraLib == CAMERA_LIB_FFPYPLAYER:
+            return self._convertFrameToRGBFFPyPlayer(frame)
+        elif self._cameraLib == CAMERA_LIB_OPENCV:
+            return self._convertFrameToRGBOpenCV(frame)
+        else:
+            raise CameraError(
+                "Unsupported camera library: {}".format(self._cameraLib))
     
     def update(self):
         """Acquire the newest data from the camera and audio streams.
@@ -2607,14 +2813,14 @@ class Camera:
         for colorData, pts, streamTime in newFrames:
             # if camera is in CV mode, convert the frame to RGB
             if self._usageMode == CAMERA_MODE_CV:
-                colorData = self._convertFrameToRGBFFPyPlayer(colorData)
+                colorData = self._convertFrameToRGB(colorData)
             # add the frame to the frame store
             self._frameStore.append((colorData, pts, streamTime))
         
         # if we have frames, update the last frame
         colorData, pts, streamTime = newFrames[-1]
         self._lastFrame = (
-            self._convertFrameToRGBFFPyPlayer(colorData),  # convert to RGB, nop if already
+            self._convertFrameToRGB(colorData),  # convert to RGB, nop if already
             pts,  # presentation timestamp
             streamTime
         )
@@ -2655,7 +2861,7 @@ class Camera:
         self.update()
 
         recentFrames = [
-            self._convertFrameToRGBFFPyPlayer(frame) for frame in self._frameStore]
+            self._convertFrameToRGB(frame) for frame in self._frameStore]
 
         return recentFrames
     
@@ -3107,6 +3313,124 @@ class Camera:
                 "Attempting to call `_closeMovieFileWriterFFPyPlayer()` "
                 "without an open movie file writer.")
 
+    def _openMovieFileWriterOpenCV(self, filename, encoderOpts=None):
+        """Open a movie file writer using OpenCV.
+
+        Parameters
+        ----------
+        filename : str
+            File to save the resulting video to, should include the extension.
+        encoderOpts : dict or None
+            Options to pass to the encoder. This is a dictionary of options
+            specific to the encoder library being used. See the documentation
+            for `~psychopy.tools.movietools.MovieFileWriter` for more details.
+
+        """
+        import cv2
+
+        # options to configure the writer
+        frameWidth, frameHeight = self.frameSize
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        self._movieWriter = cv2.VideoWriter(
+            filename, 
+            fourcc, 
+            self._capture.frameRate,
+            (frameWidth, frameHeight), 
+            isColor=True)
+        
+        self._tempVideoFile = filename  # store the temp video file name
+        self._curPTS = 0.0  # current pts for the movie writer
+        self._generatePTS = False  # whether to generate PTS for the movie writer
+        if filename.endswith('.mp4'):
+            self._generatePTS = True
+            logging.debug(
+                "MP4 format detected, PTS will be generated for the movie writer.")
+        if self._movieWriter is None:
+            raise RuntimeError(
+                "Failed to open movie file writer using OpenCV. "
+                "Check if OpenCV is installed and the file path is valid.")
+        logging.debug(
+            "Opened movie file writer using OpenCV for file `{}`.".format(
+                filename))
+        
+        self._movieWriter.set(cv2.CAP_PROP_FPS, self._capture.frameRate)
+        self._movieWriter.set(cv2.CAP_PROP_FOURCC, fourcc)
+        self._movieWriter.set(cv2.CAP_PROP_FRAME_WIDTH, frameWidth)
+        self._movieWriter.set(cv2.CAP_PROP_FRAME_HEIGHT, frameHeight)
+        self._movieWriter.set(cv2.CAP_PROP_FORMAT, cv2.CV_8UC3)  # set format to RGB
+
+        if not self._movieWriter.isOpened():
+            raise RuntimeError(
+                "Failed to open movie file writer using OpenCV. "
+                "Check if OpenCV is installed and the file path is valid.")
+        
+        logging.debug(
+            "Movie file writer opened successfully using OpenCV for file `{}`.".format(
+                filename))
+
+    def _submitFrameToFileOpenCV(self, frames):
+        """Submit a frame to the movie file writer thread using OpenCV.
+
+        This is used to submit frames to the movie file writer thread. It is
+        called by the camera interface when a new frame is captured.
+
+        Parameters
+        ----------
+        frames : list of tuples
+            Color data and presentation timestamps to submit to the movie file 
+            writer thread.
+
+        Returns
+        -------
+        int
+            Number of bytes written the the movie file.
+
+        """
+        import cv2
+
+        if self._movieWriter is None:
+            raise RuntimeError(
+                "Attempting to call `_submitFrameToFileOpenCV()` before "
+                "`_openMovieFileWriterOpenCV()`.")
+        
+        if not isinstance(frames, list):
+            frames = [frames]  # ensure frames is a list    
+
+        # write frames to the movie file writer
+        bytesOut = 0
+        for colorData, pts, _ in frames:
+            # do color conversion if needed
+            # colorData = self._convertFrameToRGBFFPyPlayer(colorData)
+
+            # write the frame to the movie file writer
+            if not self._movieWriter.write(colorData):
+                raise RuntimeError(
+                    "Failed to write frame to movie file writer using OpenCV. "
+                    "Check if the movie file writer is open and the frame data is valid.")
+
+        return 0
+    
+    def _closeMovieFileWriterOpenCV(self):
+        """Close the movie file writer using OpenCV.
+
+        This will close the movie file writer and free up any resources used by
+        the writer. If the writer is not open, this will do nothing.
+        """
+        if self._movieWriter is not None:
+            logging.debug(
+                "Closing movie file writer using OpenCV...")
+            self._movieWriter.release()
+            self._movieWriter = None
+        else:
+            logging.debug(
+                "Attempting to call `_closeMovieFileWriterOpenCV()` "
+                "without an open movie file writer.")
+            
+        self._curPTS = 0.0  # reset current PTS for the movie writer
+        self._generatePTS = False  # reset PTS generation flag
+        logging.debug(
+            "Movie file writer closed successfully using OpenCV.")
+
     # 
     # Movie file writer methods
     #
@@ -3160,13 +3484,16 @@ class Camera:
         logging.debug("Using temporary file '{}' for video.".format(self._tempVideoFile))  
             
         # check if the encoder library name string is valid
-        if encoderLib not in ('ffpyplayer'):
+        if encoderLib not in ('ffpyplayer', 'opencv'):
             raise ValueError(
                 "Invalid value for parameter `encoderLib`, expected one of "
                 "`'ffpyplayer'` or `'opencv'`.")
         
         if encoderLib == 'ffpyplayer':
             self._openMovieFileWriterFFPyPlayer(
+                self._tempVideoFile, encoderOpts=encoderOpts)
+        elif encoderLib == 'opencv':
+            self._openMovieFileWriterOpenCV(
                 self._tempVideoFile, encoderOpts=encoderOpts)
         else:
             raise ValueError(
@@ -3199,11 +3526,15 @@ class Camera:
         tStart = time.time()  # start time for the operation
         if self._cameraLib == 'ffpyplayer':
             toReturn = self._submitFrameToFileFFPyPlayer(frames)
+        elif self._cameraLib == 'opencv':
+            toReturn = 0  # OpenCV does not return bytes written, so we just return 0
+            pass
+            # toReturn = self._submitFrameToFileOpenCV(frames)
         else:
             raise ValueError(
                 "Invalid value for parameter `encoderLib`, expected "
-                "`'ffpyplayer'.")
-        
+                "`'ffpyplayer'` or `'opencv'`")
+
         logging.debug(
             "Submitted {} frames to the movie file writer (took {:.6f} seconds)".format(
                 len(frames), time.time() - tStart))
@@ -3224,6 +3555,8 @@ class Camera:
         
         if self._cameraLib == 'ffpyplayer':
             self._closeMovieFileWriterFFPyPlayer()
+        elif self._cameraLib == 'opencv':
+            self._closeMovieFileWriterOpenCV()
         else:
             raise ValueError(
                 "Invalid value for parameter `encoderLib`, expected one of "
