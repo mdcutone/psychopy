@@ -24,6 +24,7 @@ import json
 import glob
 
 from .packageIndex import (
+    isIndexing,
     loadPackageIndex, 
     getPluginPackages, 
     isUserPackageInstalled)
@@ -563,15 +564,27 @@ class PluginBrowserList(wx.Panel, handlers.ThemeMixin):
 
         # Setup items
         self.items = []
-        self.populate()
+        
         # Store state of plugins on init so we can detect changes later
         self.initState = {}
-        for item in self.items:
-            self.initState[item.info.pipname] = {"installed": item.info.installed, "active": item.info.active}
+
+        wx.CallAfter(self.populate)
 
     def populate(self):
         # get all plugin details
-        items = getAllPluginDetails()
+        
+        try:
+            items = getAllPluginDetails()
+        except Exception as e:
+            logging.error(f"Error getting plugin details: {e}")
+
+            # display error message
+            wx.MessageBox(_translate("Could not retrieve package details. Please try again later."),
+                           _translate("Error"),
+                           wx.OK | wx.ICON_ERROR)
+            self.Close()
+            return
+        
         # start off assuming no headings
         self.badItemLbl.Hide()
         # put installed packages at top of list
@@ -586,7 +599,10 @@ class PluginBrowserList(wx.Panel, handlers.ThemeMixin):
         self.Layout()
         self.scrollArea.Layout()
         self.scrollArea.SetupScrolling()
-    
+
+        for item in self.items:
+            self.initState[item.info.pipname] = {"installed": item.info.installed, "active": item.info.active}
+
     def updateInfo(self):
         for item in self.items:
             item.updateInfo()
