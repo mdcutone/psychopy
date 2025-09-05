@@ -13,7 +13,7 @@ _packageIndex = None
 _isIndexing = True  # Flag to indicate if the package index is being updated
 
 
-def refreshPackageIndex(fetch=False):
+def refreshPackageIndex(fetch=False, quiet=True):
     """Refresh the package index.
 
     Parameters
@@ -23,6 +23,8 @@ def refreshPackageIndex(fetch=False):
         regardless of whether it is already present on disk. The default is
         False, which means it will only update if the index is not present or is
         outdated.
+    quiet : bool, optional
+        If True, suppress output messages. The default is True.
 
     """
     global _isIndexing
@@ -41,10 +43,12 @@ def refreshPackageIndex(fetch=False):
     try:
         headerText = ' Updating package index '
         headerText = headerText.center(80, '=')
-        print(headerText)
+        if not quiet:
+            print(headerText)
 
         env = os.environ.copy()
-        print(f"Running command: {' '.join(_cmd)}")
+        if not quiet:
+            print(f"Running command: {' '.join(_cmd)}")
 
         proc = sp.Popen(_cmd, 
                         stdout=sp.PIPE, 
@@ -84,7 +88,7 @@ def isIndexing():
     return _isIndexing
 
 
-def downloadPluginAssets(fetch=False):
+def downloadPluginAssets(fetch=False, quiet=True):
     """Download assets for the specified plugin.
 
     Parameters
@@ -92,7 +96,9 @@ def downloadPluginAssets(fetch=False):
     fetch : bool, optional
         If True, fetch the plugin assets even if present on disk.
         The default is False.
-    
+    quiet : bool, optional
+        If True, suppress output messages. The default is True.
+
     """
     global _packageIndex
     if _packageIndex is None:
@@ -116,11 +122,12 @@ def downloadPluginAssets(fetch=False):
         if err.errno != os.errno.EEXIST:
             logging.error(f"Error creating directory {appPluginCacheDir}: {err}")
             raise
-    
+
     headerText = ' Downloading plugin icons '
     headerText = headerText.center(80, '=')
-    print(headerText)
-    
+    if not quiet:
+        print(headerText)
+
     for iconUrl in pluginIconsURLs:
         # get the icon file name from URL
         iconFileName = os.path.basename(iconUrl)
@@ -129,10 +136,12 @@ def downloadPluginAssets(fetch=False):
 
         # check if we already have a copy of the icon
         if os.path.exists(iconPath) and not fetch:
-            print(f"Plugin icon already exists at {iconPath}")
+            if not quiet:
+                print(f"Plugin icon already exists at {iconPath}")
             continue
 
-        print(f"Downloading plugin icon from {iconUrl} to {iconPath}")
+        if not quiet:
+            print(f"Downloading plugin icon from {iconUrl} to {iconPath}")
 
         import requests
 
@@ -147,7 +156,8 @@ def downloadPluginAssets(fetch=False):
                     file.write(chunk)
                     wx.YieldIfNeeded()
 
-            print(f"Plugin icon downloaded successfully to {iconPath}")
+            if not quiet:
+                print(f"Plugin icon downloaded successfully to {iconPath}")
         except requests.exceptions.RequestException as e:
             logging.error(f"Error downloading plugin icon: {e}")
         except IOError as e:
@@ -275,8 +285,6 @@ def isUserPackageInstalled(packageName):
     if _packageIndex is None:
         loadPackageIndex()
     
-    print(list(_packageIndex['installed']['user']['packages'].keys()))
-
     # Check if the package is in the user packages list
     return packageName in _packageIndex['installed']['user']['packages'].keys()
 
