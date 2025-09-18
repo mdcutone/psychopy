@@ -630,7 +630,7 @@ class ParamNotebook(wx.Notebook, handlers.ThemeMixin):
             page = self.CategoryPage(self, self.parent, params, categ=categ)
             self.paramCtrls.update(page.ctrls)
             # Add page to notebook
-            self.AddPage(page, _translate(categ))
+            self.AddPage(page, _translate(categ or ""))
 
     def checkDepends(self, event=None):
         """

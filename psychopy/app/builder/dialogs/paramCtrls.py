@@ -453,6 +453,30 @@ class MultiLineCtrl(SingleLineCtrl):
     ctrlStyle = wx.TE_LEFT | wx.TE_MULTILINE
 
 
+class HiddenCtrl(BaseParamCtrl):
+    inputType = "hidden"
+
+    _value = None
+
+    def makeCtrls(self):
+        """
+        Makes the actual control object.
+        """
+        self.ctrl = None
+    
+    def getValue(self):
+        """
+        Returns the value of this ctrl
+        """
+        return self._value
+
+    def setValue(self, value):
+        """
+        Returns the value of this ctrl
+        """
+        self._value = value
+
+
 class InvalidCtrl(SingleLineCtrl):
     inputType = "inv"
 
@@ -580,6 +604,13 @@ class ChoiceCtrl(BaseParamCtrl):
                 self.labels.append(str(labels[i]))
             else:
                 self.labels.append(str(choices[i]))
+        # translate labels
+        for i in range(len(self.labels)):
+            # An empty string must not be translated
+            # because it returns meta information of
+            # .mo file (due to specification of gettext)
+            if self.labels[i] != '':
+                self.labels[i] = _translate(self.labels[i])
         # apply to ctrl
         self.ctrl.SetItems(self.labels)
         # disable if param is readonly
@@ -594,7 +625,11 @@ class ChoiceCtrl(BaseParamCtrl):
         if str(value) not in self.choices:
             # if not known, add it to possible choices
             self.choices.append(str(value))
-            self.labels.append(str(value))
+            # translate label if the value is not ''
+            if str(value) != '':
+                self.labels.append(_translate(str(value)))
+            else:
+                self.labels.append(str(value))
             self.ctrl.SetItems(self.labels)
         # set
         self.ctrl.SetSelection(
@@ -1092,9 +1127,19 @@ class CodeCtrl(BaseParamCtrl, handlers.ThemeMixin):
     inputType = "code"
 
     def makeCtrls(self):
+        # use allowedVals to get language
+        if isinstance(self.param.allowedVals, str):
+            codeType = {
+                'python': "Py",
+                'javascript': "JS",
+            }.get(self.param.allowedVals)
+        else:
+            codeType = "txt"
+        # make code box
         self.ctrl = CodeBox(
             self, wx.ID_ANY, prefs, 
-            pos=wx.DefaultPosition, size=(-1, 128), style=wx.DEFAULT
+            pos=wx.DefaultPosition, size=(-1, 128), style=wx.DEFAULT,
+            codeType=codeType
         )
         self.sizer.Add(
             self.ctrl, proportion=1, flag=wx.EXPAND | wx.ALL
@@ -1661,6 +1706,23 @@ class DeviceCtrl(ChoiceCtrl):
             self.deviceMgrBtn, border=6, flag=wx.EXPAND | wx.LEFT
         )
 
+    def populate(self):
+        self.choices = []
+        self.labels = []
+        for name, device in prefs.devices.items():
+            # get backends from allowedVals
+            for backend in self.param.allowedVals:
+                # if device is the correct type, include it
+                if isinstance(device, backend):
+                    self.choices.append(name)
+                    self.labels.append(name)
+        # apply to ctrl
+        self.ctrl.SetItems(self.labels)
+        # disable if param is readonly
+        self.ctrl.Enable(not self.param.readOnly)
+        # apply (or re-apply) selection
+        self.setValue(self.param.val)
+    
     def openDeviceManager(self, evt=None):
         from psychopy.app.deviceManager import DeviceManagerDlg
         # create dialog
