@@ -86,6 +86,10 @@ class Vector:
     arrays of boolean values.
 
     """
+    #: Incremented whenever the value changes, so that objects deriving values
+    #: from this one (see `Vertices`) can tell when their own caches are stale.
+    _version = 0
+
     def __init__(self, value, units, win):
         # Create a dict to cache values on access
         self._cache = {}
@@ -395,6 +399,9 @@ class Vector:
         self._cache = {
             'pix': value
         }
+        # Every other unit's setter funnels through this one, so this is the
+        # only place the value can change
+        self._version += 1
 
     @property
     def deg(self):
@@ -615,6 +622,13 @@ class Vertices:
         Anchor location for vertices, specifies the origin for the vertices.
 
     """
+    #: What `_cache` was computed from, see `getas`. Declared on the class so
+    #: that the setters below are safe to call before `__init__` has finished,
+    #: and held as separate attributes rather than a tuple to keep the check on
+    #: each access down to a few identity comparisons.
+    _cacheSize = _cachePos = _cacheBase = None
+    _cacheSizeVersion = _cachePosVersion = -1
+
     def __init__(self, verts, obj=None, size=None, pos=None, units=None,
                  flip=None, anchor=None):
 
@@ -622,6 +636,9 @@ class Vertices:
             raise ValueError(
                 "Vertices array needs either an object or values for pos and "
                 "size.")
+
+        # Start with an empty cache of our own (the setters below clear it)
+        self.clearCache()
 
         # Store object
         self.obj = obj
@@ -643,6 +660,17 @@ class Vertices:
 
         # Store base vertices
         self.base = verts
+
+    def clearCache(self):
+        """Discard any converted values cached by `getas`.
+
+        Called automatically when something this object derives its values from
+        changes. Only needed directly if the base vertices array is modified in
+        place rather than being reassigned.
+        """
+        self._cache = {}
+        self._cacheSize = self._cachePos = self._cacheBase = None
+        self._cacheSizeVersion = self._cachePosVersion = -1
 
     def __repr__(self):
         """If vertices object is printed, it will display its class and value.
@@ -723,11 +751,16 @@ class Vertices:
             "booleans")
 
         # Set as multipliers rather than bool
-        self._flip = np.array([[
-            -1 if value[0, 0] else 1,
-            -1 if value[0, 1] else 1,
-        ]])
-        self._flipHoriz, self._flipVert = self._flip[0]
+        flipHoriz = -1 if value[0, 0] else 1
+        flipVert = -1 if value[0, 1] else 1
+        # This is re-set on each vertex update, usually to the same value, so
+        # only throw away the cache when it has really changed
+        if (flipHoriz, flipVert) != (
+                getattr(self, "_flipHoriz", None),
+                getattr(self, "_flipVert", None)):
+            self.clearCache()
+        self._flip = np.array([[flipHoriz, flipVert]])
+        self._flipHoriz, self._flipVert = flipHoriz, flipVert
 
     @property
     def flipHoriz(self):
@@ -770,6 +803,9 @@ class Vertices:
     def anchor(self, anchor):
         if anchor is None and hasattr(self.obj, "anchor"):
             anchor = self.obj.anchor
+        # Remember what it was, to know whether this is really a change
+        anchorX = getattr(self, "_anchorX", None)
+        anchorY = getattr(self, "_anchorY", None)
         # Set defaults
         self._anchorY = None
         self._anchorX = None
@@ -787,6 +823,10 @@ class Vertices:
             self._anchorX = 'center'
         if self._anchorY is None:
             self._anchorY = 'center'
+        # As with flip, this is re-set on each vertex update, so only throw
+        # away the cache when the anchor has really changed
+        if (self._anchorX, self._anchorY) != (anchorX, anchorY):
+            self.clearCache()
 
     @property
     def anchorAdjust(self):
@@ -795,26 +835,69 @@ class Vertices:
         return [_anchorAliases[a] for a in self.anchor]
 
     def getas(self, units):
+        """Get the absolute position of each vertex, in the given units.
+
+        The returned array is cached and shared between calls, so treat it as
+        read-only - copy it before modifying. The cache is dropped whenever the
+        size, pos, flip, anchor or base vertices change; if the base vertices
+        array is modified in place rather than reassigned, nothing can detect
+        that, so call `clearCache` to say so.
+        """
         assert units in unitTypes, f"Unrecognised unit type '{units}'"
-        # Start with base values
-        verts = self.base.copy()
-        verts = verts.astype(float)
         # Apply size
-        if self.size is None:
+        size = self.size
+        if size is None:
             raise ValueError(
                 u"Cannot not calculate absolute positions of vertices without "
                 u"a size attribute")
-        verts *= getattr(self.size, units)
-        # Apply flip
-        verts *= self._flip
-        # Apply anchor
-        verts += self.anchorAdjust * getattr(self.size, units)
         # Apply pos
-        if self.pos is None:
+        pos = self.pos
+        if pos is None:
             raise ValueError(
                 u"Cannot not calculate absolute positions of vertices without "
                 u"a pos attribute")
-        verts += getattr(self.pos, units)
+
+        # Cached values only hold while the things they came from are
+        # unchanged. The size and pos vectors are tracked by identity as well
+        # as by version, as either may be swapped out for a different vector
+        # entirely; the base array is tracked by identity alone, as it is
+        # replaced rather than modified whenever it changes.
+        base = self.base
+        # Only Vector reports a version, so anything else goes uncached
+        cacheable = isinstance(size, Vector) and isinstance(pos, Vector)
+        if cacheable:
+            if (size is self._cacheSize
+                    and pos is self._cachePos
+                    and base is self._cacheBase
+                    and size._version == self._cacheSizeVersion
+                    and pos._version == self._cachePosVersion):
+                cached = self._cache.get(units)
+                if cached is not None:
+                    return cached
+            else:
+                # derived from something else now, so anything held is stale
+                self._cache = {}
+                self._cacheSize = size
+                self._cachePos = pos
+                self._cacheBase = base
+                self._cacheSizeVersion = size._version
+                self._cachePosVersion = pos._version
+
+        sizeas = getattr(size, units)
+        # Start with base values
+        verts = base.copy()
+        verts = verts.astype(float)
+        # Apply size
+        verts *= sizeas
+        # Apply flip
+        verts *= self._flip
+        # Apply anchor
+        verts += self.anchorAdjust * sizeas
+        # Apply pos
+        verts += getattr(pos, units)
+
+        if cacheable:
+            self._cache[units] = verts
 
         return verts
 
