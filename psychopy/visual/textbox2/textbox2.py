@@ -62,7 +62,44 @@ codes = {'BOLD_START': u'\uE100',
 re_color_pattern = re.compile('<c=[^>]*>')
 _colorCache = {}
 
+
+def _colorSignature(col):
+    """Cheap, comparable signature of a Color's current value.
+
+    Used to tell whether a cached value derived from `col` is still good. Reads
+    the underlying values directly rather than going via `Color.rgba`, as this
+    runs on every frame and the conversion machinery is comparatively slow. It
+    also picks up colours which have been mutated in place (e.g. by setting
+    `opacity`), which comparing object identity would miss.
+    """
+    franca = getattr(col, '_franca', None)
+    if franca is not None:
+        franca = franca.tobytes()
+    alpha = col.alpha
+    if isinstance(alpha, np.ndarray):
+        alpha = alpha.tobytes()
+    return franca, alpha
+
+
 wordBreaks = " -\n"  # what about ",."?
+
+_arabicReshaper = None
+
+
+def getArabicReshaper():
+    """Get the shared ArabicReshaper, creating it on first use.
+
+    Constructing one parses a configuration of several thousand ligature
+    entries, so it is built lazily and reused rather than being made per
+    `Styling` object. It holds no per-text state.
+    """
+    global _arabicReshaper
+    if _arabicReshaper is None:
+        _arabicReshaper = ArabicReshaper(configuration={
+            'delete_harakat': False,  # if present, retain any diacritics
+            'shift_harakat_position': False  # shift by 1 to be compatible with the bidi algorithm
+        })
+    return _arabicReshaper
 
 
 END_OF_THIS_LINE = 983349843
@@ -260,6 +297,10 @@ class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, Colo
         self.alignment = alignment
 
         # box border and fill
+        self._palette = None  # last computed palette, see .palette
+        self._paletteKey = None  # inputs the above was computed from
+        self._paletteOverride = None  # palette set explicitly by the user
+        self._appliedPalette = None  # palette last pushed to self.box
         self.borderWidth = borderWidth
         self.borderColor = borderColor
         self.fillColor = fillColor
@@ -338,26 +379,39 @@ class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, Colo
     @property
     def palette(self):
         """Describes the current visual properties of the TextBox in a dict"""
-        self._palette = {
-            False: {
-                'lineColor': self._borderColor,
-                'lineWidth': self.borderWidth,
-                'fillColor': self._fillColor
-            },
-            True: {
-                'lineColor': self._borderColor-0.1,
-                'lineWidth': self.borderWidth+1,
-                'fillColor': self._fillColor+0.1
-            }
-        }
-        return self._palette[self.hasFocus]
+        # an explicitly set palette is used as-is, for both focus states
+        if self._paletteOverride is not None:
+            return self._paletteOverride
+        focus = bool(self.hasFocus)
+        # building the focused variant means Color arithmetic, which copies and
+        # revalidates the colour - far too slow to repeat on every frame - so
+        # only rebuild when one of the inputs has actually changed
+        key = (
+            focus,
+            self.borderWidth,
+            _colorSignature(self._borderColor),
+            _colorSignature(self._fillColor),
+        )
+        if key != self._paletteKey:
+            if focus:
+                self._palette = {
+                    'lineColor': self._borderColor - 0.1,
+                    'lineWidth': self.borderWidth + 1,
+                    'fillColor': self._fillColor + 0.1
+                }
+            else:
+                self._palette = {
+                    'lineColor': self._borderColor,
+                    'lineWidth': self.borderWidth,
+                    'fillColor': self._fillColor
+                }
+            self._paletteKey = key
+
+        return self._palette
 
     @palette.setter
     def palette(self, value):
-        self._palette = {
-            False: value,
-            True: value
-        }
+        self._paletteOverride = value
 
     @property
     def pallette(self):
@@ -803,7 +857,16 @@ class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, Colo
         visible_text = self._text
         vertices = np.zeros((len(visible_text) * 4, 2), dtype=np.float32)
         self._charIndices = np.zeros((len(visible_text)), dtype=int)
-        self._colors = np.zeros((len(visible_text) * 4, 4), dtype=np.double)
+        # fill with the default colour in one go, then override only those runs
+        # which carry a colour of their own - much cheaper than deciding, and
+        # assigning, per character
+        self._colors = np.empty((len(visible_text) * 4, 4), dtype=np.double)
+        self._colors[:] = rgb
+        charColors = self._styles.get('color')
+        if charColors is not None:
+            for i, charColor in enumerate(charColors):
+                if charColor is not None:
+                    self._colors[i * 4:i * 4 + 4] = charColor
         self._texcoords = np.zeros((len(visible_text) * 4, 2), dtype=np.double)
         self._glIndices = np.zeros((len(visible_text) * 4), dtype=int)
         self._renderChars = []
@@ -831,75 +894,98 @@ class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, Colo
             wordsThisLine = 0
             lineN = 0
 
+            # hoist everything which doesn't vary per character out of the loop
+            italicStyles = self._styles.get('italic')
+            boldStyles = self._styles.get('bold')
+            boldItalicStyles = self._styles.get('bolditalic')
+            # most text carries no styling at all, in which case the whole
+            # bold/italic dance can be skipped
+            styled = any(
+                s is not None and any(s)
+                for s in (italicStyles, boldStyles, boldItalicStyles)
+            )
+            letterSpacing = self.letterSpacing
+            fontSize = font.size
+            dotGlyph = font[u"·"]
+            dotSize = dotGlyph.size
+            # per-glyph metrics are the same every time a character appears, so
+            # work them out once per distinct character rather than per position
+            glyphMetrics = {}
+            texcoordsList = [None] * len(visible_text)
+
             for i, charcode in enumerate(self._text):
-                printable = True  # unless we decide otherwise
                 # handle formatting codes
-                fakeItalic = 0.0
-                fakeBold = 0.0
-                if "italic" in self._styles and self._styles['italic'][i]:
-                    fakeItalic = 0.1 * font.size
-                if "bold" in self._styles and self._styles['bold'][i]:
-                    fakeBold = 0.3 * font.size
-                if "bolditalic" in self._styles and self._styles['bolditalic'][i]:
-                    fakeItalic = 0.1 * font.size
-                    fakeBold = 0.3 * font.size
-
-                # handle newline
-                if charcode == '\n':
-                    printable = False
-
-                # handle printable characters
-                if printable:
-                    glyph = font[charcode]
-                    if showWhiteSpace and charcode == " ":
-                        glyph = font[u"·"]
-                    elif charcode == " ":
-                        # glyph size of space is smaller than actual size, so use size of dot instead
-                        glyph.size = font[u"·"].size
-                    # Get top and bottom coords
-                    yTop = current[1] + glyph.offset[1]
-                    yBot = yTop - glyph.size[1]
-                    # Get x mid point
-                    xMid = current[0] + glyph.offset[0] + glyph.size[0] * alphaCorrection / 2 + fakeBold / 2
-                    # Get left and right corners from midpoint
-                    xBotL = xMid - glyph.size[0] * alphaCorrection / 2 - fakeItalic - fakeBold / 2
-                    xBotR = xMid + glyph.size[0] * alphaCorrection / 2 - fakeItalic + fakeBold / 2
-                    xTopL = xMid - glyph.size[0] * alphaCorrection / 2 - fakeBold / 2
-                    xTopR = xMid + glyph.size[0] * alphaCorrection / 2 + fakeBold / 2
-
-                    u0 = glyph.texcoords[0]
-                    v0 = glyph.texcoords[1]
-                    u1 = glyph.texcoords[2]
-                    v1 = glyph.texcoords[3]
+                if styled:
+                    fakeItalic = 0.0
+                    fakeBold = 0.0
+                    if italicStyles is not None and italicStyles[i]:
+                        fakeItalic = 0.1 * fontSize
+                    if boldStyles is not None and boldStyles[i]:
+                        fakeBold = 0.3 * fontSize
+                    if boldItalicStyles is not None and boldItalicStyles[i]:
+                        fakeItalic = 0.1 * fontSize
+                        fakeBold = 0.3 * fontSize
                 else:
-                    glyph = font[u"·"]
-                    x = current[0] + glyph.offset[0]
-                    yTop = current[1] + glyph.offset[1]
-                    yBot = yTop - glyph.size[1]
+                    fakeItalic = 0.0
+                    fakeBold = 0.0
+
+                metrics = glyphMetrics.get(charcode)
+                if metrics is None:
+                    # handle newline
+                    printable = charcode != '\n'
+                    # handle printable characters
+                    if printable:
+                        glyph = font[charcode]
+                        if showWhiteSpace and charcode == " ":
+                            glyph = font[u"·"]
+                            glyphSize = glyph.size
+                        elif charcode == " ":
+                            # glyph size of space is smaller than actual size, so use size of dot instead
+                            glyphSize = dotSize
+                        else:
+                            glyphSize = glyph.size
+                    else:
+                        glyph = dotGlyph
+                        glyphSize = glyph.size
+                    texcoords = glyph.texcoords
+                    metrics = (
+                        printable,
+                        glyph.offset[0], glyph.offset[1],
+                        glyphSize[0], glyphSize[1],
+                        texcoords[0], texcoords[1], texcoords[2], texcoords[3],
+                        glyph.advance[0], glyph.advance[1],
+                    )
+                    glyphMetrics[charcode] = metrics
+                (printable, offsetX, offsetY, sizeX, sizeY,
+                 u0, v0, u1, v1, advanceX, advanceY) = metrics
+
+                # Get top and bottom coords
+                yTop = current[1] + offsetY
+                yBot = yTop - sizeY
+                if printable:
+                    halfWidth = sizeX * alphaCorrection / 2
+                    # Get x mid point
+                    xMid = current[0] + offsetX + halfWidth + fakeBold / 2
+                    # Get left and right corners from midpoint
+                    xBotL = xMid - halfWidth - fakeItalic - fakeBold / 2
+                    xBotR = xMid + halfWidth - fakeItalic + fakeBold / 2
+                    xTopL = xMid - halfWidth - fakeBold / 2
+                    xTopR = xMid + halfWidth + fakeBold / 2
+                else:
+                    x = current[0] + offsetX
                     xBotL = x
                     xTopL = x
                     xBotR = x
                     xTopR = x
-                    u0 = glyph.texcoords[0]
-                    v0 = glyph.texcoords[1]
-                    u1 = glyph.texcoords[2]
-                    v1 = glyph.texcoords[3]
 
-                theseVertices = [[xTopL, yTop], [xBotL, yBot],
-                                 [xBotR, yBot], [xTopR, yTop]]
-                texcoords = [[u0, v0], [u0, v1],
-                             [u1, v1], [u1, v0]]
-
-                vertices[i * 4:i * 4 + 4] = theseVertices
-                self._texcoords[i * 4:i * 4 + 4] = texcoords
-                # handle character color
-                if "color" in self._styles and self._styles['color'][i] is not None:
-                    self._colors[i*4 : i*4+4, :4] = self._styles['color'][i] # set custom color
-                else:
-                    self._colors[i*4 : i*4+4, :4] = rgb # set default color
+                vertices[i * 4:i * 4 + 4] = [[xTopL, yTop], [xBotL, yBot],
+                                             [xBotR, yBot], [xTopR, yTop]]
+                # gathered now and converted in one go below, which is much
+                # cheaper than assigning into the array a row at a time
+                texcoordsList[i] = ((u0, v0), (u0, v1), (u1, v1), (u1, v0))
                 self._lineNs[i] = lineN
-                current[0] = current[0] + (glyph.advance[0] + fakeBold / 2) * self.letterSpacing
-                current[1] = current[1] + glyph.advance[1]
+                current[0] = current[0] + (advanceX + fakeBold / 2) * letterSpacing
+                current[1] = current[1] + advanceY
 
                 # are we wrapping the line?
                 if charcode == "\n":
@@ -962,6 +1048,10 @@ class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, Colo
             # add length of this (unfinished) line
             _lineWidths.append(current[0])
             self._lineLenChars.append(charsThisLine)
+
+            if texcoordsList:
+                self._texcoords = np.array(
+                    texcoordsList, dtype=np.double).reshape(-1, 2)
 
         elif self._lineBreaking == 'uax14':
 
@@ -1082,11 +1172,7 @@ class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, Colo
 
                         vertices[i * 4:i * 4 + 4] = theseVertices
                         self._texcoords[i * 4:i * 4 + 4] = texcoords
-                        # handle character color
-                        if "color" in self._styles and self._styles['color'][i] is not None:
-                            self._colors[i*4 : i*4+4, :4] = self._styles['color'][i] # set custom color
-                        else:
-                            self._colors[i*4 : i*4+4, :4] = rgb # set default color
+                        # character colours are filled in up front
                         self._lineNs[i] = lineN
 
                         current[0] = current[0] + charwidth_list[i]
@@ -1115,15 +1201,9 @@ class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, Colo
                 "specified.".format(self._lineBreaking))
 
         # Add render-only characters
-        for rend in self._renderChars:
-            vertices = self._addRenderOnlyChar(
-                i=rend['i'],
-                x=rend['current'][0],
-                y=rend['current'][1],
-                vertices=vertices,
-                glyph=rend['glyph'],
-                alphaCorrection=alphaCorrection
-            )
+        if self._renderChars:
+            vertices = self._addRenderOnlyChars(
+                vertices, rgb, alphaCorrection=alphaCorrection)
 
         # Apply vertical alignment
         if self.alignment[1] in ("bottom", "center"):
@@ -1161,11 +1241,12 @@ class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, Colo
         self.vertices = (vertices * self.contentBox._size.pix).dot(self._rotationMatrix) / self.contentBox._size.pix
 
         if len(_lineBottoms):
+            contentVerts = self.contentBox._vertices.pix
             if self.flipVert:
-                self._lineBottoms = min(self.contentBox._vertices.pix[:, 1]) - np.array(_lineBottoms)
+                self._lineBottoms = min(contentVerts[:, 1]) - np.array(_lineBottoms)
             else:
-                self._lineBottoms = max(self.contentBox._vertices.pix[:, 1]) + np.array(_lineBottoms)
-            self._lineWidths = min(self.contentBox._vertices.pix[:, 0]) + np.array(_lineWidths)
+                self._lineBottoms = max(contentVerts[:, 1]) + np.array(_lineBottoms)
+            self._lineWidths = min(contentVerts[:, 0]) + np.array(_lineWidths)
         else:
             self._lineBottoms = np.array(_lineBottoms)
             self._lineWidths = np.array(_lineWidths)
@@ -1235,12 +1316,18 @@ class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, Colo
 
     def draw(self):
         """Draw the text to the back buffer"""
-        # Border width
-        self.box.setLineWidth(self.palette['lineWidth']) # Use 1 as base if border width is none
-        # Border colour
-        self.box.setLineColor(self.palette['lineColor'], colorSpace='rgb')
-        # Background
-        self.box.setFillColor(self.palette['fillColor'], colorSpace='rgb')
+        # Apply the palette to the box, but only when it has changed - these
+        # setters each revalidate the colour, which is too slow to redo every
+        # frame. .palette returns the same dict until an input changes.
+        palette = self.palette
+        if palette is not self._appliedPalette:
+            # Border width
+            self.box.setLineWidth(palette['lineWidth']) # Use 1 as base if border width is none
+            # Border colour
+            self.box.setLineColor(palette['lineColor'], colorSpace='rgb')
+            # Background
+            self.box.setFillColor(palette['fillColor'], colorSpace='rgb')
+            self._appliedPalette = palette
 
         # Inherit win
         self.box.win = self.win
@@ -1395,49 +1482,59 @@ class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, Colo
         else:
             return self.box.overlaps(polygon)
 
-    def _addRenderOnlyChar(self, i, x, y, vertices, glyph, alphaCorrection=1):
+    def _addRenderOnlyChars(self, vertices, rgb, alphaCorrection=1):
         """
-        Add a character at index i which is drawn but not actually part of the text
+        Add the characters in `self._renderChars`, which are drawn but are not
+        actually part of the text (the hyphens added when a word is broken
+        mid-way).
+
+        These are inserted in a single pass; doing them one at a time means
+        rebuilding every array once per character, which gets expensive for
+        text with many broken words.
         """
-        i4 = i * 4
-        # Get coordinates of glyph texture
-        self._texcoords = np.vstack([
-            self._texcoords[:i4],
-            [glyph.texcoords[0], glyph.texcoords[1]],
-            [glyph.texcoords[0], glyph.texcoords[3]],
-            [glyph.texcoords[2], glyph.texcoords[3]],
-            [glyph.texcoords[2], glyph.texcoords[1]],
-            self._texcoords[i4:]
-        ])
-        # Get coords of box corners
-        top = y + glyph.offset[1]
-        bot = top - glyph.size[1]
-        mid = x + glyph.offset[0] + glyph.size[0] * alphaCorrection / 2
-        left = mid - glyph.size[0] * alphaCorrection / 2
-        right = mid + glyph.size[0] * alphaCorrection / 2
-        vertices = np.vstack([
-            vertices[:i4],
-            [left, top],
-            [left, bot],
-            [right, bot],
-            [right, top],
-            vertices[i4:]
-        ])
+        renderChars = self._renderChars
+        # Each insert shifts the ones after it along by a character, so take
+        # that back off to get positions within the arrays as they are now
+        charIndices = [rend['i'] - n for n, rend in enumerate(renderChars)]
+        indices = np.repeat(np.array(charIndices, dtype=int) * 4, 4)
+
+        newVertices = []
+        newTexcoords = []
+        for n, rend in enumerate(renderChars):
+            x, y = rend['current']
+            glyph = rend['glyph']
+            # Get coords of box corners
+            top = y + glyph.offset[1]
+            bot = top - glyph.size[1]
+            halfWidth = glyph.size[0] * alphaCorrection / 2
+            mid = x + glyph.offset[0] + halfWidth
+            left = mid - halfWidth
+            right = mid + halfWidth
+            newVertices += [
+                [left, top], [left, bot], [right, bot], [right, top]
+            ]
+            # Get coordinates of glyph texture
+            texcoords = glyph.texcoords
+            newTexcoords += [
+                [texcoords[0], texcoords[1]],
+                [texcoords[0], texcoords[3]],
+                [texcoords[2], texcoords[3]],
+                [texcoords[2], texcoords[1]],
+            ]
+
+        vertices = np.insert(vertices, indices, newVertices, axis=0)
+        self._texcoords = np.insert(
+            self._texcoords, indices, newTexcoords, axis=0)
         # Make same colour as other text
-        self._colors = np.vstack([
-            self._colors[:i4],
-            self._foreColor.render('rgba1'),
-            self._foreColor.render('rgba1'),
-            self._foreColor.render('rgba1'),
-            self._foreColor.render('rgba1'),
-            self._colors[i4:]
-        ])
-        # Extend line numbers array
-        self._lineNs = np.hstack([
-            self._lineNs[:i],
-            self._lineNs[i-1],
-            self._lineNs[i:]
-        ])
+        self._colors = np.insert(
+            self._colors, indices, np.tile(rgb, (len(indices), 1)), axis=0)
+        # Extend line numbers array, each new char joining the line it broke
+        lineNs = self._lineNs
+        self._lineNs = np.insert(
+            lineNs,
+            charIndices,
+            [lineNs[i - 1] for i in charIndices]
+        )
 
         return vertices
 
@@ -1452,11 +1549,12 @@ class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, Colo
         if hasattr(self, 'flipVert') and self.flipVert:
             flip[1] = -1  # True=(-1), False->(+1)
 
-        self.__dict__['verticesPix'] = self._vertices.pix
+        # .pix is recomputed on each access, so convert once and reuse
+        verts = self._vertices.pix
+        self.__dict__['verticesPix'] = verts
 
         # tight bounding box
         if hasattr(self._vertices, self.units) and self.vertices.shape[0] >= 1:
-            verts = self._vertices.pix
             L = verts[:, 0].min()
             R = verts[:, 0].max()
             B = verts[:, 1].min()
@@ -1682,9 +1780,11 @@ class Caret(ColorMixin):
         gl.glColor4f(
             *self._foreColor.rgba1
         )
+        # .vertices is recomputed on each access, so read it just once
+        verts = self.vertices
         gl.glBegin(gl.GL_LINES)
-        gl.glVertex2f(self.vertices[0, 0], self.vertices[0, 1])
-        gl.glVertex2f(self.vertices[1, 0], self.vertices[1, 1])
+        gl.glVertex2f(verts[0, 0], verts[0, 1])
+        gl.glVertex2f(verts[1, 0], verts[1, 1])
         gl.glEnd()
 
     def draw(self, override=None):
@@ -1823,18 +1923,24 @@ class Caret(ColorMixin):
         ii = self.index
         if textbox.vertices.shape[0] == 0:
             # If there are no chars, put caret at start position (determined by alignment)
+            # .pix is recomputed on each access, so convert once and reuse
+            contentVerts = textbox.contentBox._vertices.pix
+            contentB = min(contentVerts[:, 1])
+            contentT = max(contentVerts[:, 1])
+            contentL = min(contentVerts[:, 0])
+            contentR = max(contentVerts[:, 0])
             if textbox.alignment[1] == "bottom":
-                bottom = min(textbox.contentBox._vertices.pix[:, 1])
+                bottom = contentB
             elif textbox.alignment[1] == "center":
-                bottom = (min(textbox.contentBox._vertices.pix[:, 1]) + max(textbox.contentBox._vertices.pix[:, 1]) - textbox.glFont.ascender - textbox.glFont.descender) / 2
+                bottom = (contentB + contentT - textbox.glFont.ascender - textbox.glFont.descender) / 2
             else:
-                bottom = max(textbox.contentBox._vertices.pix[:, 1]) - textbox.glFont.ascender
+                bottom = contentT - textbox.glFont.ascender
             if textbox.alignment[0] == "right":
-                x = max(textbox.contentBox._vertices.pix[:, 0])
+                x = contentR
             elif textbox.alignment[0] == "center":
-                x = (min(textbox.contentBox._vertices.pix[:, 0]) + max(textbox.contentBox._vertices.pix[:, 0])) / 2
+                x = (contentL + contentR) / 2
             else:
-                x = min(textbox.contentBox._vertices.pix[:, 0])
+                x = contentL
         else:
             # Otherwise, get caret position from character vertices
             if self.index >= len(textbox._lineNs):
@@ -1888,14 +1994,14 @@ class Styling:
         self.adjustments = []
         # maps indices in visible text to styles
         self.indices = []
-        # initialise arabic reshaper     
-        self.arabicReshaper = ArabicReshaper(configuration={
-            'delete_harakat': False,  # if present, retain any diacritics
-            'shift_harakat_position': False  # shift by 1 to be compatible with the bidi algorithm
-        })
         # do we need arabic or bidi transformation?
         self.needsBidi = languageStyle.lower() in ("rtl", "arabic")
         self.needsArabic = languageStyle.lower() == "arabic"
+        # initialise arabic reshaper (only when needed - building one parses a
+        # config of several thousand ligature entries, which is far too slow to
+        # do on every text assignment)
+        if self.needsArabic:
+            self.arabicReshaper = getArabicReshaper()
         # define regex patterns according to syntax
         self.patterns = {}
         self.escapes = []
