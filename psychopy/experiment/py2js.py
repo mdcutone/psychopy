@@ -12,13 +12,14 @@ to JS (ES6/PsychoJS)
 import ast
 from pathlib import Path
 
-import astunparse
 import esprima
 from os import path
 from psychopy import logging
 
 from io import StringIO
-from psychopy.experiment.py2js_transpiler import translatePythonToJavaScript
+from psychopy.experiment.py2js_transpiler import (
+    translatePythonToJavaScript, Unparser as BaseUnparser
+)
 
 
 class TupleTransformer(ast.NodeTransformer):
@@ -33,7 +34,7 @@ class TupleTransformer(ast.NodeTransformer):
         return ast.List(node.elts, node.ctx)
 
 
-class Unparser(astunparse.Unparser):
+class Unparser(BaseUnparser):
     """astunparser had buried the future_imports option underneath its init()
     so we need to override that method and change it."""
 
@@ -73,10 +74,9 @@ def expression2js(expr):
     for node in ast.walk(syntaxTree):
         TupleTransformer().visit(node)  # Transform tuples to list
         # for py2 using 'unicode_literals' we don't want
-        if isinstance(node, ast.Str) and type(node.s)==bytes:
-            node.s = str(node.s, 'utf-8')
-        elif isinstance(node, ast.Str) and node.s.startswith("u'"):
-            node.s = node.s[1:]
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                and node.value.startswith("u'"):
+            node.value = node.value[1:]
         if isinstance(node, ast.Name):
             if node.id == 'undefined':
                 continue
