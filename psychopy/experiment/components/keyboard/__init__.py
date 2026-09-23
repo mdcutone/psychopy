@@ -5,15 +5,16 @@
 # Copyright (C) 2002-2018 Jonathan Peirce (C) 2019-2025 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
+from importlib.util import find_spec
 from pathlib import Path
 
 from psychopy.alerts._alerts import alert
 from psychopy.experiment.components import BaseComponent, Param, _translate, getInitVals
 from psychopy.experiment import CodeGenerationException, valid_var_re
-from pkgutil import find_loader
 
-# Check for psychtoolbox
-havePTB = find_loader('psychtoolbox') is not None
+# Check for psychtoolbox (`pkgutil.find_loader` did this before Python 3.14
+# removed it)
+havePTB = find_spec('psychtoolbox') is not None
 
 
 class KeyboardComponent(BaseComponent):
