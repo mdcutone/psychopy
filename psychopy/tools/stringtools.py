@@ -379,15 +379,13 @@ def _actualizeAstValue(item):
     """
     Convert an AST value node to a usable Python object
     """
-    if isinstance(item, ast.Str):
-        # Handle ast string
-        return item.s
-    elif hasattr(ast, 'Bytes') and isinstance(item, ast.Bytes):
-        # Handle ast bytes
-        return item.s
-    elif isinstance(item, ast.Num):
-        # Handle ast numbers
-        return item.n
+    if isinstance(item, ast.Constant):
+        # Handle ast strings, bytes and numbers. Bools are excluded to match
+        # the `ast.Num` check this replaces (removed in Python 3.14), which
+        # never counted them as numbers.
+        if isinstance(item.value, (str, bytes, int, float, complex)) and \
+                not isinstance(item.value, bool):
+            return item.value
     elif isinstance(item, ast.Tuple):
         # Handle ast array
         return tuple(_actualizeAstValue(i) for i in item.elts)
