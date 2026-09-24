@@ -20,7 +20,7 @@ from ast import literal_eval
 import numpy as np
 import sys
 from arabic_reshaper import ArabicReshaper
-from pyglet import gl
+import psychopy.tools.pygletgl as gl
 from bidi import algorithm as bidi
 import re
 
@@ -40,9 +40,7 @@ from ... import core, alerts, layout
 
 from psychopy.tools.linebreak import get_breakable_points, break_units
 
-import pyglet
-USE_LEGACY_GL = pyglet.version < '2.0'
-import pyglet.gl as gl
+USE_LEGACY_GL = gl.USE_LEGACY_GL
 
 allFonts = FontManager()
 

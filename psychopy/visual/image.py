@@ -17,7 +17,7 @@ from psychopy.layout import Size
 
 pyglet.options['debug_gl'] = False
 import ctypes
-GL = pyglet.gl
+import psychopy.tools.pygletgl as GL
 
 import numpy
 from fractions import Fraction
@@ -31,7 +31,7 @@ from psychopy.visual.basevisual import (
     BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin, TextureMixin
 )
 
-USE_LEGACY_GL = pyglet.version < '2.0'
+USE_LEGACY_GL = GL.USE_LEGACY_GL
 
 
 class ImageStim(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin,

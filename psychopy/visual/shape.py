@@ -32,9 +32,9 @@ from psychopy.colors import Color
 import psychopy.visual
 
 pyglet.options['debug_gl'] = False
-GL = pyglet.gl
+import psychopy.tools.pygletgl as GL
 
-USE_LEGACY_GL = pyglet.version < '2.0'
+USE_LEGACY_GL = GL.USE_LEGACY_GL
 
 
 knownShapes = {

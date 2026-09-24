@@ -29,7 +29,7 @@ import math
 from ..colors import Color, colorSpaces
 from .textbox2 import TextBox2
 
-import pyglet
+import psychopy.tools.pygletgl as pygletgl
 
 
 haveAvbin = False
@@ -249,7 +249,7 @@ class Window():
     project (we won't be fixing pygame-specific bugs).
 
     """
-    USE_LEGACY_GL = pyglet.version < '2.0'
+    USE_LEGACY_GL = pygletgl.USE_LEGACY_GL
     def __init__(self,
                  size=(800, 600),
                  pos=None,
@@ -3857,7 +3857,7 @@ class Window():
         if self.USE_LEGACY_GL:
             GL.glMatrixMode(GL.GL_PROJECTION)  # Reset the projection matrix
             GL.glLoadIdentity()
-            GL.gluOrtho2D(-1, 1, -1, 1)
+            GL.glOrtho(-1, 1, -1, 1, -1, 1)
 
             GL.glMatrixMode(GL.GL_MODELVIEW)  # Reset the modelview matrix
             GL.glLoadIdentity()
@@ -3871,9 +3871,10 @@ class Window():
         GL.glEnable(GL.GL_BLEND)
 
         # check for GL_ARB_texture_float
-        # (which is needed for shaders to be useful)
+        # (which is needed for shaders to be useful), part of OpenGL 3.0+
         # this needs to be done AFTER the context has been created
-        if not GL.gl_info.have_extension('GL_ARB_texture_float'):
+        if not (GL.gl_info.have_version(3) or
+                GL.gl_info.have_extension('GL_ARB_texture_float')):
             self._haveShaders = False
 
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
@@ -3953,23 +3954,9 @@ class Window():
             fragSrc = gltools.embedShaderSourceDefs(
                 _shaders.fragPhongLighting, srcDefs)
 
-            # build a shader program
-            prog = gltools.createProgram()
-            vertexShader = gltools.compileShader(
-                vertSrc, GL.GL_VERTEX_SHADER)
-            fragmentShader = gltools.compileShader(
-                fragSrc, GL.GL_FRAGMENT_SHADER)
-
-            gltools.attachShader(prog, vertexShader)
-            gltools.attachShader(prog, fragmentShader)
-            gltools.linkProgram(prog)
-            gltools.detachShader(prog, vertexShader)
-            gltools.detachShader(prog, fragmentShader)
-            gltools.deleteShader(vertexShader)
-            gltools.deleteShader(fragmentShader)
-
-            # set the flag
-            self._shaders['stim3d_phong'][flag] = prog        
+            # build a shader program, set the flag
+            self._shaders['stim3d_phong'][flag] = _shaders.compileProgram(
+                vertSrc, fragSrc)
 
     def _setupFrameBuffer(self):
         """Setup the framebuffer object for this window.
@@ -4392,7 +4379,12 @@ class Window():
             GL.glVertex2f(1.0, -1.0)
             GL.glEnd()
         else:
-            gltools.setUniformSampler2D(self._progFBOtoFrame, b'texture', 0)
+            gltools.setUniformSampler2D(self._progFBOtoFrame, b'uTexture', 0)
+            # `_fboVerts` are already in clip coordinates
+            gltools.setUniformMatrix(
+                self._progFBOtoFrame, b'uProjectionMatrix', IDENTITY_MATRIX4)
+            gltools.setUniformMatrix(
+                self._progFBOtoFrame, b'uModelViewMatrix', IDENTITY_MATRIX4)
             gltools.drawClientArrays({
                 'gl_Vertex': self._fboVerts, 
                 'gl_MultiTexCoord0': self._fboTexCoords}, 

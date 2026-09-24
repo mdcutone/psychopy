@@ -42,6 +42,17 @@ if 'PYGLET_DEBUG_GL' not in os.environ:
     except ImportError:
         pass  # pyglet isn't required to merely import psychopy
 
+# Pyglet 2+ creates a hidden "shadow" window when `pyglet.gl` is imported, and
+# on macOS its context is core profile, which PsychoPy's fixed-function OpenGL
+# can't use. Stop that here, before anything imports `pyglet.gl`, so that
+# `psychopy.tools.pygletgl` can create it with a legacy context instead.
+try:
+    import pyglet
+    if pyglet.version >= '2.0':
+        pyglet.options['shadow_window'] = False
+except ImportError:
+    pass
+
 # for developers the following allows access to the current git sha from
 # their repository
 if __git_sha__ == 'n/a':
