@@ -333,7 +333,7 @@ class ImageStim(BaseVisualStim, DraggingMixin, ContainerMixin, ColorMixin,
         loc = uniforms[b'uModelViewMatrix']
         if loc != -1:
             GL.glUniformMatrix4fv(
-                loc, 1, GL.GL_TRUE, self._asMatrixPtr(win._viewMatrix))
+                loc, 1, GL.GL_TRUE, self._asMatrixPtr(win._getPixViewMatrix()))
 
         # draw the image
         gt.drawClientArrays({

@@ -570,7 +570,7 @@ class DotStim(BaseVisualStim, ColorMixin, ContainerMixin):
             
             GL.glPointSize(self.dotSize)
             projectionMatrix = win._projectionMatrix
-            modelViewMatrix = win._viewMatrix
+            modelViewMatrix = win._getPixViewMatrix()
 
             gt.setUniformValue(
                 _prog, 

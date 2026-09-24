@@ -438,7 +438,7 @@ class BaseShapeStim(BaseVisualStim, DraggingMixin, ColorMixin, ContainerMixin):
             gt.setUniformMatrix(
                 _prog, 
                 b'uModelViewMatrix',
-                win._viewMatrix,
+                win._getPixViewMatrix(),
                 transpose=True)
             gt.drawClientArrays(
                 {'gl_Vertex': self.verticesPix},
@@ -459,7 +459,7 @@ class BaseShapeStim(BaseVisualStim, DraggingMixin, ColorMixin, ContainerMixin):
             gt.setUniformMatrix(
                 _prog, 
                 b'uModelViewMatrix', 
-                win._viewMatrix,
+                win._getPixViewMatrix(),
                 transpose=True)
             gt.drawClientArrays(
                 {'gl_Vertex': self.verticesPix},
@@ -869,7 +869,7 @@ class ShapeStim(BaseShapeStim):
             gt.setUniformMatrix(
                 _prog, 
                 b'uModelViewMatrix', 
-                win._viewMatrix, 
+                win._getPixViewMatrix(), 
                 transpose=True)
             gt.drawClientArrays(
                 {'gl_Vertex': self.verticesPix},
@@ -888,7 +888,7 @@ class ShapeStim(BaseShapeStim):
             gt.setUniformMatrix(
                 _prog, 
                 b'uModelViewMatrix', 
-                win._viewMatrix, 
+                win._getPixViewMatrix(), 
                 transpose=True)
             gt.drawClientArrays(
                 {'gl_Vertex': self._borderPix},

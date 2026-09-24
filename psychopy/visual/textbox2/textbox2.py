@@ -1396,7 +1396,7 @@ class TextBox2(BaseVisualStim, PointerMixin, DraggingMixin, ContainerMixin, Colo
             gt.setUniformMatrix(
                 prog, 
                 b'uModelViewMatrix', 
-                self.win._viewMatrix,
+                self.win._getPixViewMatrix(),
                 transpose=True)
             gt.setUniformMatrix(
                 prog, 
@@ -1816,7 +1816,7 @@ class Caret(ColorMixin):
         gt.setUniformMatrix(
             prog, 
             b'uModelViewMatrix', 
-            self.win.viewMatrix,
+            self.win._getPixViewMatrix(),
             transpose=True)
         gt.drawClientArrays({
             'gl_Vertex': self.vertices}, 'lines')

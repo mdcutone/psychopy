@@ -623,7 +623,7 @@ class ElementArrayStim(MinimalStim, TextureMixin, ColorMixin):
         gt.setUniformMatrix(
             _prog, 
             b'uModelViewMatrix', 
-            win._viewMatrix,
+            win._getPixViewMatrix(),
             transpose=True)
 
         verticesPix = self.verticesPix.reshape(-1, 3)

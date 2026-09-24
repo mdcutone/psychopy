@@ -734,6 +734,9 @@ class Window():
         # allows the pointers below to stay valid for the life of the window.
         self._projectionMatrix = numpy.identity(4, dtype=numpy.float32)
         self._viewMatrix = numpy.identity(4, dtype=numpy.float32)
+        # the view matrix scaled for drawing in pixels, see `_getPixViewMatrix`
+        self._pixScaleMatrix = numpy.identity(4, dtype=numpy.float32)
+        self._pixViewMatrix = numpy.identity(4, dtype=numpy.float32)
 
         # Pointers handed to the GL matrix calls. Deriving these on every call
         # is a measurable cost in the draw loop, so cache them here along with
@@ -3829,6 +3832,28 @@ class Window():
             GL.glScalef(thisScale[0], thisScale[1], 1.0)
 
         return thisScale
+
+    def _getPixViewMatrix(self):
+        """Get the view matrix for drawing in pixels with non-legacy OpenGL.
+
+        This is the view matrix followed by the scaling `setScale('pix')`
+        applies to the current matrix with legacy OpenGL, so vertices in pixels
+        (e.g. `verticesPix`) are drawn at the same size and position.
+
+        Returns
+        -------
+        ndarray
+            4x4 `float32` matrix. The same array is updated and returned on
+            each call.
+
+        """
+        sx, sy = self.setScale('pix')
+        self._pixScaleMatrix[0, 0] = sx
+        self._pixScaleMatrix[1, 1] = sy
+        numpy.matmul(
+            self._viewMatrix, self._pixScaleMatrix, out=self._pixViewMatrix)
+
+        return self._pixViewMatrix
 
     def _checkMatchingSizes(self, requested, actual):
         """Checks whether the requested and actual screen sizes differ.
