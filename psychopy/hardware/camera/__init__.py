@@ -1295,8 +1295,8 @@ class CameraDevice(BaseDevice):
         ----------
         device : int, str or dict
             Index into `getAvailableDevices()`, name of the camera as the OS
-            reports it, or a device profile as `getAvailableDevices()` returns
-            them.
+            reports it or as the `deviceName` of its profile, or a device
+            profile as `getAvailableDevices()` returns them.
 
         Returns
         -------
@@ -1318,11 +1318,11 @@ class CameraDevice(BaseDevice):
                 raise CameraNotFoundError(
                     "Cannot find camera with index {}, {} camera(s) are "
                     "available.".format(device, len(availableDevices)))
-            device = availableDevices[device]['deviceName']
+            device = availableDevices[device]['device']
 
         if isinstance(device, str):
             for profile in cls.getAvailableDevices():
-                if profile['deviceName'] == device:
+                if device in (profile['device'], profile['deviceName']):
                     return profile
 
         raise CameraNotFoundError(
@@ -1366,7 +1366,7 @@ class CameraDevice(BaseDevice):
             Key identifying the camera within the registry of open devices.
 
         """
-        return cls._captureLib, profile['deviceName']
+        return cls._captureLib, profile['device']
 
     def _isReusedInstance(self, **requested):
         """Whether this object is a device which is already open.
@@ -1982,8 +1982,9 @@ class CameraDevice(BaseDevice):
 
         Parameters
         ----------
-        device : str or int
-            The name or index of the camera device.
+        device : str
+            Name of the camera device, either as the OS reports it or as the
+            `deviceName` field of a profile from `getAvailableDevices()`.
         by : str, optional
             If specified, filter the capabilities by a specific attribute (e.g.,
             'frameSize', 'frameRate', 'pixelFormat', 'codecFormat'). If `None`,
@@ -2002,9 +2003,19 @@ class CameraDevice(BaseDevice):
             match the specified attribute.
 
         """
+        cameras = cls.getCameras()
+
+        # `deviceName` in a profile is a human-readable name for the camera,
+        # which can differ from the one the OS reports it under
+        if device not in cameras:
+            for profile in cls.getAvailableDevices():
+                if device == profile['deviceName']:
+                    device = profile['device']
+                    break
+
         # find the specified device
         deviceModes = []
-        for dev in cls.getCameras().values():
+        for dev in cameras.values():
             for mode in dev:
                 if mode.name != device:
                     continue
@@ -2158,7 +2169,7 @@ class FFPyPlayerCameraDevice(CameraDevice):
         self.info = self._getDeviceProfile(device)
         self._frameSize = frameSize if frameSize is not None else [640, 480]
         self._frameRate = frameRate if frameRate is not None else 30.0
-        self._device = self.info['deviceName']
+        self._device = self.info['device']
         self._decoderOpts = decoderOpts if decoderOpts is not None else {}
         self._pollingInterval = pollingInterval if pollingInterval is not None else self.frameInterval
         self._pollingTimerThread = None
@@ -2638,7 +2649,10 @@ class FFPyPlayerCameraDevice(CameraDevice):
                 continue  # skip duplicate camera names
             foundCameras.append(cams[0].name)
             profiles.append({
-                'deviceName': cams[0].name,
+                # human-readable name, which `DeviceManager` files it under
+                'deviceName': _getCameraDisplayName(
+                    cams[0].name,
+                    [profile['deviceName'] for profile in profiles]),
                 'deviceClass': "psychopy.hardware.camera.CameraDevice",
                 # the camera to open, named as `__init__` takes it; profiles are
                 # splatted straight into the constructor by
@@ -2829,7 +2843,7 @@ class PyAVCameraDevice(CameraDevice):
 
         # whatever we were given, resolved to a camera attached to the system
         self.info = self._getDeviceProfile(device)
-        self._device = self.info['deviceName']
+        self._device = self.info['device']
         self._frameSize = list(frameSize) if frameSize is not None else [640, 480]
         self._frameRate = float(frameRate) if frameRate is not None else 30.0
         self._frameInterval = 1.0 / self._frameRate if self._frameRate > 0 else -1.0
@@ -3519,7 +3533,7 @@ class PyAVCameraDevice(CameraDevice):
         if isinstance(other, PyAVCameraDevice):
             return self._device == other._device
         elif isinstance(other, dict):
-            return self._device == other.get('deviceName', None)
+            return self._device == other.get('device', None)
 
         return False
 
@@ -3584,7 +3598,10 @@ class PyAVCameraDevice(CameraDevice):
             foundCameras.append(cams[0].name)
 
             profiles.append({
-                'deviceName': cams[0].name,
+                # human-readable name, which `DeviceManager` files it under
+                'deviceName': _getCameraDisplayName(
+                    cams[0].name,
+                    [profile['deviceName'] for profile in profiles]),
                 'deviceClass': PyAVCameraDevice._deviceClassPath,
                 # the camera to open, named as `__init__` takes it; profiles are
                 # splatted straight into the constructor by
@@ -3715,7 +3732,7 @@ class OpenCVCameraDevice(CameraDevice):
 
         # whatever we were given, resolved to a camera attached to the system
         self.info = self._getDeviceProfile(device)
-        self._device = self.info['deviceName']
+        self._device = self.info['device']
         self._frameSize = list(frameSize) if frameSize is not None else [640, 480]
         self._frameRate = float(frameRate) if frameRate is not None else 30.0
         self._frameInterval = 1.0 / self._frameRate if self._frameRate > 0 else -1.0
@@ -3849,7 +3866,8 @@ class OpenCVCameraDevice(CameraDevice):
         Parameters
         ----------
         deviceName : str
-            Name of the camera, as `getAvailableDevices()` reports it.
+            Name of the camera, as the `device` field of the profiles
+            `getAvailableDevices()` returns gives it.
 
         Returns
         -------
@@ -3865,7 +3883,7 @@ class OpenCVCameraDevice(CameraDevice):
                 return int(digits)
 
         for devIndex, profile in enumerate(cls.getAvailableDevices()):
-            if profile['deviceName'] == deviceName:
+            if profile['device'] == deviceName:
                 return devIndex
 
         raise CameraNotFoundError(
@@ -4574,7 +4592,7 @@ class OpenCVCameraDevice(CameraDevice):
         if isinstance(other, OpenCVCameraDevice):
             return self._device == other._device
         elif isinstance(other, dict):
-            return self._device == other.get('deviceName', None)
+            return self._device == other.get('device', None)
 
         return False
 
@@ -4671,7 +4689,10 @@ class OpenCVCameraDevice(CameraDevice):
             foundCameras.append(cams[0].name)
 
             profiles.append({
-                'deviceName': cams[0].name,
+                # human-readable name, which `DeviceManager` files it under
+                'deviceName': _getCameraDisplayName(
+                    cams[0].name,
+                    [profile['deviceName'] for profile in profiles]),
                 'deviceClass': OpenCVCameraDevice._deviceClassPath,
                 # the camera to open, named as `__init__` takes it; profiles are
                 # splatted straight into the constructor by
@@ -5570,12 +5591,11 @@ class Camera:
                 availableDevices = cameraDeviceClass.getAvailableDevices()
                 # if given a device name, try to find it
                 for profile in availableDevices:
-                    if profile['deviceName'] != device:
+                    if device not in (profile['device'], profile['deviceName']):
                         continue
                     paramsMatch = all([
                         profile.get(key) == value
                         for key, value in {
-                            'deviceName': device,
                             'captureLib': cameraLib,
                             'frameRate': frameRate if frameRate is not None else True,  # get first
                             'frameSize': frameSize if frameSize is not None else True
@@ -7726,6 +7746,50 @@ def _getCameraInfoLinux(cameraLib=CAMERA_LIB_FFPYPLAYER):
         videoDevices[vf] = supportedFormats
 
     return videoDevices
+
+
+def _getCameraDisplayName(cameraName, takenNames=()):
+    """Get a human-readable name for a camera attached to the system.
+
+    Cameras are identified by the name the OS enumerates them under, which is
+    what the capture libraries open them with. On MacOS and Windows that is
+    already the product name of the camera, but on Linux it is the path of the
+    device file (e.g. `/dev/video0`), so the name the driver gives the camera
+    is looked up instead.
+
+    Parameters
+    ----------
+    cameraName : str
+        Name of the camera as `getCameras()` reports it.
+    takenNames : Iterable[str]
+        Names already given to other cameras. Identical cameras share a product
+        name, so a number is appended to keep the names returned unique.
+
+    Returns
+    -------
+    str
+        Human-readable name for the camera.
+
+    """
+    displayName = cameraName
+
+    if (platform.system() == 'Linux' and
+            cameraName.startswith(VIDEO_DEVICE_ROOT_LINUX)):
+        sysfsName = os.path.join(
+            '/sys/class/video4linux', os.path.basename(cameraName), 'name')
+        try:
+            with open(sysfsName, 'r') as f:
+                displayName = f.read().strip() or cameraName
+        except OSError:
+            pass  # no name to be had from the driver, use the path
+
+    uniqueName = displayName
+    suffix = 2
+    while uniqueName in takenNames:
+        uniqueName = '{} ({})'.format(displayName, suffix)
+        suffix += 1
+
+    return uniqueName
 
 
 # Mapping for platform specific camera getter functions used by `getCameras`.
