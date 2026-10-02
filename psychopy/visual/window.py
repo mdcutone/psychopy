@@ -13,7 +13,7 @@ import sys
 import weakref
 import atexit
 from itertools import product
-from collections import deque
+from collections import deque, namedtuple
 
 from psychopy.tools import colorspacetools as ct
 
@@ -102,6 +102,13 @@ import numpy
 from psychopy.core import rush
 
 reportNDroppedFrames = 5  # stop raising warning after this
+
+# Per-frame timing breakdown produced by `Window.flip()` and returned by
+# `Window.getLastFramePerfStats()`. By construction
+# `drawTime + waitTime == frameInterval`, so the whole frame is accounted for.
+FramePerfStats = namedtuple(
+    'FramePerfStats',
+    ['drawTime', 'waitTime', 'headroom', 'frameInterval', 'framePeriod'])
 
 # import pyglet.gl, pyglet.window, pyglet.image, pyglet.font, pyglet.event
 from . import shaders as _shaders
@@ -719,6 +726,15 @@ class Window():
         self.frameIntervals = []
         self._frameTimes = deque(maxlen=1000)  # 1000 keeps overhead low
 
+        # Per-frame performance stats, see `getLastFramePerfStats()`. The draw
+        # window for a frame opens when the previous flip completed, so
+        # `_frameDrawStart` is the vsync timestamp of the previous frame. Both
+        # stay `None` until there has been a flip to measure from, which also
+        # keeps subclasses that supply their own `flip()` (e.g. `Rift`) from
+        # reporting stats they never recorded.
+        self._frameDrawStart = None
+        self._lastFramePerfStats = None
+
         self._toDraw = []
         self._heldDraw = []
         self._toDrawDepths = []
@@ -1263,6 +1279,64 @@ class Window():
 
         return output
 
+    def getLastFramePerfStats(self):
+        """Performance statistics for the most recently presented frame.
+
+        Use this to see how much of the frame interval your drawing is actually
+        consuming, and therefore how much room is left for additional stimuli or
+        other per-frame work before frames start being dropped.
+
+        Returns
+        -------
+        FramePerfStats or None
+            Named tuple with the following fields, or `None` if no frame has
+            been measured yet (stats become available after the second call to
+            :py:attr:`~Window.flip()`).
+
+            drawTime : float
+                Time in seconds spent drawing the frame, measured from the
+                moment the previous flip completed to the moment the buffer swap
+                was issued. As well as your own draw calls this covers the
+                `autoDraw` pass, the FBO blit, functions scheduled with
+                :py:attr:`~Window.callOnFlip()` and logging.
+            waitTime : float
+                Time in seconds the flip spent waiting, from the buffer swap
+                being issued to the display releasing the draw buffer again.
+            headroom : float or None
+                Proportion of the nominal frame interval still available for
+                more work, i.e. ``1.0 - drawTime / framePeriod``. A value of
+                `0.25` means a quarter of the frame is unused. Negative values
+                mean the frame overran its budget.
+            frameInterval : float
+                Measured duration of the frame in seconds, equal to
+                ``drawTime + waitTime``.
+            framePeriod : float
+                Nominal frame period in seconds used as the budget, i.e.
+                :py:attr:`~Window.monitorFramePeriod`.
+
+        Notes
+        -----
+        * These are CPU-side wall-clock times. Draw calls are queued
+          asynchronously, so `drawTime` measures the cost of *issuing* the frame,
+          not of the GPU completing it. Work that the GPU has not finished by
+          the time the swap is issued shows up in `waitTime` instead.
+        * `waitTime` is only meaningful when :py:attr:`~Window.waitBlanking` is
+          `True`. Without it nothing explicitly blocks on the vertical blank, so
+          the split between drawing and waiting is not interpretable.
+        * Stats are recorded on every flip; there is nothing to enable.
+
+        Examples
+        --------
+        Warn when a frame leaves less than 20% of its budget free::
+
+            win.flip()
+            stats = win.getLastFramePerfStats()
+            if stats is not None and stats.headroom < 0.2:
+                print('only {:.0%} of the frame left'.format(stats.headroom))
+
+        """
+        return self._lastFramePerfStats
+
     def _assignFlipTime(self, obj, attrib, format=float):
         """Helper function to assign the time of last flip to the obj.attrib
 
@@ -1553,6 +1627,12 @@ class Window():
         # call this before flip() whether FBO was used or not
         self._afterFBOrender()
 
+        # Everything that can block on the display is from here on: the swap
+        # itself (which blocks on macOS/pyglet via the display link), the buffer
+        # clear in `_endOfFlip` and `glFinish`. Timestamping here therefore puts
+        # the FBO blit on the draw side and the vsync wait on the wait side.
+        tSwapStart = logging.defaultClock.getTime()
+
         self.backend.swapBuffers(flipThisFrame)
 
         if self.useFBO and flipThisFrame:
@@ -1598,6 +1678,31 @@ class Window():
         # get timestamp
         self._frameTime = now = logging.defaultClock.getTime()
         self._frameTimes.append(self._frameTime)
+
+        # Frame performance stats. `_frameDrawStart` is when this frame's draw
+        # window opened (the previous flip's vsync), so the two spans below tile
+        # the whole frame interval. Headroom is measured against the nominal
+        # frame period rather than the interval we just saw, so that a frame
+        # which overran its budget reports a negative value instead of looking
+        # healthy on the back of a doubled interval.
+        if self._frameDrawStart is not None:
+            drawTime = tSwapStart - self._frameDrawStart
+            waitTime = now - tSwapStart
+            framePeriod = self.monitorFramePeriod
+            if framePeriod:
+                headroom = 1.0 - drawTime / framePeriod
+            else:
+                headroom = None
+            self._lastFramePerfStats = FramePerfStats(
+                drawTime=drawTime,
+                waitTime=waitTime,
+                headroom=headroom,
+                frameInterval=drawTime + waitTime,
+                framePeriod=framePeriod)
+
+        # open the draw window for the next frame; the bookkeeping below is work
+        # done inside the frame, so it counts towards that frame's draw time
+        self._frameDrawStart = now
 
         # run scheduled functions immediately after flip completes
         n_items = len(self._toCall)
