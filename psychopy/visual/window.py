@@ -624,6 +624,10 @@ class Window():
         from psychopy.hardware.keyboard import KeyboardDevice
         if hasattr(KeyboardDevice._instance, "attachWindow"):
             KeyboardDevice._instance.attachWindow(self.backend.winHandle)
+        # if there's a mouse, have it give positions in this window too
+        from psychopy.hardware.mouse import MouseDevice
+        if MouseDevice._instance is not None:
+            MouseDevice._instance.attachWindow(self)
 
         # check whether shaders are supported
         # also will need to check for ARB_float extension,
@@ -3527,6 +3531,11 @@ class Window():
                 ioHubConnection.ACTIVE_CONNECTION.unregisterWindowHandles(self._hw_handle)
         except Exception:
             pass
+
+        # stop the mouse giving positions in this window
+        from psychopy.hardware.mouse import MouseDevice
+        if MouseDevice._instance is not None:
+            MouseDevice._instance.detachWindow(self)
 
         if self.backend is not None and hasattr(self.backend, 'close'):
             self.backend.close()  # moved here, dereferencing the window prevents
