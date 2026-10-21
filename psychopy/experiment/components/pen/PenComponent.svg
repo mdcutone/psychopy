@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 32 32" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:1.5;">
+    <g id="light-components-PenComponent">
+        <rect x="0" y="0" width="32" height="32" style="fill:none;"/>
+        <!-- stroke drawn by the pen -->
+        <path d="M8.2,24.2C6.2,26.8 4.6,24.4 2.6,28.6" style="fill:none;stroke:var(--blue);stroke-width:2px;"/>
+        <!-- pen, pointing down and to the left -->
+        <g transform="rotate(45 16 16)">
+            <path d="M13,4.5C13,3.672 13.672,3 14.5,3L17.5,3C18.328,3 19,3.672 19,4.5L19,21L13,21Z" style="fill:none;stroke:var(--outline);stroke-width:2px;"/>
+            <path d="M13,21L16,27L19,21" style="fill:none;stroke:var(--outline);stroke-width:2px;"/>
+            <path d="M13,7.5L19,7.5" style="fill:none;stroke:var(--outline);stroke-width:2px;"/>
+        </g>
+    </g>
+</svg>
