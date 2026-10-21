@@ -131,7 +131,9 @@ _GLFW_CURSORS_ = {}  # cache of created cursor objects, keyed by constant name
 _GLFW_MOUSE_BUTTONS_ = {
     glfw.MOUSE_BUTTON_LEFT: mouse.MOUSE_BUTTON_LEFT,
     glfw.MOUSE_BUTTON_MIDDLE: mouse.MOUSE_BUTTON_MIDDLE,
-    glfw.MOUSE_BUTTON_RIGHT: mouse.MOUSE_BUTTON_RIGHT
+    glfw.MOUSE_BUTTON_RIGHT: mouse.MOUSE_BUTTON_RIGHT,
+    glfw.MOUSE_BUTTON_4: mouse.MOUSE_BUTTON_X1,
+    glfw.MOUSE_BUTTON_5: mouse.MOUSE_BUTTON_X2
 }
 
 # Keys which are passed to editable stimuli as cursor motions, these use the
@@ -1234,67 +1236,44 @@ class GLFWBackend(BaseBackend):
         GLFW passes both button state changes to this callback, which are
         forwarded to `onMouseButtonPress` and `onMouseButtonRelease`.
         """
-        # don't process mouse events until ready
-        if mouse.Mouse.getInstance() is None:
-            event._onGLFWMouseButton(*args, **kwargs)
-            return
-
+        event._onGLFWMouseButton(*args, **kwargs)
         _, _, action, _ = args
         if action == glfw.PRESS:
             self.onMouseButtonPress(*args)
         elif action == glfw.RELEASE:
             self.onMouseButtonRelease(*args)
 
-    def _setMouseButtonState(self, button, pressed):
-        """Pass a button state change to the mouse event handler."""
-        mouseEventHandler = mouse.Mouse.getInstance()
-        if button not in _GLFW_MOUSE_BUTTONS_:
-            return
-
-        absTime = core.getTime()
-        absPos = self.getMousePos()
-        mouseEventHandler.win = self.win
-        mouseEventHandler.setMouseButtonState(
-            _GLFW_MOUSE_BUTTONS_[button], pressed, absPos, absTime)
+    def _getCursorWindowPos(self):
+        """Get the position of the cursor in window coordinates, for events
+        which don't give it."""
+        return glfw.get_cursor_pos(self.winHandle.handle)
 
     def onMouseButtonPress(self, *args, **kwargs):
         """Event handler for mouse press events."""
         _, button, _, _ = args
-        self._setMouseButtonState(button, True)
+        self._forwardMouseEvent(
+            'press', self._getCursorWindowPos(),
+            button=_GLFW_MOUSE_BUTTONS_.get(button))
 
     def onMouseButtonRelease(self, *args, **kwargs):
         """Event handler for mouse release events."""
         _, button, _, _ = args
-        self._setMouseButtonState(button, False)
+        self._forwardMouseEvent(
+            'release', self._getCursorWindowPos(),
+            button=_GLFW_MOUSE_BUTTONS_.get(button))
 
     def onMouseScroll(self, *args, **kwargs):
         """Event handler for mouse scroll events."""
-        # don't process mouse events until ready
-        mouseEventHandler = mouse.Mouse.getInstance()
-        if mouseEventHandler is None:
-            event._onGLFWMouseScroll(*args, **kwargs)
-            return
-
+        event._onGLFWMouseScroll(*args, **kwargs)
         _, xoffset, yoffset = args
-        absTime = core.getTime()
-        absPos = self.getMousePos()
-        mouseEventHandler.win = self.win
-        mouseEventHandler.setMouseScrollState(
-            absPos, (xoffset, yoffset), absTime)
+        self._forwardMouseEvent(
+            'scroll', self._getCursorWindowPos(), scroll=(xoffset, yoffset))
 
     def onMouseMove(self, *args, **kwargs):
         """Event handler for mouse move events."""
-        # don't process mouse events until ready
-        mouseEventHandler = mouse.Mouse.getInstance()
-        if mouseEventHandler is None:
-            event._onPygletMouseMotion(0, 0, 0, 0)  # resets the move clock
-            return
-
+        event._onPygletMouseMotion(0, 0, 0, 0)  # resets the move clock
         _, xpos, ypos = args
-        absTime = core.getTime()
-        absPos = self._windowCoordsToPix((xpos, ypos))
-        mouseEventHandler.win = self.win
-        mouseEventHandler.setMouseMotionState(absPos, absTime)
+        self._forwardMouseEvent('move', (xpos, ypos))
 
     def _onCursorEnter(self, handle, entered):
         """Callback for GLFW cursor enter events, which are emitted when the
@@ -1306,32 +1285,11 @@ class GLFWBackend(BaseBackend):
 
     def onMouseEnter(self, *args, **kwargs):
         """Event called when the mouse enters the window."""
-        # don't process mouse events until ready
-        mouseEventHandler = mouse.Mouse.getInstance()
-        if mouseEventHandler is None:
-            return
-
-        absTime = core.getTime()
-        absPos = self.getMousePos()
-        # check if auto focus is enabled
-        if mouseEventHandler.autoFocus:
-            mouseEventHandler.win = self.win
-
-        mouseEventHandler.setMouseMotionState(absPos, absTime)
+        self._forwardMouseEvent('enter', self._getCursorWindowPos())
 
     def onMouseLeave(self, *args, **kwargs):
         """Event called when the mouse leaves the window."""
-        # don't process mouse events until ready
-        mouseEventHandler = mouse.Mouse.getInstance()
-        if mouseEventHandler is None:
-            return
-
-        absTime = core.getTime()
-        absPos = self.getMousePos()
-        mouseEventHandler.setMouseMotionState(absPos, absTime)
-
-        if mouseEventHandler.autoFocus:
-            mouseEventHandler.win = None
+        self._forwardMouseEvent('leave', self._getCursorWindowPos())
 
     @_requiresOpenWindow
     def setMouseExclusive(self, exclusive):

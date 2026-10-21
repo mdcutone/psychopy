@@ -19,7 +19,7 @@ import platform
 import numpy as np
 
 import psychopy
-from psychopy import core, prefs
+from psychopy import prefs
 from psychopy.hardware import mouse
 from psychopy import logging, event, platform_specific
 from psychopy.tools.attributetools import attributeSetter
@@ -85,7 +85,9 @@ _PYGLET_CURSORS_ = {
 _PYGLET_MOUSE_BUTTONS_ = {
     pyglet_mouse.LEFT: mouse.MOUSE_BUTTON_LEFT,
     pyglet_mouse.MIDDLE: mouse.MOUSE_BUTTON_MIDDLE,
-    pyglet_mouse.RIGHT: mouse.MOUSE_BUTTON_RIGHT
+    pyglet_mouse.RIGHT: mouse.MOUSE_BUTTON_RIGHT,
+    pyglet_mouse.MOUSE4: mouse.MOUSE_BUTTON_X1,
+    pyglet_mouse.MOUSE5: mouse.MOUSE_BUTTON_X2
 }
 
 
@@ -383,6 +385,7 @@ class PygletBackend(BaseBackend):
         self.winHandle.on_mouse_release = self.onMouseButtonRelease
         self.winHandle.on_mouse_scroll = self.onMouseScroll
         self.winHandle.on_mouse_motion = self.onMouseMove
+        self.winHandle.on_mouse_drag = self.onMouseDrag
         self.winHandle.on_mouse_enter = self.onMouseEnter
         self.winHandle.on_mouse_leave = self.onMouseLeave
 
@@ -933,91 +936,44 @@ class PygletBackend(BaseBackend):
 
     def onMouseButtonPress(self, *args, **kwargs):
         """Event handler for mouse press events."""
-        # don't process mouse events until ready
-        mouseEventHandler = mouse.Mouse.getInstance()
-        if mouseEventHandler is None:
-            event._onPygletMousePress(*args, **kwargs)
-            return
-
+        event._onPygletMousePress(*args, **kwargs)
         x, y, button, _ = args
-        absTime = core.getTime()
-        absPos = self._windowCoordsToPix((x, y))
-        mouseEventHandler.win = self.win
-        mouseEventHandler.setMouseButtonState(
-            _PYGLET_MOUSE_BUTTONS_[button], True, absPos, absTime)
+        self._forwardMouseEvent(
+            'press', (x, y), button=_PYGLET_MOUSE_BUTTONS_.get(button))
 
     def onMouseButtonRelease(self, *args, **kwargs):
-        """Event handler for mouse press events."""
-        # don't process mouse events until ready
-        mouseEventHandler = mouse.Mouse.getInstance()
-        if mouseEventHandler is None:
-            event._onPygletMouseRelease(*args, **kwargs)
-            return
-
+        """Event handler for mouse release events."""
+        event._onPygletMouseRelease(*args, **kwargs)
         x, y, button, _ = args
-        absTime = core.getTime()
-        absPos = self._windowCoordsToPix((x, y))
-        mouseEventHandler.win = self.win
-        mouseEventHandler.setMouseButtonState(
-            _PYGLET_MOUSE_BUTTONS_[button], False, absPos, absTime)
+        self._forwardMouseEvent(
+            'release', (x, y), button=_PYGLET_MOUSE_BUTTONS_.get(button))
 
     def onMouseScroll(self, *args, **kwargs):
         """Event handler for mouse scroll events."""
-        # don't process mouse events until ready
-        mouseEventHandler = mouse.Mouse.getInstance()
-        if mouseEventHandler is None:
-            event._onPygletMouseWheel(*args, **kwargs)
-            return
-
-        # register mouse position associated with event
-        x, y, scroll_x, scroll_y = args
-        absTime = core.getTime()
-        absPos = self._windowCoordsToPix((x, y))
-        mouseEventHandler.win = self.win
-        mouseEventHandler.setMouseMotionState(absPos, absTime)
+        event._onPygletMouseWheel(*args, **kwargs)
+        x, y, scrollX, scrollY = args
+        self._forwardMouseEvent('scroll', (x, y), scroll=(scrollX, scrollY))
 
     def onMouseMove(self, *args, **kwargs):
         """Event handler for mouse move events."""
-        # don't process mouse events until ready
-        mouseEventHandler = mouse.Mouse.getInstance()
-        if mouseEventHandler is None:
-            event._onPygletMouseMotion(*args, **kwargs)
-            return
-
+        event._onPygletMouseMotion(*args, **kwargs)
         x, y, _, _ = args
-        absTime = core.getTime()
-        absPos = self._windowCoordsToPix((x, y))
-        mouseEventHandler.win = self.win
-        mouseEventHandler.setMouseMotionState(absPos, absTime)
+        self._forwardMouseEvent('move', (x, y))
+
+    def onMouseDrag(self, *args, **kwargs):
+        """Event handler for mouse move events while a button is pressed, which
+        pyglet reports instead of `onMouseMove`. These are only passed to
+        `psychopy.hardware.mouse`, not `psychopy.event`."""
+        x, y = args[:2]
+        self._forwardMouseEvent('move', (x, y))
 
     def onMouseEnter(self, *args, **kwargs):
         """Event called when the mouse enters the window."""
-        # don't process mouse events until ready
-        mouseEventHandler = mouse.Mouse.getInstance()
-        if mouseEventHandler is None:
-            return
-
-        absTime = core.getTime()
-        absPos = self._windowCoordsToPix(args)
-        # check if auto focus is enabled
-        if mouseEventHandler.autoFocus:
-            mouseEventHandler.win = self.win
-
-        mouseEventHandler.setMouseMotionState(absPos, absTime)
+        self._forwardMouseEvent('enter', args)
 
     def onMouseLeave(self, *args, **kwargs):
-        """Event called when the mouse enters the window."""
-        # don't process mouse events until ready
-        mouseEventHandler = mouse.Mouse.getInstance()
-        if mouseEventHandler is None:
-            return
-
-        absTime = core.getTime()
-        absPos = self._windowCoordsToPix(args)
-        mouseEventHandler.setMouseMotionState(absPos, absTime)
-
-        if mouseEventHandler.autoFocus:
-            mouseEventHandler.win = None
+        """Event called when the mouse leaves the window."""
+        self._forwardMouseEvent('leave', args)
 
     def setMouseExclusive(self, exclusive):
         """Set mouse exclusivity.

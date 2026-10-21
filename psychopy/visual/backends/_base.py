@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 from psychopy import logging
+from psychopy.hardware import mouse
 from psychopy.tools.attributetools import attributeSetter
 from .. import globalVars
 
@@ -237,6 +238,9 @@ class BaseBackend(ABC):
         if hasattr(self.win, 'pos'):  # write the new position of the window
             self.win.pos = (posX, posY)
 
+        # let the mouse know where the window is now
+        mouse._onWindowMoved(self.win)
+
         if self._onMoveCallback is not None:
             self._onMoveCallback(self.win, posX, posY)
 
@@ -432,10 +436,37 @@ class BaseBackend(ABC):
     # Mouse related methods (e.g., event handlers)
     #
     # These methods are used to handle mouse events. Each function is bound to
-    # the appropriate callback which registers the mouse event with the global
-    # mouse event handler (psychopy.hardware.mouse.Mouse). Each callback has an
-    # `*args` parameter which allows the backend to pass whatever parameters.
+    # the appropriate callback, which passes the mouse event to `psychopy.event`
+    # and to `psychopy.hardware.mouse.MouseDevice` (see `_forwardMouseEvent`).
+    # Each callback has an `*args` parameter which allows the backend to pass
+    # whatever parameters.
     #
+
+    def _forwardMouseEvent(self, kind, winPos=None, button=None, scroll=None):
+        """Pass a mouse event to `psychopy.hardware.mouse.MouseDevice`, if it
+        is getting events from windows.
+
+        Parameters
+        ----------
+        kind : str
+            Type of event, one of 'press', 'release', 'move', 'scroll', 'enter'
+            or 'leave'.
+        winPos : ArrayLike or None
+            Position `(x, y)` of the cursor in window coordinates, as given by
+            the backend. If `None`, the position is unknown.
+        button : int or None
+            Index of the button (`psychopy.hardware.mouse.MOUSE_BUTTON_*`) for
+            'press' and 'release' events.
+        scroll : ArrayLike or None
+            Horizontal and vertical scroll offsets `(dx, dy)` for 'scroll'
+            events.
+
+        """
+        if not mouse._isListeningToWindows():
+            return
+        pos = None if winPos is None else self._windowCoordsToPix(winPos)
+        mouse._onWindowMouseEvent(
+            self.win, kind, pos, button=button, scroll=scroll)
 
     @abstractmethod
     def onMouseButton(self, *args, **kwargs):
