@@ -83,8 +83,8 @@ def test_hardware_mouse_units(scaledWin):
     from psychopy.hardware import mouse
 
     scaledWin.units = 'pix'
-    # `Mouse` is a singleton, so convert without creating an instance
-    m = object.__new__(mouse.Mouse)
-    m.win = scaledWin
-    assert np.allclose(m._windowUnitsToPix((10., -5.)), (30, -15))
-    assert np.allclose(m._pixToWindowUnits((30., -15.)), (10, -5))
+    # convert without creating a `Mouse`, which would start a `MouseDevice`
+    assert np.allclose(
+        mouse.Mouse._windowUnitsToPix((10., -5.), scaledWin), (30, -15))
+    assert np.allclose(
+        mouse.Mouse._pixToWindowUnits((30., -15.), scaledWin), (10, -5))
