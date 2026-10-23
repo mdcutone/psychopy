@@ -15,12 +15,9 @@ from psychopy import prefs
 from psychopy.constants import FOREVER
 from psychopy.experiment.devices import DeviceMixin
 from ..params import Param
-from psychopy.experiment.utils import canBeNumeric
-from psychopy.experiment.utils import CodeGenerationException
-from psychopy.experiment.utils import unescapedDollarSign_re
+from psychopy.experiment.utils import canBeNumeric, CodeGenerationException, unescapedDollarSign_re
 from psychopy.experiment.params import getCodeFromParamStr
 from psychopy.alerts import alerttools
-from psychopy.colors import nonAlphaSpaces
 
 from psychopy.localization import _translate
 
@@ -710,7 +707,7 @@ class BaseComponent:
         # Return True if stop test was written
         return buff.indentLevel - startIndent
 
-    def writeStopTestCodeJS(self, buff, extra=""):
+    def writeStopTestCodeJS(self, buff, extra="", updateStatus=True):
         """Test whether we need to stop
                            
         Parameters
@@ -721,6 +718,10 @@ class BaseComponent:
             Additional conditions to check, including any boolean operators (and, or, etc.). Use 
             `%(key)s` syntax to insert the values of any necessary params. Default is an empty 
             string.
+        updateStatus : bool
+            If `True`, mark the component as finished after writing its stop timing data. Components
+            which need to perform work while still started can defer this and update their status
+            after that work is complete.
         """
         # create copy of params dict so we can change stuff without harm
         params = self.params.copy()
@@ -796,11 +797,12 @@ class BaseComponent:
         )
         buff.writeIndentedLines(code % params)
         # set status
-        code = (
-            "// update status\n"
-            "%(name)s.status = PsychoJS.Status.FINISHED;\n"
-        )
-        buff.writeIndentedLines(code % params)
+        if updateStatus:
+            code = (
+                "// update status\n"
+                "%(name)s.status = PsychoJS.Status.FINISHED;\n"
+            )
+            buff.writeIndentedLines(code % params)
 
         # Return True if stop test was written
         return buff.indentLevel - startIndent
@@ -984,9 +986,6 @@ class BaseComponent:
                 valStr = valStr.replace("(", "[", 1)
                 valStr = valStr[::-1].replace(")", "]", 1)[
                          ::-1]  # replace from right
-            # filenames (e.g. for image) need to be loaded from resources
-            if paramName in ["sound"]:
-                valStr = (f"psychoJS.resourceManager.getResource({valStr})")
         else:
             endStr = ''
 
@@ -1002,12 +1001,7 @@ class BaseComponent:
             if paramName == 'color':
                 buff.writeIndented(f"{compName}.setColor({params['color']}, colorSpace={params['colorSpace']}")
                 buff.write(f"{loggingStr}){endStr}\n")
-            elif paramName == 'sound':
-                stopVal = params['stopVal'].val
-                if stopVal in ['', None, -1, 'None']:
-                    stopVal = '-1'
-                buff.writeIndented(f"{compName}.setSound({params['sound']}, secs={stopVal}){endStr}\n")
-            elif paramName == 'movie' and params['backend'].val in ('moviepy', 'avbin', 'vlc', 'opencv'):
+            elif paramName == 'movie' and params['backend'].val in ('moviepy', 'avbin', 'vlc'):
                 # we're going to do this for now ...
                 if params['units'].val == 'from exp settings':
                     unitsStr = "units=''"
@@ -1023,15 +1017,10 @@ class BaseComponent:
                     code = ("%s = visual.MovieStim(\n" % params['name'] +
                             "    win=win, name='%s', %s,\n" % (
                                 params['name'], unitsStr))
-                elif params['backend'].val == 'vlc':
+                else:  # vlc
                     code = ("%s = visual.VlcMovieStim(\n" % params['name'] +
                             "    win=win, name='%s', %s,\n" % (
                                 params['name'], unitsStr))
-                else:
-                    code = ("%s = visual.MovieStim(\n" % params['name'] +
-                            "    win=win, name='%s', %s,\n" % (
-                                params['name'], unitsStr) +
-                            "    noAudio=%(No audio)s,\n" % params)
 
                 code += ("    filename=%(movie)s,\n"
                          "    ori=%(ori)s, pos=%(pos)s, opacity=%(opacity)s,\n"
