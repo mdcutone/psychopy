@@ -203,8 +203,9 @@ class DeviceManager:
             except ImportError:
                 # if no backend can be loaded, no devices of this type can exist
                 return cls
-            # only device backends are classes (e.g. sound.Sound resolves to a module)
-            if isinstance(backend, type):
+            # only device backends are classes (e.g. sound.Sound resolves to a module), and
+            # backends which subclass the device class (e.g. joysticks) are already covered by it
+            if isinstance(backend, type) and not issubclass(backend, cls):
                 cls = backend
 
         return cls
