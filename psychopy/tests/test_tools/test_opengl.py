@@ -78,9 +78,11 @@ def test_pygletParity():
                 if value != pygletValue:
                     different.append(name)
             elif hasattr(pygletValue, 'argtypes'):
-                ours = [_ctypeName(t) for t in [value.restype] + value.argtypes]
+                # (`argtypes` are a tuple once functions are linked)
+                ours = [_ctypeName(t) for t in
+                        [value.restype, *value.argtypes]]
                 theirs = [_ctypeName(t) for t in
-                          [pygletValue.restype] + pygletValue.argtypes]
+                          [pygletValue.restype, *pygletValue.argtypes]]
                 if ours != theirs:
                     different.append(name)
 

@@ -32,20 +32,12 @@ from ._base import BaseBackend, closeOnInitError
 if sys.platform == 'darwin':
     from . import _macos
 
-import pyglet
-# Ensure setting pyglet.options['debug_gl'] to False is done prior to any
-# other calls to pyglet or pyglet submodules, otherwise it may not get picked
-# up by the pyglet GL engine and have no effect.
-pyglet.options['debug_gl'] = False
-# Pyglet is used as the OpenGL loader for the whole library, through the module
-# PsychoPy uses to support legacy OpenGL with all versions of pyglet
-import psychopy.tools.pygletgl as GL
+import psychopy.tools.opengl as GL
 
 USE_LEGACY_GL = GL.USE_LEGACY_GL
 
-# On Linux, `psychopy/__init__.py` selects the X11 build of GLFW by default
-# since Pyglet's GLX contexts can't be mixed with the EGL ones GLFW uses under
-# Wayland.
+# On Linux, `psychopy/__init__.py` selects the X11 build of GLFW by default,
+# since the EGL contexts GLFW uses under Wayland are untested.
 import glfw
 
 # GLFW may have already been initialized elsewhere (e.g., the GLFW joystick
@@ -66,9 +58,9 @@ def _isWayland():
 
 if _isWayland():
     logging.warning(
-        "GLFW is using Wayland, which may fail to create windows since Pyglet "
-        "uses GLX for OpenGL. Set the environment variable "
-        "`PYGLFW_LIBRARY_VARIANT=x11` to use X11 instead.")
+        "GLFW is using Wayland, which is untested with PsychoPy. Set the "
+        "environment variable `PYGLFW_LIBRARY_VARIANT=x11` to use X11 "
+        "instead.")
 
 
 _shadowWindow = None  # hidden window all GLFW windows share OpenGL objects with
@@ -339,9 +331,8 @@ class GLFWBackend(BaseBackend):
     """GLFW (Graphics Library Framework) backend class.
 
     GLFW backend using the `glfw` (pyGLFW) ctypes library to access the GLFW3
-    API (https://www.glfw.org/). Pyglet is used as the OpenGL loader so it must
-    also be installed. This backend can be used in place of the Pyglet backend
-    by passing `winType='glfw'` to :class:`~psychopy.visual.Window`.
+    API (https://www.glfw.org/). This backend can be used in place of the Pyglet
+    backend by passing `winType='glfw'` to :class:`~psychopy.visual.Window`.
 
     Every window shares a context with a hidden 'shadow' window, like Pyglet.
     This allows data (textures, array buffers, etc.) to be shared across

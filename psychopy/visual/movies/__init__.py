@@ -47,7 +47,7 @@ from psychopy import logging
 import numpy as np
 import pyglet
 pyglet.options['debug_gl'] = False
-import psychopy.tools.pygletgl as GL
+import psychopy.tools.opengl as GL
 
 
 from .exceptions import (

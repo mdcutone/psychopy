@@ -20,7 +20,7 @@ import pyglet
 from ..layout import Size
 
 pyglet.options['debug_gl'] = False
-import psychopy.tools.pygletgl as GL
+import psychopy.tools.opengl as GL
 
 import psychopy  # so we can get the __path__
 from psychopy import core, logging

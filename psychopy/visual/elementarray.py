@@ -19,7 +19,7 @@ from ..colors import Color
 
 pyglet.options['debug_gl'] = False
 import ctypes
-import psychopy.tools.pygletgl as GL
+import psychopy.tools.opengl as GL
 
 import psychopy  # so we can get the __path__
 from psychopy import logging

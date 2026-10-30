@@ -36,7 +36,8 @@ import pyglet.window.mouse as pyglet_mouse
 # up by the pyglet GL engine and have no effect.
 # Shaders will work but require OpenGL2.0 drivers AND PyOpenGL3.0+
 pyglet.options['debug_gl'] = False
-import psychopy.tools.pygletgl as GL
+import psychopy.tools.opengl as GL
+import psychopy.tools.pygletgl as pygletgl  # pyglet windows with legacy contexts
 
 # `pyglet.canvas` was renamed `pyglet.display` in pyglet 2.1
 if pyglet.version < '2.1':
@@ -227,7 +228,7 @@ class PygletBackend(BaseBackend):
                 logging.info('configured pyglet screen %i' % win.screen)
 
         # configure the window context
-        config = GL.createConfig(
+        config = pygletgl.createConfig(
             depth_size=win.depthBits,
             double_buffer=True,
             sample_buffers=sample_buffers,
@@ -261,17 +262,17 @@ class PygletBackend(BaseBackend):
 
         # create the window
         try:
-            self.winHandle = GL.Window(
+            self.winHandle = pygletgl.Window(
                 width=w, height=h,
                 caption="PsychoPy",
                 fullscreen=win._isFullScr,
                 config=config,
                 screen=thisScreen,
                 style=style)
-        except GL.ContextException:
+        except pygletgl.ContextException:
             # turn off the shadow window an try again
             pyglet.options['shadow_window'] = False
-            self.winHandle = GL.Window(
+            self.winHandle = pygletgl.Window(
                 width=w, height=h,
                 caption="PsychoPy",
                 fullscreen=win._isFullScr,

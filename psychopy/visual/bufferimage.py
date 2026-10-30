@@ -17,7 +17,7 @@ RBGA object.`"""
 # Shaders will work but require OpenGL2.0 drivers AND PyOpenGL3.0+
 import pyglet
 pyglet.options['debug_gl'] = False
-import psychopy.tools.pygletgl as GL
+import psychopy.tools.opengl as GL
 
 import psychopy  # so we can get the __path__
 from psychopy import core, logging

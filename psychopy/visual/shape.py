@@ -32,7 +32,7 @@ from psychopy.colors import Color
 import psychopy.visual
 
 pyglet.options['debug_gl'] = False
-import psychopy.tools.pygletgl as GL
+import psychopy.tools.opengl as GL
 
 USE_LEGACY_GL = GL.USE_LEGACY_GL
 

@@ -33,11 +33,15 @@ OpenGL registry by `building/generateGLBindings.py`.
 import ctypes
 import re
 
-from . import _lib, _platform
+from . import _bindings, _lib, _platform, _types, glu
 from ._bindings import *
 from ._lib import GLException
 from ._types import *
 from .glu import *
+
+__all__ = (
+    _bindings.__all__ + _types.__all__ + glu.__all__ +
+    ['GLException', 'USE_LEGACY_GL', 'gl_info'])
 
 #: Use the fixed-function (legacy) OpenGL code paths, and so create legacy or
 #: compatibility profile contexts. Stimuli also have drawing code for the core

@@ -18,7 +18,7 @@ import psychopy.tools.colorspacetools as colortools
 import psychopy.tools.arraytools as arraytools
 import pyglet
 pyglet.options['debug_gl'] = False
-from psychopy.tools.pygletgl import (glCallList, glFinish, glGenLists, glNewList, glViewport,
+from psychopy.tools.opengl import (glCallList, glFinish, glGenLists, glNewList, glViewport,
                        glMatrixMode, glLoadIdentity, glDisable, glEnable, glColorMaterial,
                        glBlendFunc, glTranslatef, glColor4f, glRectf, glLineWidth, glBegin,
                        GL_LINES, glVertex2d, glEndList, glClearColor, glOrtho,
