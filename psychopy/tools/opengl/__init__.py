@@ -19,8 +19,16 @@ fixed-function API), the extensions PsychoPy uses, the GLU tessellator and:
 
 * `USE_LEGACY_GL` : Whether to use the fixed-function OpenGL code paths.
 * `gl_info` : Information about the current context's OpenGL implementation.
-* `GLException` : Raised for OpenGL errors, and when calling a function that
-  the driver doesn't have.
+* `GLException` : Raised when calling a function that the driver doesn't
+  have, and the base class of `GLError`.
+* `GLError` : Raised for errors reported by OpenGL, describing them (and the
+  call that caused them, if known).
+* `checkErrors()` : Raise a `GLError` for any errors reported since the last
+  check (`Window.flip()` does this every frame).
+* `getErrors()` : Get and clear the errors reported since the last check.
+* `setErrorChecking()` : Check for errors after every call, so the call that
+  caused one raises it (slow, for debugging). The environment variable
+  `PSYCHOPY_DEBUG_GL=1` also turns this on.
 
 Functions are found in the driver the first time they're called, so a context
 should be current by then. Types and values are the same as in `pyglet.gl`.
@@ -35,13 +43,16 @@ import re
 
 from . import _bindings, _lib, _platform, _types, glu
 from ._bindings import *
-from ._lib import GLException
+from ._lib import (
+    GLError, GLException, checkErrors, getErrorChecking, getErrors,
+    setErrorChecking)
 from ._types import *
 from .glu import *
 
 __all__ = (
     _bindings.__all__ + _types.__all__ + glu.__all__ +
-    ['GLException', 'USE_LEGACY_GL', 'gl_info'])
+    ['GLError', 'GLException', 'USE_LEGACY_GL', 'checkErrors',
+     'getErrorChecking', 'getErrors', 'gl_info', 'setErrorChecking'])
 
 #: Use the fixed-function (legacy) OpenGL code paths, and so create legacy or
 #: compatibility profile contexts. Stimuli also have drawing code for the core

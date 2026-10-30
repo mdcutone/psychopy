@@ -1682,6 +1682,13 @@ class Window():
         if self._showPilotingIndicator:
             self._pilotingIndicator.draw()
 
+        # raise any OpenGL errors from this frame, after the timing-sensitive
+        # work above since reading them may wait for the graphics card (the
+        # `GL` of a backend from a plugin may not check)
+        checkErrors = getattr(GL, 'checkErrors', None)
+        if checkErrors is not None:
+            checkErrors('during the last frame')
+
         #    If self.waitBlanking is True, then return the time that
         # GL.glFinish() returned, set as the 'now' variable. Otherwise
         # return None as before

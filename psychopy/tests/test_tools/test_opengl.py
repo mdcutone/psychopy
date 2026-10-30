@@ -53,9 +53,10 @@ def test_usedNamesBound(generator):
 def test_bindingsUpToDate(generator):
     """The bindings are what the generator creates from the registry."""
     commit = generator['COMMIT'].read_text().strip()
-    source, _ = generator['generate'](generator['REGISTRY'], commit)
-    bindings = Path(GL.__file__).parent / '_bindings.py'
-    assert source == bindings.read_text(encoding='utf-8')
+    bindings, groups, _ = generator['generate'](generator['REGISTRY'], commit)
+    package = Path(GL.__file__).parent
+    assert bindings == (package / '_bindings.py').read_text(encoding='utf-8')
+    assert groups == (package / '_enumgroups.py').read_text(encoding='utf-8')
 
 
 def test_pygletParity():
@@ -181,24 +182,104 @@ def win():
     win.close()
 
 
-def test_errorChecking(win, monkeypatch):
-    """With error checking on, OpenGL errors raise `GLException`, except
-    between `glBegin()` and `glEnd()` where checking is an error itself."""
-    monkeypatch.setattr(_lib, 'DEBUG_GL', True)
-    # new placeholders, since error checking is set up when they're linked
-    glEnable = _lib.link('glEnable', None, [GL.GLenum], 'OpenGL 1.0')
-    glBegin = _lib.link('glBegin', None, [GL.GLenum], 'OpenGL 1.0')
-    glVertex2f = _lib.link(
-        'glVertex2f', None, [GL.GLfloat, GL.GLfloat], 'OpenGL 1.0')
-    glEnd = _lib.link('glEnd', None, [], 'OpenGL 1.0')
+@pytest.fixture
+def errorChecking():
+    """Check for errors after every call, during a test."""
+    GL.setErrorChecking(True)
+    yield
+    GL.setErrorChecking(False)
 
-    with pytest.raises(GL.GLException, match='GL_INVALID_ENUM'):
-        glEnable(0xDEAD)
 
-    glBegin(GL.GL_TRIANGLES)
+def test_errorChecking(win, errorChecking):
+    """With error checking on, the call causing an OpenGL error raises a
+    `GLError` describing it, except between `glBegin()` and `glEnd()` where
+    checking is an error itself."""
+    assert GL.getErrorChecking()
+    with pytest.raises(GL.GLError) as excinfo:
+        GL.glEnable(0xDEAD)
+    error = excinfo.value
+    assert error.errors == [GL.GL_INVALID_ENUM]
+    assert error.errorNames == ['GL_INVALID_ENUM']
+    assert error.function == 'glEnable'
+    assert error.arguments == (0xDEAD,)
+    assert 'after calling `glEnable(0xDEAD)`' in str(error)
+    assert "isn't one of the EnableCap values" in str(error)
+
+    GL.glBegin(GL.GL_TRIANGLES)
     for vertex in [(0., 0.), (1., 0.), (0., 1.)]:
-        glVertex2f(*vertex)
-    glEnd()
+        GL.glVertex2f(*vertex)
+    GL.glEnd()
+
+    # and is turned off for functions linked while it was on
+    GL.setErrorChecking(False)
+    GL.glEnable(0xDEAD)
+    assert GL.getErrors() == [GL.GL_INVALID_ENUM]
+    assert GL.getErrors() == []  # cleared
+
+
+def test_checkErrors(win):
+    """`checkErrors()` raises a `GLError` for errors reported since the last
+    check, saying how to find the call that caused them."""
+    GL.checkErrors()  # none
+    GL.glEnable(0xDEAD)
+    GL.glClear(0x8)  # not a buffer bit
+    with pytest.raises(GL.GLError) as excinfo:
+        GL.checkErrors('in this test')
+    error = excinfo.value
+    # many drivers only keep the first error until it's read
+    assert error.errors[0] == GL.GL_INVALID_ENUM
+    assert set(error.errors) <= {GL.GL_INVALID_ENUM, GL.GL_INVALID_VALUE}
+    assert error.function is None
+    assert 'in this test' in str(error)
+    assert 'PSYCHOPY_DEBUG_GL' in str(error)
+    GL.checkErrors()  # cleared
+
+
+def test_flipRaisesErrors(win):
+    """`Window.flip()` raises errors from drawing the frame."""
+    win.flip()
+    GL.glEnable(0xDEAD)
+    with pytest.raises(GL.GLError, match='during the last frame'):
+        win.flip()
+    win.flip()  # cleared
+
+
+def _placeholder(name):
+    """The `GLFunction` placeholder of an OpenGL function."""
+    return next(f for f in _lib._functions if f.__name__ == name)
+
+
+@pytest.mark.parametrize('name, arguments, expected', [
+    ('glClear', (GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT,),
+     'glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT)'),  # in bit order
+    ('glDrawArrays', (GL.GL_TRIANGLES, 0, 3), 'glDrawArrays(GL_TRIANGLES, 0, 3)'),
+    ('glBlendFunc', (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA),
+     'glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)'),
+    ('glTexImage2D',
+     (GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, 4, 4, 0, GL.GL_RGBA,
+      GL.GL_UNSIGNED_BYTE, None),
+     'glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_RGBA, '
+     'GL_UNSIGNED_BYTE, None)'),
+    ('glColor4f', (1., .5, 0., 1.), 'glColor4f(1, 0.5, 0, 1)'),
+    ('glGenTextures', (1, ctypes.byref(GL.GLuint())),
+     'glGenTextures(1, byref(c_uint(0)))'),
+    ('glLoadMatrixf', ((GL.GLfloat * 16)(),), 'glLoadMatrixf(c_float[16])'),
+])
+def test_errorMessages(name, arguments, expected):
+    """Error messages describe the call, naming enumerants and bit flags."""
+    error = GL.GLError(
+        [GL.GL_INVALID_OPERATION], _placeholder(name), arguments)
+    assert f'after calling `{expected}`' in str(error)
+    assert 'GL_INVALID_OPERATION (0x0502)' in str(error)
+
+
+def test_errorMessageMultiple():
+    """All errors reported are described."""
+    error = GL.GLError([GL.GL_INVALID_ENUM, GL.GL_OUT_OF_MEMORY])
+    message = str(error)
+    assert message.startswith('OpenGL errors since errors were last checked')
+    assert 'GL_INVALID_ENUM (0x0500)' in message
+    assert 'GL_OUT_OF_MEMORY (0x0505)' in message
 
 
 def test_missingFunction():
