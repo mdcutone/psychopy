@@ -135,6 +135,44 @@ def test_drawWithWindow(winType):
         win.close()
 
 
+@pytest.mark.skipif(
+    not sys.platform.startswith('linux'), reason="EGL is only used on Linux")
+def test_eglContext():
+    """Functions work with EGL contexts, as GLFW creates under Wayland (in a
+    new process, since a GLX context can't be current on the same thread as an
+    EGL one, and other tests leave pyglet's current)."""
+    pytest.importorskip('glfw')
+    script = (
+        "import sys\n"
+        "import glfw\n"
+        "import psychopy.tools.opengl as GL\n"
+        "from psychopy.tools.opengl import _platform\n"
+        "if not glfw.init():\n"
+        "    sys.exit(77)\n"
+        # also EGL under X11, so this runs without Wayland
+        "glfw.window_hint(glfw.CONTEXT_CREATION_API, glfw.EGL_CONTEXT_API)\n"
+        "win = glfw.create_window(16, 16, 'EGL', None, None)\n"
+        "if not win:\n"
+        "    sys.exit(77)\n"
+        "glfw.make_context_current(win)\n"
+        "assert _platform._getCurrentEGLContext()\n"
+        "assert GL.gl_info.have_version(2, 1)\n"
+        "GL.glClearColor(0., 1., 0., 1.)\n"
+        "GL.glClear(GL.GL_COLOR_BUFFER_BIT)\n"
+        "pixel = (GL.GLubyte * 4)()\n"
+        "GL.glReadPixels(0, 0, 1, 1, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, pixel)\n"
+        "assert list(pixel) == [0, 255, 0, 255], list(pixel)\n"
+        # not exported by libOpenGL, so found with `eglGetProcAddress()`
+        "program = GL.glCreateProgramObjectARB()\n"
+        "assert program\n"
+        "GL.glDeleteObjectARB(program)\n"
+        "glfw.terminate()\n")
+    result = subprocess.run([sys.executable, '-c', script])
+    if result.returncode == 77:
+        pytest.skip("can't create an EGL context")
+    assert result.returncode == 0
+
+
 @pytest.fixture
 def win():
     from psychopy import visual

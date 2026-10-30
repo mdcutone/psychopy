@@ -13,9 +13,9 @@ pyglet, GLFW or SDL):
 * macOS : All functions are exported by `OpenGL.framework`.
 * Windows : `opengl32.dll` exports OpenGL 1.1, anything newer is found with
   `wglGetProcAddress()`, which needs a current context.
-* Linux : `libGL` exports some functions, the rest are found with
-  `glXGetProcAddressARB()`, or `eglGetProcAddress()` if an EGL context is
-  current (e.g. with Wayland).
+* Linux : `libOpenGL` (or `libGL`) exports some functions, the rest are found
+  with `glXGetProcAddressARB()`, or `eglGetProcAddress()` if an EGL context is
+  current (e.g. GLFW windows under Wayland).
 
 """
 
@@ -101,12 +101,14 @@ elif sys.platform == 'win32':
         return _glLib.wglGetCurrentContext()
 
 else:
-    # libGL has the GLX API too, libOpenGL (GLVND) doesn't
-    _glLib = loadLibrary('libGL.so.1', 'GL')
-    _glxLib = _glLib
-    if _glLib is None:
-        _glLib = loadLibrary('libOpenGL.so.0', 'OpenGL')
-        _glxLib = loadLibrary('libGLX.so.0', 'GLX')
+    # With GLVND, libOpenGL has the OpenGL API for both GLX and EGL contexts,
+    # and libGLX the GLX API. Without it, libGL has both.
+    _glLib = loadLibrary('libOpenGL.so.0', 'OpenGL')
+    _glxLib = loadLibrary('libGLX.so.0', 'GLX')
+    if _glLib is None or _glxLib is None:
+        _libGL = loadLibrary('libGL.so.1', 'GL')
+        _glLib = _glLib or _libGL
+        _glxLib = _glxLib or _libGL
     if _glLib is None:
         raise ImportError('Unable to load the OpenGL library (libGL).')
 

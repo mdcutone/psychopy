@@ -30,6 +30,26 @@ def test_glfw_legacy_gl():
 
 
 @skip_under_vm(reason="GLFW doesn't work on (macOS) virtual machine")
+@pytest.mark.parametrize('wayland', [True, False])
+def test_glfw_wayland_with_pyglet(monkeypatch, wayland):
+    """Under Wayland, GLFW windows (with EGL contexts) can't be created once
+    pyglet windows (with GLX contexts) are in use."""
+    import sys
+    from psychopy.visual.backends import glfwbackend
+
+    monkeypatch.setattr(glfwbackend, '_isWayland', lambda: wayland)
+    monkeypatch.setitem(sys.modules, 'psychopy.tools.pygletgl', object())
+    if wayland:
+        with pytest.raises(RuntimeError, match='Wayland'):
+            glfwbackend._checkContextAPI()
+    else:
+        glfwbackend._checkContextAPI()
+
+    monkeypatch.delitem(sys.modules, 'psychopy.tools.pygletgl')
+    glfwbackend._checkContextAPI()
+
+
+@skip_under_vm(reason="GLFW doesn't work on (macOS) virtual machine")
 def test_glfw_without_pyglet_gl():
     """GLFW windows don't use pyglet for OpenGL, or need a pyglet context to be
     current (in a new process, since other tests create pyglet windows).

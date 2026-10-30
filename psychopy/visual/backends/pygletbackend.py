@@ -32,6 +32,19 @@ import pyglet
 import pyglet.window as pyglet_window
 import pyglet.window.mouse as pyglet_mouse
 import psychopy.tools.opengl as GL
+
+# Pyglet's GLX contexts (via XWayland) can't be current on the same thread as
+# the EGL contexts GLFW creates under Wayland, and importing `pygletgl` makes
+# one current
+_glfwBackend = sys.modules.get('psychopy.visual.backends.glfwbackend')
+if (_glfwBackend is not None and _glfwBackend._isWayland() and
+        _glfwBackend._shadowWindow is not None):
+    raise RuntimeError(
+        "Pyglet windows can't be used alongside GLFW windows under Wayland. "
+        "Use one window type, or set the environment variable "
+        "`PYGLFW_LIBRARY_VARIANT=x11` (before importing PsychoPy) to use GLFW "
+        "through XWayland.")
+
 import psychopy.tools.pygletgl as pygletgl  # pyglet windows with legacy contexts
 
 # `pyglet.canvas` was renamed `pyglet.display` in pyglet 2.1

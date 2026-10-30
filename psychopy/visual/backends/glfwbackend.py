@@ -36,8 +36,6 @@ import psychopy.tools.opengl as GL
 
 USE_LEGACY_GL = GL.USE_LEGACY_GL
 
-# On Linux, `psychopy/__init__.py` selects the X11 build of GLFW by default,
-# since the EGL contexts GLFW uses under Wayland are untested.
 import glfw
 
 # GLFW may have already been initialized elsewhere (e.g., the GLFW joystick
@@ -56,11 +54,20 @@ def _isWayland():
         glfw.get_platform() == glfw.PLATFORM_WAYLAND
 
 
-if _isWayland():
-    logging.warning(
-        "GLFW is using Wayland, which is untested with PsychoPy. Set the "
-        "environment variable `PYGLFW_LIBRARY_VARIANT=x11` to use X11 "
-        "instead.")
+def _checkContextAPI():
+    """Raise an error if GLFW windows can't be used alongside pyglet windows.
+
+    Under Wayland GLFW creates EGL contexts, while pyglet creates GLX ones (via
+    XWayland). Contexts of both can't be current on the same thread, and pyglet
+    keeps one current from when its backend is imported.
+
+    """
+    if _isWayland() and 'psychopy.tools.pygletgl' in sys.modules:
+        raise RuntimeError(
+            "GLFW windows can't be used alongside pyglet windows under "
+            "Wayland. Use one window type, or set the environment variable "
+            "`PYGLFW_LIBRARY_VARIANT=x11` (before importing PsychoPy) to use "
+            "GLFW through XWayland.")
 
 
 _shadowWindow = None  # hidden window all GLFW windows share OpenGL objects with
@@ -383,6 +390,7 @@ class GLFWBackend(BaseBackend):
     @closeOnInitError
     def __init__(self, win, backendConf=None):
         BaseBackend.__init__(self, win)  # sets up self.win=win as weakref
+        _checkContextAPI()
 
         # if `None`, change to `dict` to extract options
         backendConf = backendConf if backendConf is not None else {}
