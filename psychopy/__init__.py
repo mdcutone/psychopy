@@ -27,14 +27,16 @@ __all__ = ["gui", "misc", "visual", "core",
            "event", "data", "sound", "microphone"]
 
 # Disable pyglet's GL error checking, which installs an `errcheck` hook that
-# calls `glGetError()` after every single GL call. This must happen before
-# anything imports `pyglet.gl`, since `pyglet.gl.lib` reads the option once at
-# import time and decorates the entry points there and then -- setting it later
-# (as the visual modules do) has no effect. Importing `pyglet` itself is cheap
-# and does not pull in `pyglet.gl`.
+# calls `glGetError()` after every single GL call. PsychoPy makes its own GL
+# calls through `psychopy.tools.opengl`, but pyglet still makes some (e.g. when
+# creating windows). This must happen before anything imports `pyglet.gl`,
+# since `pyglet.gl.lib` reads the option once at import time and decorates the
+# entry points there and then. Importing `pyglet` itself is cheap and does not
+# pull in `pyglet.gl`.
 #
 # `PYGLET_DEBUG_GL` in the environment is left alone, so anyone debugging GL
-# calls can still turn the checking back on.
+# calls can still turn the checking back on (`psychopy.tools.opengl` checks
+# for errors with it too, or with `PSYCHOPY_DEBUG_GL`).
 if 'PYGLET_DEBUG_GL' not in os.environ:
     try:
         import pyglet
@@ -43,10 +45,11 @@ if 'PYGLET_DEBUG_GL' not in os.environ:
         pass  # pyglet isn't required to merely import psychopy
 
 # Use the X11 build of GLFW on Linux, even in Wayland sessions (via XWayland).
-# Pyglet is our OpenGL loader and uses GLX, which cannot be made current
-# alongside the EGL contexts GLFW creates under Wayland. pyGLFW picks the build
-# when first imported, so this must happen before anything imports `glfw`.
-# Setting `PYGLFW_LIBRARY_VARIANT` in the environment overrides this.
+# Under Wayland GLFW creates EGL contexts, which `psychopy.tools.opengl`
+# supports but which are untested, and the pyglet backend's contexts are GLX
+# ones. pyGLFW picks the build when first imported, so this must happen before
+# anything imports `glfw`. Setting `PYGLFW_LIBRARY_VARIANT` in the environment
+# overrides this.
 if sys.platform.startswith('linux') and os.environ.get('DISPLAY'):
     os.environ.setdefault('PYGLFW_LIBRARY_VARIANT', 'x11')
 

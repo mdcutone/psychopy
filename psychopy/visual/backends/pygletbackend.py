@@ -31,11 +31,6 @@ from ._base import BaseBackend, closeOnInitError
 import pyglet
 import pyglet.window as pyglet_window
 import pyglet.window.mouse as pyglet_mouse
-# Ensure setting pyglet.options['debug_gl'] to False is done prior to any
-# other calls to pyglet or pyglet submodules, otherwise it may not get picked
-# up by the pyglet GL engine and have no effect.
-# Shaders will work but require OpenGL2.0 drivers AND PyOpenGL3.0+
-pyglet.options['debug_gl'] = False
 import psychopy.tools.opengl as GL
 import psychopy.tools.pygletgl as pygletgl  # pyglet windows with legacy contexts
 

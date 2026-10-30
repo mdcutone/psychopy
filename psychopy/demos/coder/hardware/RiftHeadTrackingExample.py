@@ -22,7 +22,7 @@ trianglePose = rifttools.LibOVRPose(trianglePosition)
 # convert the pose to a view transformation matrix
 translationMatrix = trianglePose.getModelMatrix()
 
-# convert to format Pyglet's GL libraries accept
+# convert to a format the OpenGL functions accept
 translationMatrix = arraytools.array2pointer(translationMatrix)
 
 # uncomment the line below to show a performance HUD

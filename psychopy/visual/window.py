@@ -105,7 +105,6 @@ from psychopy.core import rush
 
 reportNDroppedFrames = 5  # stop raising warning after this
 
-# import pyglet.gl, pyglet.window, pyglet.image, pyglet.font, pyglet.event
 from . import shaders as _shaders
 try:
     from pyglet import media
