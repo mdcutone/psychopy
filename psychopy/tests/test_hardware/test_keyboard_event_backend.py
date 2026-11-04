@@ -85,7 +85,8 @@ class TestKeyboardEventBackend:
         assert [k.name for k in keys] == ['a', 'b', 'c']
         assert [k.value for k in keys] == ['a', 'b', 'c']
 
-    def test_timestamps_and_reaction_times(self):
+    @pytest.mark.timing
+    def test_timestamps_and_reaction_times(self, timing):
         """Verify tDown and rt are accurately populated with proper time bases."""
         self.kb.clock.reset()
         time.sleep(0.05)
@@ -106,8 +107,10 @@ class TestKeyboardEventBackend:
         assert isinstance(k1.rt, float)
         assert isinstance(k2.rt, float)
         assert k1.rt < k2.rt
-        assert 0.04 <= k1.rt <= 0.15
-        assert 0.07 <= k2.rt <= 0.20
+        # upper bounds are loosened by how much sleeps overshoot on this
+        # machine (k1 follows one sleep, k2 follows two)
+        assert timing.lower(0.04) <= k1.rt <= timing.upper(0.15, nSleeps=1)
+        assert timing.lower(0.07) <= k2.rt <= timing.upper(0.20, nSleeps=2)
 
     def test_parse_message_shapes(self):
         """Verify parseMessage handles both (key, timestamp) pairs and bare strings."""

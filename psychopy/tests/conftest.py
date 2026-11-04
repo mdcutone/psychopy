@@ -38,3 +38,37 @@ def closeLeakedWindows(request):
         warnings.warn(
             f"{len(leaked)} window(s) left open by {request.module.__name__}, "
             f"closing them")
+
+
+@pytest.fixture(scope='session')
+def timing():
+    """Tolerance for scaling timing thresholds by machine speed.
+
+    Calibrated the first time a test requests it, then shared for the rest of
+    the session. Tests using it should also be marked `@pytest.mark.timing`.
+    See `psychopy/tests/timing.py` for usage.
+    """
+    from psychopy.tests.timing import getTimingTolerance
+    return getTimingTolerance()
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Add the timing calibration to the report of a failed timing test, so
+    it's possible to tell from a CI log whether the machine was just slow.
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if report.failed and item.get_closest_marker('timing') is not None:
+        from psychopy.tests.timing import getTimingTolerance
+        report.sections.append(
+            ("timing calibration", str(getTimingTolerance())))
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Print the timing calibration, if any test used it.
+    """
+    from psychopy.tests.timing import getTimingTolerance, isTimingCalibrated
+    if isTimingCalibrated():
+        terminalreporter.write_line(
+            f"timing calibration: {getTimingTolerance()}")
