@@ -11,6 +11,12 @@ import copy
 from psychopy.experiment.components import BaseVisualComponent, BaseDeviceComponent, getInitVals, Param, _translate
 from psychopy.experiment.components.sound import SpeakerDeviceBackend
 
+# Backends which can decode movies with hardware, as
+# `psychopy.visual.movies.hardwareDecodingBackends()` gives them (which isn't
+# imported, as that would import `psychopy.visual`), for which the option is
+# shown and written
+HARDWARE_DECODING_BACKENDS = ('pyav',)
+
 
 class MovieComponent(BaseVisualComponent, BaseDeviceComponent):
     """An event class for presenting movie-based stimuli"""
@@ -74,10 +80,10 @@ class MovieComponent(BaseVisualComponent, BaseDeviceComponent):
             hardwareDecoding, valType='bool', inputType="bool",
             categ='Playback', updates='constant', hint=msg,
             label=_translate("Hardware decoding"))
-        # only the PyAV backend decodes with hardware
+        # only shown for the backends which decode with hardware
         self.depends.append(
             {"dependsOn": "backend",
-             "condition": "=='pyav'",
+             "condition": "in {!r}".format(list(HARDWARE_DECODING_BACKENDS)),
              "param": "hardwareDecoding",
              "true": "show",
              "false": "hide",
@@ -233,9 +239,9 @@ class MovieComponent(BaseVisualComponent, BaseDeviceComponent):
             "audioDevice=%(deviceLabel)s,"
             "depth=%(depth)s"
         )
-        # only the PyAV backend decodes with hardware (others would warn
-        # that it's ignored, were it asked for)
-        if self.params['backend'].val == 'pyav' and \
+        # Only for backends which decode with hardware, as it's only shown for
+        # those (it would be decoded in software with a warning otherwise)
+        if self.params['backend'].val in HARDWARE_DECODING_BACKENDS and \
                 self.params['hardwareDecoding']:
             code += ", hardwareDecoding=%(hardwareDecoding)s"
         buff.writeIndentedLines((code + "\n") % params)

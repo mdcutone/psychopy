@@ -18,7 +18,9 @@ __all__ = [
     'MovieAudioError',
     'backend',   # allow the user to get the current backend and set it
     'setBackend',
-    'getBackend']
+    'getBackend',
+    'supportsHardwareDecoding',
+    'hardwareDecodingBackends']
 
 
 import ctypes
@@ -58,8 +60,10 @@ from .frame import (
     FRAME_BYTES_PER_PIXEL, _YUVFrameAdapter, _COLOR_MATRIX_KR_KB,
     _YUV_SEMIPLANAR_FORMATS, _YUV_SAMPLE_BITS)
 from .readers import (
-    MovieFileReader, PREFERRED_VIDEO_LIB, SUPPORTED_VIDEO_LIBS)
-from .readers._base import defaultTimeout, _openMovieReaders
+    MovieFileReader, PREFERRED_VIDEO_LIB, SUPPORTED_VIDEO_LIBS,
+    supportsHardwareDecoding, hardwareDecodingBackends)
+from .readers._base import (
+    defaultTimeout, _openMovieReaders, _hardwareDecodingProblem)
 
 # threshold to stop reporting dropped frames
 reportNDroppedFrames = 10
@@ -517,8 +521,10 @@ class MovieStim(BaseVisualStim, DraggingMixin, ColorMixin, ContainerMixin):
         D3D11VA on Windows, VA-API on Linux and VideoToolbox on macOS), or an
         FFmpeg device type (e.g. `'cuda'`) names one. Movies the decoder can't
         handle (e.g. a codec it doesn't have) are decoded in software, as they
-        are if there's no decoder; `hardwareDecoder` says which was used. Only
-        the `pyav` backend does this, needing PyAV 14 or later, and it's only
+        are if there's no decoder or the backend can't decode with hardware,
+        with a warning saying why; `hardwareDecoder` says which was used. Only
+        the `pyav` backend does this, needing PyAV 14 or later (see
+        `psychopy.visual.movies.supportsHardwareDecoding`), and it's only
         worthwhile with `gpuColorConversion`, as frames are otherwise
         converted to RGB on the CPU, which costs more than is saved. Frames
         copied back from the GPU are a little slower to upload than those
@@ -718,12 +724,15 @@ class MovieStim(BaseVisualStim, DraggingMixin, ColorMixin, ContainerMixin):
         # `_useGPUColorConversion`
         self._gpuColorConversion = bool(gpuColorConversion)
 
-        # hardware decoder to decode with, see `hardwareDecoding`
-        if hardwareDecoding and self._movieLib != 'pyav':
-            logging.warning(
-                "Only `movieLib='pyav'` decodes movies with hardware, so "
-                "`hardwareDecoding` is ignored with '{}'.".format(
-                    self._movieLib))
+        # hardware decoder to decode with, see `hardwareDecoding`, if the
+        # backend can (else it's said why not, and decoded in software)
+        if hardwareDecoding:
+            problem = _hardwareDecodingProblem(self._movieLib)
+            if problem is not None:
+                logging.warning(
+                    "Hardware decoding was asked for, but {}, so movies are "
+                    "decoded in software.".format(problem))
+                hardwareDecoding = False
         self._hardwareDecoding = hardwareDecoding
         self._audioSamples = []  # audio samples from the movie 
         self._audioTrack = None  # audio track information from the movie metadata

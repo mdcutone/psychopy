@@ -34,7 +34,7 @@ _AUTO_HARDWARE_DECODERS = {
 
 def _hardwareDecodersToTry(request):
     """Hardware decoders (FFmpeg device types) to try for a
-    `hardwareDecoding` setting, best first (`list`).
+    `hardwareDecoding` setting, best first.
 
     Parameters
     ----------
@@ -42,34 +42,41 @@ def _hardwareDecodersToTry(request):
         `True` or `'auto'` for the best available, a device type (e.g.
         `'cuda'`) for that one, or `False` or `None` for none.
 
+    Returns
+    -------
+    tuple
+        `(devices, problem)`: the decoders to try, and if there are none to
+        try for a request for some, why not (else `None`).
+
     """
     if not request:
-        return []
+        return [], None
 
-    try:
-        from av.codec.hwaccel import hwdevices_available
-    except ImportError:  # PyAV before 14
-        logging.warning(
-            "This version of PyAV can't decode movies with hardware, so they "
-            "are decoded in software. Hardware decoding needs PyAV 14 or "
-            "later.")
-        return []
+    problem = PyAVMovieFileReader._hardwareDecodingProblem()
+    if problem is not None:
+        return [], problem
+
+    from av.codec.hwaccel import hwdevices_available
     available = set(hwdevices_available())
+    availableText = ', '.join(sorted(available)) or 'none'
 
     if request is True or request == 'auto':
         platform = 'linux' if sys.platform.startswith('linux') \
             else sys.platform
-        return [device for device in _AUTO_HARDWARE_DECODERS.get(platform, ())
-                if device in available]
+        candidates = _AUTO_HARDWARE_DECODERS.get(platform, ())
+        devices = [device for device in candidates if device in available]
+        if not devices:
+            return [], (
+                "PyAV has none of the hardware decoders tried on this "
+                "platform ({}; it has: {})".format(
+                    ', '.join(candidates) or 'none', availableText))
+        return devices, None
 
     if request not in available:
-        logging.warning(
-            "Hardware decoder {!r} isn't available, so movies are decoded in "
-            "software. Available here: {}.".format(
-                request, ', '.join(sorted(available)) or 'none'))
-        return []
+        return [], "PyAV has no hardware decoder {!r} (it has: {})".format(
+            request, availableText)
 
-    return [request]
+    return [request], None
 
 
 class PyAVMovieFileReader(MovieFileReader):
@@ -82,6 +89,21 @@ class PyAVMovieFileReader(MovieFileReader):
 
     """
     _decoderLib = 'pyav'
+    supportsHardwareDecoding = True
+
+    @classmethod
+    def _hardwareDecodingProblem(cls):
+        try:
+            import av
+        except ImportError:
+            return "PyAV isn't installed"
+        try:
+            from av.codec.hwaccel import hwdevices_available  # noqa: F401
+        except ImportError:
+            return "PyAV {} can't (it needs PyAV 14 or later)".format(
+                av.__version__)
+
+        return None
 
     def __init__(self, filename, decoderLib=None, decoderOpts=None):
         super().__init__(filename, decoderLib, decoderOpts)
@@ -184,8 +206,9 @@ class PyAVMovieFileReader(MovieFileReader):
         # first frame, which is when it's known whether it could be used.
         opened = None
         self._hardwareDecoder = None
-        for device in _hardwareDecodersToTry(
-                self._decoderOpts.get('hwaccel')) + [None]:
+        requested = self._decoderOpts.get('hwaccel')
+        devices, problem = _hardwareDecodersToTry(requested)
+        for device in devices + [None]:
             if opened is not None:
                 opened[0].close()  # the last one tried, which couldn't
             opened = self._openContainer(av, openOpts, device)
@@ -201,6 +224,17 @@ class PyAVMovieFileReader(MovieFileReader):
         if self._hardwareDecoder is not None:
             logging.info("Decoding {} with hardware decoder {!r}.".format(
                 self._filename, self._hardwareDecoder))
+        elif requested:
+            # asked for, so say why it's not being used
+            if problem is None:
+                problem = "{} can't decode it".format(
+                    "hardware decoder {!r}".format(devices[0])
+                    if len(devices) == 1 else
+                    "none of the hardware decoders tried ({})".format(
+                        ', '.join(devices)))
+            logging.warning(
+                "Hardware decoding was asked for, but {}, so {} is decoded "
+                "in software.".format(problem, self._filename))
 
         self._videoStream = videoStream
 
