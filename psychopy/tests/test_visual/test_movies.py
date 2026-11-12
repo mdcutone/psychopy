@@ -2785,6 +2785,21 @@ def _writeH264Movie(path, size=(320, 240), nFrames=30):
     return path
 
 
+def _recordWarnings(monkeypatch):
+    """Record the warnings PsychoPy logs (as everything here logs them through
+    `psychopy.logging.warning`), returning the list they're added to."""
+    warned = []
+    original = logging.warning
+
+    def warning(msg, *args, **kwargs):
+        warned.append(str(msg))
+        return original(msg, *args, **kwargs)
+
+    monkeypatch.setattr(logging, 'warning', warning)
+
+    return warned
+
+
 class TestMovieStimHardwareDecoding:
     """Tests for decoding movies with a hardware decoder (`hardwareDecoding`),
     which are skipped where there's none to decode with."""
@@ -2825,11 +2840,28 @@ class TestMovieStimHardwareDecoding:
             assert difference.mean() < 1.0
             assert difference.max() <= 3
 
+    def test_supportsHardwareDecoding(self, win, movieLib):
+        """Which backends can decode with hardware can be asked: only `pyav`,
+        and only with a version of PyAV which can."""
+        try:
+            from av.codec.hwaccel import hwdevices_available  # noqa: F401
+            pyavCan = True
+        except ImportError:  # PyAV before 14, or none
+            pyavCan = False
+
+        assert movies.hardwareDecodingBackends() == ['pyav']
+        assert movies.supportsHardwareDecoding(movieLib) == (
+            movieLib == 'pyav' and pyavCan)
+        assert not movies.supportsHardwareDecoding('notABackend')
+        assert MovieFileReader.supportsHardwareDecoding is False
+
     @pytest.mark.parametrize('hardwareDecoding', [True, 'notADecoder'])
     def test_softwareWhereHardwareCant(self, win, movieLib, tmp_path,
-                                       hardwareDecoding):
-        """Movies no hardware decoder can decode (FFV1 here), or asked to be
-        decoded with one there isn't, are decoded in software."""
+                                       monkeypatch, hardwareDecoding):
+        """Movies no hardware decoder can decode (FFV1 here), asked to be
+        decoded with one there isn't, or with a backend which can't (OpenCV),
+        are decoded in software, with one warning saying why."""
+        warned = _recordWarnings(monkeypatch)
         path = _writeTaggedMovie(tmp_path / 'ffv1.mkv', 'yuv420p')
         with movieStim(win, movieLib, filename=path,
                        hardwareDecoding=hardwareDecoding) as mov:
@@ -2837,6 +2869,33 @@ class TestMovieStimHardwareDecoding:
             mov.draw()
             if movieLib == 'pyav':
                 assert mov._recentFrameImage.pixelFormat == 'yuv420p'
+
+        hardwareWarnings = [msg for msg in warned
+                            if 'Hardware decoding was asked for' in msg]
+        assert len(hardwareWarnings) == 1, warned
+        if movieLib != 'pyav':
+            assert "'{}' movie backend".format(movieLib) in \
+                hardwareWarnings[0]
+        elif hardwareDecoding == 'notADecoder':
+            assert "'notADecoder'" in hardwareWarnings[0]
+
+    def test_noWarningUnlessHardwareCant(self, win, movieLib, tmp_path,
+                                         monkeypatch):
+        """Nothing is said about hardware decoding when it's not asked for,
+        or when it's used."""
+        warned = _recordWarnings(monkeypatch)
+        with movieStim(win, movieLib) as mov:
+            assert mov.hardwareDecoder is None
+        if movieLib == 'pyav' and movies.supportsHardwareDecoding('pyav'):
+            path = _writeH264Movie(tmp_path / 'movie.mp4')
+            with movieStim(win, movieLib, filename=path,
+                           hardwareDecoding=True) as mov:
+                used = mov.hardwareDecoder is not None
+            if not used:
+                warned = [msg for msg in warned
+                          if 'Hardware decoding was asked for' not in msg]
+
+        assert not [msg for msg in warned if 'ardware' in msg], warned
 
 
 class TestMovieStimFrameTexture:

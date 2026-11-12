@@ -84,9 +84,19 @@ class TestMovieComponent:
             backend='opencv', hardwareDecoding=True)
 
         assert 'hardwareDecoding' not in script
-        assert {"dependsOn": "backend", "condition": "=='pyav'",
+        assert {"dependsOn": "backend", "condition": "in ['pyav']",
                 "param": "hardwareDecoding", "true": "show",
                 "false": "hide"} in comp.depends
+
+    def test_hardwareDecodingBackendsMatchReaders(self):
+        """The backends the option is shown for are those whose readers
+        decode with hardware (which the component doesn't import, see
+        `HARDWARE_DECODING_BACKENDS`)."""
+        from psychopy.experiment.components import movie
+        from psychopy.visual import movies
+
+        assert list(movie.HARDWARE_DECODING_BACKENDS) == \
+            movies.hardwareDecodingBackends()
 
     def test_hardwareDecodingSavedAndLoaded(self, tmp_path):
         """The setting is kept in the experiment file, and experiments saved
