@@ -314,9 +314,10 @@ class MovieFileReader:
     def setOutputPixelFormat(self, pixelFormat):
         """Set the pixel format frames are given in.
 
-        With `'yuv'`, frames decoded as planar YUV (as most are) are kept as
-        such, as `_YUVFrameAdapter`, for the caller to convert to RGB itself
-        (`MovieStim` does so in a shader as it uploads them). That saves
+        With `'yuv'`, frames decoded as 8-bit planar YUV (as most are), or as
+        the semi-planar YUV hardware decoders give (`nv12`, `p010le`), are
+        kept as such, as `_YUVFrameAdapter`, for the caller to convert to RGB
+        itself (`MovieStim` does so in a shader as it uploads them). That saves
         converting them as they're decoded, and leaves less than half as much
         to copy to the GPU. Frames in any other format are given as RGBA
         regardless, as they are with `'rgba'` (the default). Frames already
@@ -336,6 +337,13 @@ class MovieFileReader:
 
         size, interpolation, _ = self._outputFrameFormat
         self._outputFrameFormat = (size, interpolation, pixelFormat == 'yuv')
+
+    @property
+    def hardwareDecoder(self):
+        """FFmpeg device type of the hardware decoder the movie is decoded
+        with, or `None` if it's decoded in software (`str` or `None`). Only
+        `pyav` decodes with hardware, see `MovieStim`'s `hardwareDecoding`."""
+        return None
 
     @property
     def frameInterval(self):

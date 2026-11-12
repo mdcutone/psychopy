@@ -12,15 +12,64 @@ __all__ = [
     'PyAVMovieFileReader',
 ]
 
+import sys
 import time
 
 from psychopy import logging
 from ..exceptions import MovieFileFormatError
 from ..frame import (
     FRAME_PIXEL_FORMAT, _RGBFrameAdapter, _YUVFrameAdapter,
-    _YUV_PLANAR_FORMATS, _SWSCALE_TO_AVCOL_SPC, _frameColorMatrix,
-    _isYUVFormat)
+    _SWSCALE_TO_AVCOL_SPC, _frameColorMatrix, _isYUVFormat, _isGPUYUVFormat)
 from ._base import MovieFileReader, defaultTimeout
+
+# Hardware decoders `hardwareDecoding=True` tries on each platform, best first
+# (CUDA takes the least CPU to hand frames over), of those FFmpeg was built
+# with. Those which can't be used here, or can't decode the movie, are passed
+# over.
+_AUTO_HARDWARE_DECODERS = {
+    'win32': ('cuda', 'd3d11va', 'dxva2'),
+    'linux': ('cuda', 'vaapi'),
+    'darwin': ('videotoolbox',)}
+
+
+def _hardwareDecodersToTry(request):
+    """Hardware decoders (FFmpeg device types) to try for a
+    `hardwareDecoding` setting, best first (`list`).
+
+    Parameters
+    ----------
+    request : bool, str or None
+        `True` or `'auto'` for the best available, a device type (e.g.
+        `'cuda'`) for that one, or `False` or `None` for none.
+
+    """
+    if not request:
+        return []
+
+    try:
+        from av.codec.hwaccel import hwdevices_available
+    except ImportError:  # PyAV before 14
+        logging.warning(
+            "This version of PyAV can't decode movies with hardware, so they "
+            "are decoded in software. Hardware decoding needs PyAV 14 or "
+            "later.")
+        return []
+    available = set(hwdevices_available())
+
+    if request is True or request == 'auto':
+        platform = 'linux' if sys.platform.startswith('linux') \
+            else sys.platform
+        return [device for device in _AUTO_HARDWARE_DECODERS.get(platform, ())
+                if device in available]
+
+    if request not in available:
+        logging.warning(
+            "Hardware decoder {!r} isn't available, so movies are decoded in "
+            "software. Available here: {}.".format(
+                request, ', '.join(sorted(available)) or 'none'))
+        return []
+
+    return [request]
 
 
 class PyAVMovieFileReader(MovieFileReader):
@@ -42,6 +91,66 @@ class PyAVMovieFileReader(MovieFileReader):
         self._packetIterator = None  # generator yielding decoded video frames
         # `swscale` colour matrices PyAV has a name for, set on open
         self._namedColorMatrices = frozenset()
+        # hardware decoder the movie is decoded with, see `hardwareDecoder`
+        self._hardwareDecoder = None
+
+    @property
+    def hardwareDecoder(self):
+        """FFmpeg device type of the hardware decoder the movie is decoded
+        with (e.g. `'cuda'`), or `None` if it's decoded in software (`str` or
+        `None`). Set by `open()`, from the decoder option `'hwaccel'` (see
+        `MovieStim`'s `hardwareDecoding`)."""
+        return self._hardwareDecoder
+
+    def _openContainer(self, av, openOpts, device):
+        """Open the movie and decode its first frame, with a hardware decoder
+        or in software.
+
+        Returns
+        -------
+        tuple or None
+            `(container, videoStream, firstFrame, hardware)`, `hardware` being
+            whether the frame was decoded with the hardware decoder asked for
+            (PyAV falls back to software if it can't be used), or `None` if
+            the movie has no video stream.
+
+        """
+        kwargs = {}
+        if device is not None:  # PyAV before 14 has no `hwaccel`
+            from av.codec.hwaccel import HWAccel
+            kwargs['hwaccel'] = HWAccel(device, allow_software_fallback=True)
+        container = av.open(self._filename, options=openOpts, **kwargs)
+
+        videoStream = next(
+            (s for s in container.streams if s.type == 'video'), None)
+        if videoStream is None:
+            container.close()
+            return None
+
+        # Use multi-threaded decoding where available for faster frame access.
+        # Not frame threads with a hardware decoder, which gain it little
+        # (it decodes 4K at over 200 fps without), and at the end of the movie
+        # take ~5-7 ms to drain (at 4K) holding the GIL, which stalls drawing.
+        try:
+            videoStream.thread_type = 'AUTO' if device is None else 'SLICE'
+        except Exception:
+            pass  # not fatal if the codec doesn't support threaded decoding
+
+        packetIterator = container.decode(video=0)
+        startTime = time.time()
+        firstFrame = None
+        while time.time() - startTime < defaultTimeout:
+            try:
+                firstFrame = next(packetIterator)
+                break
+            except StopIteration:
+                break
+
+        hardware = device is not None and bool(
+            getattr(videoStream.codec_context, 'is_hwaccel', False))
+        self._packetIterator = packetIterator
+
+        return container, videoStream, firstFrame, hardware
 
     def _open(self):
         """Open a movie reader using PyAV.
@@ -69,21 +178,29 @@ class PyAVMovieFileReader(MovieFileReader):
         logging.info("Opening movie file: {}".format(self._filename))
 
         openOpts = self._decoderOpts.get('options', {})
-        self._container = av.open(self._filename, options=openOpts)
 
-        videoStream = next(
-            (s for s in self._container.streams if s.type == 'video'), None)
-        
-        if videoStream is None:
-            self._container.close()
-            self._container = None
-            raise MovieFileFormatError(self._filename)
-
-        # use multi-threaded decoding where available for faster frame access
-        try:
-            videoStream.thread_type = 'AUTO'
-        except Exception:
-            pass  # not fatal if the codec doesn't support threaded decoding
+        # With a hardware decoder if asked for one, trying each that might do
+        # until one does, and in software if none can. Each tried decodes the
+        # first frame, which is when it's known whether it could be used.
+        opened = None
+        self._hardwareDecoder = None
+        for device in _hardwareDecodersToTry(
+                self._decoderOpts.get('hwaccel')) + [None]:
+            if opened is not None:
+                opened[0].close()  # the last one tried, which couldn't
+            opened = self._openContainer(av, openOpts, device)
+            if opened is None:
+                raise MovieFileFormatError(self._filename)
+            if device is None or opened[3]:
+                self._hardwareDecoder = device
+                break
+            logging.info(
+                "Hardware decoder {!r} can't decode {}.".format(
+                    device, self._filename))
+        self._container, videoStream, firstFrame, _ = opened
+        if self._hardwareDecoder is not None:
+            logging.info("Decoding {} with hardware decoder {!r}.".format(
+                self._filename, self._hardwareDecoder))
 
         self._videoStream = videoStream
 
@@ -109,17 +226,7 @@ class PyAVMovieFileReader(MovieFileReader):
 
         self._setMovieProperties((width, height), frameRate, duration)
 
-        # start the decode generator and warm up by grabbing the first frame
-        self._packetIterator = self._container.decode(video=0)
-
-        startTime = time.time()
-        firstFrame = None
-        while time.time() - startTime < defaultTimeout:
-            try:
-                firstFrame = next(self._packetIterator)
-                break
-            except StopIteration:
-                break
+        # the first frame was decoded as the movie was opened, as a warm up
         if firstFrame is None:
             raise RuntimeError(
                 'PyAV failed to decode the first frame of the movie. Check '
@@ -184,7 +291,7 @@ class PyAVMovieFileReader(MovieFileReader):
         scaled = (width, height) != (frame.width, frame.height)
 
         formatName = frame.format.name
-        if keepYUV and formatName in _YUV_PLANAR_FORMATS:
+        if keepYUV and _isGPUYUVFormat(formatName):
             # Left as YUV for the shader it's drawn with to convert, see
             # `setOutputPixelFormat`. Scaling it down if need be is the only
             # work there is to do here.
