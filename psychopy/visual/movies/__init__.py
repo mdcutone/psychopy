@@ -459,31 +459,72 @@ class MovieStim(BaseVisualStim, DraggingMixin, ColorMixin, ContainerMixin):
         `movieLib='ffpyplayer'`, `'vlc'` for `movieLib='vlc'`, and
         extracted-track playback via `psychopy.sound.Sound` for
         `movieLib='pyav'` and `movieLib='opencv'`, since neither library
-        provides its own audio playback).
+        provides its own audio playback). This parameter is ignored for those 
+        backends.
     units : str
         Units to use when sizing the video frame on the window, affects how
         `size` is interpreted.
     size : ArrayLike or None
         Size of the video frame on the window in `units`. If `None`, the native
         size of the video will be used.
+    pos : ArrayLike
+        Position of the video frame on the window in `units`. Default is
+        `(0.0, 0.0)`.
+    ori : float
+        Orientation of the video frame in degrees, clockwise. Default is
+        `0.0`.
+    anchor : str
+        Point on the video frame that `pos` refers to (e.g. `'center'`,
+        `'top-left'`). Default is `'center'`.
     draggable : bool
         Can this stimulus be dragged by a mouse click?
     flipVert : bool
         If `True` then the movie will be top-bottom flipped.
     flipHoriz : bool
         If `True` then the movie will be right-left flipped.
+    color : ArrayLike or str
+        Color the video frame is multiplied by, in `colorSpace`. The default
+        white `(1.0, 1.0, 1.0)` leaves the frame's colors as they are.
+    colorSpace : str
+        Color space `color` is given in. Default is `'rgb'`.
+    opacity : float
+        Opacity of the video frame, from 0 (transparent) to 1 (opaque).
+        Default is `1.0`.
+    contrast : float
+        Contrast of the video frame. Currently not applied. Default is `1`.
     volume : int or float
         If specifying an `int` the nominal level is 100, and 0 is silence. If a
         `float`, values between 0 and 1 may be used.
+    name : str
+        Name of the stimulus, used in logging.
+    loop : bool
+        Whether to start the movie over from the beginning if draw is called and
+        the movie is done. Default is `False`.
+    autoLog : bool
+        Log changes to the stimulus' attributes automatically. Default is
+        `True`.
+    depth : float
+        Depth of the stimulus, used by Builder to order drawing. Default is
+        `0.0`.
     noAudio : bool
         Leave out the movie's audio: it isn't loaded, and isn't played by
         decoders which play it themselves (`ffpyplayer` and `vlc`). Default is
         `False`.
-    loop : bool
-        Whether to start the movie over from the beginning if draw is called and
-        the movie is done. Default is `False`.
+    interpolate : bool
+        Smooth the video frame with linear filtering when it's drawn at a size
+        other than its own (and when downscaling frames, see
+        `downscaleFrames`), rather than using nearest neighbour. Default is
+        `True`.
     autoStart : bool
         Automatically begin playback of the video when `flip()` is called.
+    audioDevice : :class:`~psychopy.hardware.speaker.SpeakerDevice`, str, int or None
+        Speaker to play the movie's audio on, as a device, the name of one
+        registered with `DeviceManager`, or an index or name to open one with.
+        Only used when the audio is played via `psychopy.sound.Sound` (the
+        `pyav` and `opencv` backends). If `None`, the default speaker is used.
+    audioConfig : dict or None
+        Options for loading the movie's audio track. `'fps'` sets the sample
+        rate it's decoded at, otherwise the speaker's rate is used.
     loadAudioInBackground : bool
         Decode the movie's audio track in the background, rather than waiting
         for it to load along with the movie. For a long movie that takes a
