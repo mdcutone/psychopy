@@ -62,7 +62,8 @@ class EyeTrackerDevice(Device):
     __slots__ = [
         '_latest_sample',
         '_latest_gaze_position',
-        '_runtime_settings']
+        '_runtime_settings',
+        '_clientCalibrationSession']
 
     def __init__(self, *args, **kwargs):
         if self.__class__._INSTANCE is not None:
@@ -288,6 +289,140 @@ class EyeTrackerDevice(Device):
             'text_color': calib.textColor if str(calib.textColor).lower() != "auto" else None,
             'screen_background_color': getattr(calib.win._color, calib.colorSpace),
         }
+
+    # --- Calibration drawn by the experiment process ------------------------
+    #
+    # When the experiment calls `runSetupProcedure(win=win)`, the calibration
+    # targets are drawn in the experiment's own window by
+    # `psychopy.iohub.client.eyetracker.calibration.ClientCalibrationProcedure`.
+    # The ioHub server only talks to the tracker, through the hooks of a
+    # window-less ("headless") instance of the tracker's calibration procedure
+    # class, driven by the RPC methods below.
+    #
+    # A tracker opts in by returning its `BaseCalibrationProcedure` subclass
+    # from `_getCalibrationProcedureClass()`, and can return tracker-specific
+    # results by overriding `_getClientCalibrationResult()`.
+
+    def _getCalibrationProcedureClass(self):
+        """Calibration procedure class used for client-drawn calibration.
+
+        Returns
+        -------
+        type or None
+            A `BaseCalibrationProcedure` subclass whose hooks talk to the
+            tracker, or None if this tracker can't be calibrated from the
+            experiment window (the default).
+        """
+        return None
+
+    def _getClientCalibrationResult(self, procedure, aborted):
+        """Result returned to the experiment once a client-drawn calibration
+        has finished. Override to return tracker-specific results.
+
+        Parameters
+        ----------
+        procedure : BaseCalibrationProcedure
+            The headless procedure used for this calibration.
+        aborted : bool
+            True if the calibration was aborted.
+
+        Returns
+        -------
+        dict
+        """
+        if aborted:
+            return {"RESULT": "CALIBRATION_ABORTED"}
+        return {"RESULT": "CALIBRATION_OK"}
+
+    def supportsClientCalibration(self):
+        """Whether calibration can be drawn in the experiment's own window.
+
+        Returns
+        -------
+        bool
+        """
+        return self._getCalibrationProcedureClass() is not None
+
+    def startClientCalibration(self, calibration_args=None, points=None):
+        """Start a calibration drawn by the experiment process.
+
+        Creates a window-less calibration procedure for this tracker and calls
+        its `startCalibrationHook()`. Not normally called directly; use
+        `runSetupProcedure(win=win)` from the experiment instead.
+
+        Parameters
+        ----------
+        calibration_args : dict or None
+            Calibration settings, merged over the device's calibration config.
+        points : list of (x, y)
+            Normalised calibration points (origin top-left) in the order they
+            will be shown.
+
+        Returns
+        -------
+        dict
+            `allow_escape` (whether ESCAPE may abort once targets are shown)
+            and `points` (the points the tracker was given).
+        """
+        from .calibration import headlessCalibration
+
+        procedureClass = self._getCalibrationProcedureClass()
+        if procedureClass is None:
+            return EyeTrackerConstants.EYETRACKER_INTERFACE_METHOD_NOT_SUPPORTED
+        # discard a session that was never finished
+        self._clientCalibrationSession = None
+
+        with headlessCalibration(points):
+            procedure = procedureClass(self, calibration_args or {})
+        self._clientCalibrationSession = procedure
+        procedure.startCalibrationHook()
+        return {
+            'allow_escape': bool(procedure.allow_escape),
+            'points': [list(pt) for pt in procedure.cal_target_list],
+        }
+
+    def registerClientCalibrationPoint(self, point):
+        """Tell the tracker that a calibration target has been shown.
+
+        Calls the procedure's `registerCalibrationPointHook(point)`.
+
+        Parameters
+        ----------
+        point : (x, y)
+            Normalised position (origin top-left) of the target just shown.
+        """
+        procedure = getattr(self, '_clientCalibrationSession', None)
+        if procedure is None:
+            raise RuntimeError(
+                "registerClientCalibrationPoint called without an active "
+                "client calibration; call startClientCalibration first.")
+        procedure.registerCalibrationPointHook(tuple(point))
+        return True
+
+    def finishClientCalibration(self, aborted=False):
+        """Finish a calibration drawn by the experiment process.
+
+        Calls the procedure's `finishCalibrationHook(aborted)` and returns the
+        calibration result.
+
+        Parameters
+        ----------
+        aborted : bool
+            True if the calibration was aborted.
+
+        Returns
+        -------
+        dict
+            Tracker-specific result, see `_getClientCalibrationResult`.
+        """
+        procedure = getattr(self, '_clientCalibrationSession', None)
+        if procedure is None:
+            return self._getClientCalibrationResult(None, True)
+        try:
+            procedure.finishCalibrationHook(aborted)
+            return self._getClientCalibrationResult(procedure, aborted)
+        finally:
+            self._clientCalibrationSession = None
 
     def setRecordingState(self, recording):
         """The setRecordingState method is used to start or stop the recording

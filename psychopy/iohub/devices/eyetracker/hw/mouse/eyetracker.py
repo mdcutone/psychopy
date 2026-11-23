@@ -420,6 +420,10 @@ class EyeTracker(EyeTrackerDevice):
         else:
             return {"RESULT": "CALIBRATION_ABORTED"}
 
+    def _getCalibrationProcedureClass(self):
+        # MouseGaze supports calibration drawn in the experiment window
+        return MouseGazeCalibrationProcedure
+
     def _getIOHubEventObject(self, native_event_data):
         """The _getIOHubEventObject method is called by the ioHub Process to
         convert new native device event objects that have been received to the

@@ -1152,7 +1152,11 @@ class ioHubConnection():
                 exec('import psychopy.iohub.client.{}'.format(dev_cls_name.lower()))
                 local_class = getattr(local_module, dev_cls_name, False)
 
-            if local_class:
+            if local_class and getattr(local_class, '_acceptsDeviceClassPath', False):
+                # client-side view that keeps the real device class path
+                d = local_class(self, dev_cls_name, dev_config,
+                                device_class_path=dev_mod_pth + "." + dev_cls_name)
+            elif local_class:
                 d = local_class(self, dev_cls_name, dev_config)
             else:
                 d = ioHubDeviceView(self, dev_mod_pth + "." + dev_cls_name, dev_cls_name, dev_config)
@@ -1540,6 +1544,7 @@ _lazyImports = """
 from psychopy.iohub.client.connect import launchHubServer
 from psychopy.iohub.client import keyboard
 from psychopy.iohub.client import wintab
+from psychopy.iohub.client import eyetracker
 """
 
 try:

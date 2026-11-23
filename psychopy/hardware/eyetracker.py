@@ -113,6 +113,16 @@ class EyetrackerCalibration:
                 # As GazePoint doesn't use auto-pace, alert user
                 alert(4530, strFields={"brand": "GazePoint"})
 
+        from psychopy.iohub.client.eyetracker import EyeTracker as EyeTrackerView
+        if isinstance(self.eyetracker, EyeTrackerView):
+            # Draws in this window if the tracker supports it, otherwise falls
+            # back to the ioHub server's calibration window (minimising this
+            # one while it runs).
+            self.last = self.eyetracker.runSetupProcedure(
+                dict(self), win=self.win, target=self.target)
+            self.win.flip()
+            return
+
         # Minimise PsychoPy window
         if self.win._isFullScr and sys.platform == 'win32':
             self.win.winHandle.set_fullscreen(False)

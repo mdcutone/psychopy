@@ -4,6 +4,9 @@
 # Distributed under the terms of the GNU General Public License (GPL).
 
 
+import copy
+from contextlib import contextmanager
+
 from psychopy import visual, layout
 import gevent
 from psychopy.iohub.util import convertCamelToSnake, updateSettings, createCustomCalibrationStim
@@ -61,27 +64,180 @@ target_positions[13] = [(0.5, 0.5), (0.1, 0.5), (0.9, 0.5), (0.1, 0.1), (0.5, 0.
                         (0.25, 0.75), (0.75, 0.75), (0.75, 0.25)]
 
 
+LEGACY_TARGET_COLOR_KEYS = ('outer_fill_color', 'outer_line_color',
+                            'inner_fill_color', 'inner_line_color')
+
+
+def guessColorSpace(colors, default):
+    """Colour space for colours given without one (ioHub YAML settings).
+
+    The tracker YAML configs give colours as 0-255 triplets (e.g.
+    ``[128, 128, 128]``) without a colour space. If no `color_type` was set,
+    such values would be read in the window's colour space, which for 'rgb'
+    makes them all white.
+
+    Parameters
+    ----------
+    colors : list
+        Colour values (None entries are ignored).
+    default : str
+        Colour space to use unless the values can only be rgb255.
+
+    Returns
+    -------
+    str
+        'rgb255' if every colour is a numeric triplet / quad within 0-255 and
+        at least one value is above 1 (so can't be 'rgb'), else `default`.
+    """
+    triplets = [c for c in colors if c is not None]
+    if not triplets:
+        return default
+    values = []
+    for c in triplets:
+        if not isinstance(c, (list, tuple)) or len(c) not in (3, 4):
+            return default
+        if not all(isinstance(v, (int, float)) for v in c):
+            return default
+        values.extend(c)
+    if any(v > 1 for v in values) and all(0 <= v <= 255 for v in values):
+        return 'rgb255'
+    return default
+
+
+def legacyTargetStim(win, attrs, units=None, colorSpace=None,
+                     name='calibrationTarget'):
+    """Create a `visual.TargetStim` from ioHub YAML target settings.
+
+    Tracker configs (`default_eyetracker.yaml`) describe the calibration
+    target with `outer_diameter`, `inner_diameter` (pixels),
+    `outer_stroke_width`, `inner_stroke_width` (pixels) and
+    `outer_fill_color`, `outer_line_color`, `inner_fill_color`,
+    `inner_line_color`.
+
+    Parameters
+    ----------
+    win : psychopy.visual.Window
+    attrs : dict
+        Target settings; missing ones use defaults.
+    units : str or None
+        Units for the stimulus (default: the window's).
+    colorSpace : str or None
+        Colour space of the colours. If None, guessed with `guessColorSpace`
+        (defaulting to the window's colour space).
+    name : str
+
+    Returns
+    -------
+    psychopy.visual.TargetStim
+    """
+    units = units or win.units
+
+    def pixToUnits(pix):
+        size = layout.Size((pix, pix), 'pix', win)
+        return float(getattr(size, units)[0])
+
+    if colorSpace is None:
+        colorSpace = guessColorSpace(
+            [attrs.get(k) for k in LEGACY_TARGET_COLOR_KEYS], win.colorSpace)
+
+    kwargs = dict(
+        radius=pixToUnits(float(attrs.get('outer_diameter') or 40.0) / 2),
+        innerRadius=pixToUnits(float(attrs.get('inner_diameter') or 15.0) / 2),
+    )
+    optional = dict(lineWidth='outer_stroke_width',
+                    innerLineWidth='inner_stroke_width',
+                    fillColor='outer_fill_color',
+                    borderColor='outer_line_color',
+                    innerFillColor='inner_fill_color',
+                    innerBorderColor='inner_line_color')
+    for arg, key in optional.items():
+        if attrs.get(key) is not None:
+            kwargs[arg] = attrs[key]
+    return visual.TargetStim(win, name=name, style='circles', pos=(0, 0),
+                             units=units, colorSpace=colorSpace,
+                             autoLog=False, **kwargs)
+
+
+@contextmanager
+def headlessCalibration(points=None):
+    """Construct calibration procedures without a window inside this block.
+
+    Tracker plugins subclass `BaseCalibrationProcedure` with their own
+    `__init__` signatures, so headless mode can't always be passed as an
+    argument. Any `BaseCalibrationProcedure` created inside this block skips
+    window, graphics and keyboard setup and uses `points` as its point list.
+
+    Examples
+    --------
+    ::
+
+        with headlessCalibration(points):
+            procedure = TrackerCalibrationProcedure(tracker, calibration_args)
+        procedure.startCalibrationHook()
+    """
+    previous = BaseCalibrationProcedure._headlessRequest
+    BaseCalibrationProcedure._headlessRequest = {'points': points}
+    try:
+        yield
+    finally:
+        BaseCalibrationProcedure._headlessRequest = previous
+
+
 class BaseCalibrationProcedure:
     IOHUB_HEARTBEAT_INTERVAL = 0.050
     CALIBRATION_POINT_LIST = target_positions[9]
 
     _keyboard_key_index = KeyboardInputEvent.CLASS_ATTRIBUTE_NAMES.index('key')
 
-    def __init__(self, eyetrackerInterface, calibration_args, allow_escape_in_progress=True):
+    # Set by `headlessCalibration()` so that tracker-specific subclasses (whose
+    # __init__ signatures don't know about headless mode) can be constructed
+    # without a window.
+    _headlessRequest = None
+
+    def __init__(self, eyetrackerInterface, calibration_args,
+                 allow_escape_in_progress=True, headless=None, points=None):
+        """
+        Parameters
+        ----------
+        eyetrackerInterface : EyeTrackerDevice
+            Server-side eye tracker device.
+        calibration_args : dict
+            Calibration settings, merged over the device's `calibration` config.
+        allow_escape_in_progress : bool
+            Whether ESCAPE may abort the calibration once targets are shown.
+        headless : bool or None
+            If True, don't create a window, graphics or keyboard listener. Only
+            the tracker hooks (`startCalibrationHook`,
+            `registerCalibrationPointHook`, `finishCalibrationHook`) are used,
+            while the targets are drawn by the experiment process (see
+            `EyeTrackerDevice.startClientCalibration`). If None, the value set
+            by `headlessCalibration()` is used (False if not set).
+        points : list of (x, y) or None
+            Calibration points (normalised, origin top-left) in the order they
+            will be shown. If None, they're taken from the `type` setting.
+        """
+        if headless is None:
+            request = BaseCalibrationProcedure._headlessRequest
+            headless = request is not None
+            if headless and points is None:
+                points = request.get('points')
+
         self._eyetracker = eyetrackerInterface
         self.allow_escape = allow_escape_in_progress
+        self.headless = headless
         self.screenSize = eyetrackerInterface._display_device.getPixelResolution()
         self.width = self.screenSize[0]
         self.height = self.screenSize[1]
         self._ioKeyboard = None
         self._msg_queue = []
         self._lastCalibrationOK = False
-        self._device_config = self._eyetracker.getConfiguration()
+        # work on a copy so calibration args don't permanently change the
+        # device's configuration
+        self._device_config = copy.deepcopy(self._eyetracker.getConfiguration())
         display = self._eyetracker._display_device
-        # apply calibration args to defaults
-        self._device_config['calibration'].update(calibration_args)
-        # get target attributes (ignore default keys as args can vary)
-        self._device_config['calibration']['target_attributes'] = calibration_args['target_attributes']
+        # apply calibration args to defaults (target_attributes is replaced
+        # as a whole, since its keys vary between target types)
+        self._device_config['calibration'].update(calibration_args or {})
         # use modified default config for calibration args
         self._calibration_args = self._device_config.get('calibration')
         unit_type = self.getCalibSetting('unit_type')
@@ -89,18 +245,36 @@ class BaseCalibrationProcedure:
             unit_type = display.getCoordinateType()
             self._calibration_args['unit_type'] = unit_type
         color_type = self.getCalibSetting('color_type')
+        # whether colours come with a colour space, or are YAML-style values
+        # whose colour space has to be guessed
+        self._colorTypeGiven = color_type is not None
         if color_type is None:
             color_type = display.getColorSpace()
             self._calibration_args['color_type'] = color_type
+        self._backgroundColorSpace = color_type
+        if not self._colorTypeGiven:
+            self._backgroundColorSpace = guessColorSpace(
+                [self.getCalibSetting('screen_background_color')], color_type)
 
+        if points is not None:
+            self.CALIBRATION_POINT_LIST = [tuple(p) for p in points]
+        else:
+            cal_type = self.getCalibSetting('type')
+            if cal_type in target_position_count:
+                num_points = target_position_count[cal_type]
+                self.CALIBRATION_POINT_LIST = list(target_positions[num_points])
+            else:
+                self.CALIBRATION_POINT_LIST = list(self.CALIBRATION_POINT_LIST)
 
-        cal_type = self.getCalibSetting('type')
+        self.cal_target_list = list(self.CALIBRATION_POINT_LIST)
 
-        if cal_type in target_position_count:
-            num_points = target_position_count[cal_type]
-            BaseCalibrationProcedure.CALIBRATION_POINT_LIST = target_positions[num_points]
-
-        self.cal_target_list = self.CALIBRATION_POINT_LIST
+        self._lastMsgPumpTime = currentTime()
+        self.window = None
+        if headless:
+            # importing psychopy.visual (done by this module) can already have
+            # registered raw keyboard input via pyglet's shadow window
+            _removeRawKeyboardRegistration()
+            return
 
         self.window = visual.Window(
             self.screenSize,
@@ -110,14 +284,13 @@ class BaseCalibrationProcedure:
             allowGUI=False,
             screen=display.getIndex(),
             color=self.getCalibSetting(['screen_background_color']),
-            colorSpace=color_type)
+            colorSpace=self._backgroundColorSpace)
         _removeRawKeyboardRegistration()
         self.window.setMouseVisible(False)
         self.window.flip(clearBuffer=True)
 
         self.createGraphics()
         self._registerEventMonitors()
-        self._lastMsgPumpTime = currentTime()
 
         self.clearAllEventBuffers()
 
@@ -192,14 +365,20 @@ class BaseCalibrationProcedure:
         unit_type = self.getCalibSetting('unit_type')
 
         # get attributes to create target
-        targetAttrs = self._calibration_args.get('target_attributes').copy()
+        targetAttrs = dict(self._calibration_args.get('target_attributes') or {})
         # sanitize for creating
-        if "animate" in targetAttrs:
-            targetAttrs.pop("animate")
-        if "win" in targetAttrs:
-            targetAttrs['win'] = self.window
-        
-        self.targetStim = actualize(targetAttrs)
+        targetAttrs.pop("animate", None)
+        if '__class__' in targetAttrs:
+            # serialized stimulus, e.g. from EyetrackerCalibration (Builder)
+            if "win" in targetAttrs:
+                targetAttrs['win'] = self.window
+            self.targetStim = actualize(targetAttrs)
+        else:
+            # YAML-style target settings, e.g. the tracker's defaults when
+            # runSetupProcedure() is called without a target
+            self.targetStim = legacyTargetStim(
+                self.window, targetAttrs, units=unit_type,
+                colorSpace=color_type if self._colorTypeGiven else None)
 
         self.originalTargetSize = self.targetStim.size
         self.targetClassHasPlayPause = hasattr(self.targetStim, 'play') and hasattr(self.targetStim, 'pause')
@@ -208,14 +387,17 @@ class BaseCalibrationProcedure:
 
         tctype = color_type
         tcolor = self.getCalibSetting(['text_color'])
+        if tcolor is not None and not self._colorTypeGiven:
+            tctype = guessColorSpace([tcolor], color_type)
         if tcolor is None:
             # If no calibration text color provided, base it on the window background color
             from psychopy.iohub.util import complement
-            sbcolor = self.getCalibSetting(['screen_background_color'])
-            if sbcolor is None:
-                sbcolor = self.window.color
             from psychopy.colors import Color
-            tcolor_obj = Color(sbcolor, color_type)
+            sbcolor = self.getCalibSetting(['screen_background_color'])
+            sbspace = self._backgroundColorSpace
+            if sbcolor is None:
+                sbcolor, sbspace = self.window.color, self.window.colorSpace
+            tcolor_obj = Color(sbcolor, sbspace)
             tcolor = complement(*tcolor_obj.rgb255)
             tctype = 'rgb255'
 
