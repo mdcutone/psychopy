@@ -4544,7 +4544,8 @@ def bindTexture(texture, target=None, unit=None):
         texture is a `TexImage2DInfo` or `TexImage2DMultisampleInfo` object,
         the target will be inferred from the texture object. If specified, the
         value will override the target inferred from the texture. If `None` and
-        the texture is an integer, the target will default to `GL_TEXTURE_2D`.
+        the texture is an integer, `GLuint` or `None`, the target will default
+        to `GL_TEXTURE_2D`.
     unit : GLenum, int or None, optional
         Texture unit to bind the texture to, this will also set the active
         texture unit. Default is `None`. If `None`, the texture will be bound to 
@@ -4558,15 +4559,15 @@ def bindTexture(texture, target=None, unit=None):
         
     if texture is None:
         texture = 0
-    else:
-        if isinstance(texture, (TexImage2DInfo, TexImage2DMultisampleInfo)):
-            texture = texture.name
-            if target is None:
-                target = texture.target
-        else:
-            texture = int(texture)
-            if target is None:
-                target = GL.GL_TEXTURE_2D
+    elif isinstance(texture, (TexImage2DInfo, TexImage2DMultisampleInfo)):
+        if target is None:
+            target = texture.target
+        texture = texture.name
+    else:  # `GLuint` or `int`
+        texture = int(getattr(texture, 'value', texture))
+
+    if target is None:
+        target = GL.GL_TEXTURE_2D
 
     if unit is not None:     # bind the texture to a specific unit
         activeTexture(unit)
@@ -5004,6 +5005,9 @@ class SimpleMaterial:
     intended to work with features supported by the fixed-function OpenGL
     pipeline.
 
+    .. deprecated:: 2027.1.0
+        Use :class:`~psychopy.visual.stim3d.BlinnPhongMaterial` instead.
+
     """
     def __init__(self,
                  win=None,
@@ -5049,6 +5053,11 @@ class SimpleMaterial:
         face : str
             Face to apply material to. Values are `front`, `back` or `both`.
         """
+        warnings.warn(
+            '`psychopy.tools.gltools.SimpleMaterial` is deprecated, use '
+            '`psychopy.visual.stim3d.BlinnPhongMaterial` instead.',
+            DeprecationWarning, stacklevel=2)
+
         self.win = win
 
         self._diffuseColor = np.zeros((3,), np.float32)
@@ -5542,7 +5551,7 @@ def loadObjFile(objFile):
 
     Examples
     --------
-    Loading a `*.obj` mode from file::
+    Loading a `*.obj` model from file::
 
         objModel = loadObjFile('/path/to/file.obj')
         # load the material (*.mtl) file if there is one, textures are also
@@ -5607,17 +5616,18 @@ def loadObjFile(objFile):
     additional information, such as `size` and `offset`::
 
         objVAOs = {}
-        for key, val in objModel.faces.items():
+        for material, faces in objModel.faces.items():
             indexBuffer = \
                 gltools.createVBO(
                     faces.flatten(),
                     target=GL.GL_ELEMENT_ARRAY_BUFFER,
                     dataType=GL.GL_UNSIGNED_INT)
 
-            objVAOs[key] = createVAO({0: (vertexData, 3, 0),  # size=3, offset=0
-                                      8: (vertexData, 2, 3),  # size=2, offset=3
-                                      2: (vertexData, 3, 5),  # size=3, offset=5
-                                      indexBuffer=val)
+            objVAOs[material] = createVAO(
+                {0: (vertexData, 3, 0),  # size=3, offset=0
+                 8: (vertexData, 2, 3),  # size=2, offset=3
+                 2: (vertexData, 3, 5)},  # size=3, offset=5
+                indexBuffer=indexBuffer)
 
     Drawing VAOs with interleaved buffers is exactly the same as shown before
     with separate buffers.
