@@ -8,6 +8,7 @@ from PIL import Image
 
 from psychopy import visual
 from psychopy.colors import Color
+import psychopy.visual.stim3d as stim3d
 import psychopy.tools.gltools as gt
 import psychopy.tools.mathtools as mt
 import psychopy.tools.pygletgl as GL
@@ -398,6 +399,49 @@ class TestStim3D:
         frame = self._render(stim)
         self._assertDrawn(frame)
         r, g, b = self._centerPixel(frame)
+        assert r > g and r > b
+
+    def test_obj_use_material_overrides_mtllib(self, tmp_path, monkeypatch):
+        # `useMaterial` takes precedence over `loadMtllib`, which is `True` by
+        # default, and the MTL file isn't loaded at all
+        def loadMtlLib(*args):
+            raise AssertionError('MTL file loaded')
+        monkeypatch.setattr(ObjMeshStim, '_loadMtlLib', loadMtlLib)
+
+        mat = BlinnPhongMaterial(
+            self.win, diffuseColor=(-1, 1, -1), specularColor=(-1, -1, -1))
+        stim = ObjMeshStim(
+            self.win, str(_writeObjFile(tmp_path)), pos=(0, 0, -3),
+            useMaterial=mat)
+        assert stim.material is mat
+
+        r, g, b = self._centerPixel(self._render(stim))
+        assert g > r and g > b
+
+    def test_obj_without_mtllib(self, tmp_path):
+        # the default `loadMtllib=True` works for files without an MTL file
+        objFile = self._writePlainObj(tmp_path / 'plain.obj', '{0}/{0}/{0}')
+        stim = ObjMeshStim(
+            self.win, str(objFile), pos=(0, 0, -3), color=(1, -1, -1))
+        assert stim.material is None
+
+        r, g, b = self._centerPixel(self._render(stim))
+        assert r > g and r > b
+
+    def test_obj_missing_mtllib(self, tmp_path, monkeypatch):
+        # a missing MTL file logs a warning and falls back to `color`
+        warnings = []
+        monkeypatch.setattr(
+            stim3d.logging, 'warning', lambda msg, *a, **kw: warnings.append(msg))
+
+        objFile = _writeObjFile(tmp_path)
+        (tmp_path / 'cube.mtl').unlink()
+        stim = ObjMeshStim(
+            self.win, str(objFile), pos=(0, 0, -3), color=(1, -1, -1))
+        assert stim.material is None
+        assert len(warnings) == 1 and 'cube.obj' in warnings[0]
+
+        r, g, b = self._centerPixel(self._render(stim))
         assert r > g and r > b
 
     def test_obj_draw_no_usemtl(self, tmp_path):
