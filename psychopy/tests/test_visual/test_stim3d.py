@@ -402,6 +402,20 @@ class TestStim3D:
 
         return path
 
+    def _renderObjFaces(self, objFile):
+        """Render a red OBJ cube without materials from several sides and
+        return the center pixel of each frame.
+        """
+        stim = ObjMeshStim(
+            self.win, str(objFile), pos=(0, 0, -3), loadMtllib=False,
+            color=(1, -1, -1))
+        pixels = []
+        for angle in (0, -90, 180):  # +Z, +X and -Z faces
+            stim.setOriAxisAngle((0, 1, 0), angle)
+            pixels.append(self._centerPixel(self._render(stim)))
+
+        return np.asarray(pixels)
+
     @pytest.mark.parametrize('faceFormat, extraComponents', [
         ('{0}', False),
         ('{0}//{0}', False),
@@ -411,22 +425,44 @@ class TestStim3D:
     def test_obj_draw_face_formats(self, tmp_path, faceFormat, extraComponents):
         # files without texture coordinates or normals, or with extra
         # components, look the same as a fully specified one
-        def renderFaces(objFile):
-            stim = ObjMeshStim(
-                self.win, str(objFile), pos=(0, 0, -3), loadMtllib=False,
-                color=(1, -1, -1))
-            pixels = []
-            for angle in (0, -90, 180):  # +Z, +X and -Z faces
-                stim.setOriAxisAngle((0, 1, 0), angle)
-                pixels.append(self._centerPixel(self._render(stim)))
-            return np.asarray(pixels)
-
-        expected = renderFaces(
+        expected = self._renderObjFaces(
             self._writePlainObj(tmp_path / 'ref.obj', '{0}/{0}/{0}'))
-        actual = renderFaces(
+        actual = self._renderObjFaces(
             self._writePlainObj(
                 tmp_path / 'test.obj', faceFormat, extraComponents))
 
+        assert np.abs(actual - expected).max() <= 2, (actual, expected)
+
+    @pytest.mark.parametrize('negativeIndices', [False, True])
+    def test_obj_draw_quads(self, tmp_path, negativeIndices):
+        # a unit cube made of quads, which are triangulated when loading,
+        # looks the same as a cube made of triangles
+        corners = [(x, y, z) for x in (-.5, .5) for y in (-.5, .5)
+                   for z in (-.5, .5)]
+        corner = {c: i for i, c in enumerate(corners)}
+        n, p = -.5, .5
+        quads = [  # counter-clockwise when viewed from outside the cube
+            [(n, n, p), (p, n, p), (p, p, p), (n, p, p)],  # +Z
+            [(p, n, n), (n, n, n), (n, p, n), (p, p, n)],  # -Z
+            [(p, n, p), (p, n, n), (p, p, n), (p, p, p)],  # +X
+            [(n, n, n), (n, n, p), (n, p, p), (n, p, n)],  # -X
+            [(n, p, p), (p, p, p), (p, p, n), (n, p, n)],  # +Y
+            [(n, n, n), (p, n, n), (p, n, p), (n, n, p)],  # -Y
+        ]
+
+        def index(c):
+            i = corner[c]
+            return i - len(corners) if negativeIndices else i + 1
+
+        lines = ['v {} {} {}'.format(*c) for c in corners]
+        lines += ['f ' + ' '.join(str(index(c)) for c in quad)
+                  for quad in quads]
+        objFile = tmp_path / 'quads.obj'
+        objFile.write_text('\n'.join(lines) + '\n')
+
+        expected = self._renderObjFaces(
+            self._writePlainObj(tmp_path / 'ref.obj', '{0}'))
+        actual = self._renderObjFaces(objFile)
         assert np.abs(actual - expected).max() <= 2, (actual, expected)
 
     @pytest.mark.parametrize('material', ['mtllib', 'single', None])

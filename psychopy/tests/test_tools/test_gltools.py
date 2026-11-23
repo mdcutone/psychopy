@@ -2,6 +2,7 @@
 """
 import ctypes
 
+import numpy as np
 import pytest
 
 from psychopy import visual
@@ -257,3 +258,93 @@ def test_loadObjFile_extra_components(tmp_path):
 def test_loadObjFile_missing_position_index(tmp_path):
     with pytest.raises(ValueError):
         _loadObj(tmp_path, _OBJ_ATTRIBS + 'f /1/1 2/2/1 3/3/1\n')
+
+
+def test_loadObjFile_quads(tmp_path):
+    # polygons are split into triangle fans around their first vertex
+    objModel = _loadObj(tmp_path, _OBJ_ATTRIBS + 'f 1/1/1 2/2/1 3/3/1 4/4/1\n')
+
+    _assertAttribShapes(objModel, 4)
+    assert objModel.faces[None].tolist() == [[0, 1, 2], [0, 2, 3]]
+
+
+def test_loadObjFile_polygons(tmp_path):
+    # mixed triangles, quads and a pentagon in the same group
+    objModel = _loadObj(tmp_path, _OBJ_ATTRIBS + (
+        'v 0.5 1.5 0\n'
+        'f 1 2 3\n'
+        'f 1 2 3 4\n'
+        'f 1 2 3 5 4\n'))
+
+    faces = objModel.faces[None]
+    assert faces.shape == (1 + 2 + 3, 3)
+    assert faces.tolist()[3:] == [[7, 8, 9], [7, 9, 10], [7, 10, 11]]
+
+    # all triangles of a polygon share its vertices and flat normal
+    _assertAttribShapes(objModel, 3 + 4 + 5)
+    assert objModel.normals.tolist() == [[0, 0, 1]] * 12
+
+
+def test_loadObjFile_quad_winding(tmp_path):
+    # triangles keep the winding of the polygon
+    objModel = _loadObj(tmp_path, _OBJ_ATTRIBS + 'f 1 4 3 2\n')
+
+    vertices = objModel.vertexPos[objModel.faces[None]]
+    for a, b, c in vertices:
+        assert np.cross(b - a, c - a).tolist() == [0, 0, -1]
+    assert objModel.normals.tolist() == [[0, 0, -1]] * 4
+
+
+def test_loadObjFile_ignores_non_polygons(tmp_path):
+    objModel = _loadObj(tmp_path, _OBJ_ATTRIBS + (
+        'f 1 2\n'
+        'f 1 2 3\n'))
+    assert objModel.faces[None].tolist() == [[0, 1, 2]]
+
+    with pytest.raises(RuntimeError):
+        _loadObj(tmp_path, _OBJ_ATTRIBS + 'f 1 2\n')
+
+
+def test_loadObjFile_negative_indices(tmp_path):
+    expected = _loadObj(tmp_path, _OBJ_ATTRIBS + (
+        'f 1/1/1 2/2/1 3/3/1\n'
+        'f 1/1/1 3/3/1 4/4/1\n'))
+    objModel = _loadObj(tmp_path, _OBJ_ATTRIBS + (
+        'f -4/-4/-1 -3/-3/-1 -2/-2/-1\n'
+        'f 1/-4/1 -2/3/-1 -1/-1/1\n'))
+
+    assert objModel.faces[None].tolist() == expected.faces[None].tolist()
+    assert objModel.vertexPos.tolist() == expected.vertexPos.tolist()
+    assert objModel.texCoords.tolist() == expected.texCoords.tolist()
+    assert objModel.normals.tolist() == expected.normals.tolist()
+
+
+def test_loadObjFile_negative_indices_are_relative(tmp_path):
+    # negative indices count back from the last attribute defined before the
+    # face, not the end of the file
+    objModel = _loadObj(tmp_path, (
+        'v 0 0 0\n'
+        'v 1 0 0\n'
+        'v 1 1 0\n'
+        'f -3 -2 -1\n'
+        'v 5 5 5\n'
+        'v 6 5 5\n'
+        'v 6 6 5\n'
+        'f -3 -2 -1\n'))
+
+    vertices = objModel.vertexPos[objModel.faces[None]]
+    assert vertices.tolist() == [
+        [[0, 0, 0], [1, 0, 0], [1, 1, 0]],
+        [[5, 5, 5], [6, 5, 5], [6, 6, 5]]]
+
+
+@pytest.mark.parametrize('face', [
+    'f 0 1 2',      # indices start at 1
+    'f -5 -4 -3',   # only 4 positions defined
+    'f 1 2 5',      # undefined position
+    'f 1/5 2/1 3/1',  # undefined texture coordinate
+    'f 1//2 2//1 3//1',  # undefined normal
+])
+def test_loadObjFile_invalid_indices(tmp_path, face):
+    with pytest.raises(ValueError):
+        _loadObj(tmp_path, _OBJ_ATTRIBS + face + '\n')
