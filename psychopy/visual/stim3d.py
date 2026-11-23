@@ -1955,18 +1955,21 @@ class ObjMeshStim(BaseRigidBodyStim):
             axis-angle format, call `setOriAxisAngle` after initialization. By
             default, the plane is oriented with normal facing the +Z axis of the
             scene.
-        useMaterial : PhongMaterial, optional
-            Material to use for all sub-meshes. The material can be configured
-            by accessing the `material` attribute after initialization. If no
-            material is specified, `color` will modulate the diffuse and
-            ambient colors for all meshes in the model. If `loadMtllib` is
-            `True`, this value should be `None`.
+        useMaterial : BlinnPhongMaterial, optional
+            Material to use for all sub-meshes. If given, materials are not
+            loaded from the MTL file even if `loadMtllib` is `True`. The
+            material can be configured by accessing the `material` attribute
+            after initialization. If no material is specified or loaded,
+            `color` will modulate the diffuse and ambient colors for all meshes
+            in the model.
         loadMtllib : bool
-            Load materials from the MTL file associated with the mesh. This will
-            override `useMaterial` if it is `None`. The value of `materials`
-            after initialization will be a dictionary where keys are material
-            names and values are materials. Any textures associated with the
-            model will be loaded as per the material requirements.
+            Load materials from the MTL file referenced by the OBJ file if
+            `useMaterial` is `None`. The value of `material` after
+            initialization will be a dictionary where keys are material names
+            and values are materials. Any textures associated with the model
+            will be loaded as per the material requirements. If the OBJ file
+            doesn't reference an MTL file, or it can't be loaded (a warning is
+            logged), `color` is used as if `loadMtllib` were `False`.
 
         """
         super(ObjMeshStim, self).__init__(
@@ -1983,11 +1986,19 @@ class ObjMeshStim(BaseRigidBodyStim):
         # load the OBJ file
         objModel = gt.loadObjFile(objFile)
 
-        # load materials from file if requested
-        if loadMtllib and self.material is None:
-            self.material = self._loadMtlLib(objModel.mtlFile)
-        else:
+        # a material given by the caller takes precedence over the file's
+        if useMaterial is not None:
             self.material = useMaterial
+        elif loadMtllib and objModel.mtlFile is not None:
+            try:
+                self.material = self._loadMtlLib(objModel.mtlFile)
+            except OSError as e:  # e.g. the file is missing
+                logging.warning(
+                    "Failed to load material library for OBJ file '{}', "
+                    "using `color` instead: {}".format(objFile, e))
+                self.material = None
+        else:  # no material library, use `color`
+            self.material = None
 
         # load vertex data into an interleaved VBO
         buffers = np.ascontiguousarray(
