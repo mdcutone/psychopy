@@ -381,6 +381,89 @@ class TestStim3D:
         r, g, b = self._centerPixel(frame)
         assert r > g and r > b
 
+    def _renderFrontAndSide(self, stim):
+        """Return the center pixels with the +Z (blue material in
+        `_writeObjFile`) and +X (red material) faces towards the viewer.
+        """
+        stim.setOriAxisAngle((0, 1, 0), 0)
+        front = self._centerPixel(self._render(stim))
+        stim.setOriAxisAngle((0, 1, 0), -90)
+        side = self._centerPixel(self._render(stim))
+
+        return front, side
+
+    @staticmethod
+    def _isColor(pixel, channel):
+        """Check the pixel is mostly the given channel (0=R, 1=G, 2=B)."""
+        others = [c for i, c in enumerate(pixel) if i != channel]
+        return pixel[channel] > max(others) + 30
+
+    def test_obj_unused_material(self, tmp_path):
+        # materials in the MTL file which no faces use are ignored
+        objFile = _writeObjFile(tmp_path)
+        with open(tmp_path / 'cube.mtl', 'a') as f:
+            f.write('\nnewmtl unused\nKd 0 1 0\n')
+
+        stim = ObjMeshStim(self.win, str(objFile), pos=(0, 0, -3))
+        assert 'unused' in stim.material
+
+        front, side = self._renderFrontAndSide(stim)
+        assert self._isColor(front, 2)
+        assert self._isColor(side, 0)
+
+    @pytest.mark.parametrize('case', ['missing', 'deleted', 'none'])
+    def test_obj_group_without_material(self, tmp_path, case):
+        # faces whose material isn't in the MTL file are drawn using `color`
+        objFile = _writeObjFile(tmp_path)
+        if case == 'missing':
+            (tmp_path / 'cube.mtl').write_text(
+                'newmtl blue\nNs 20\nKa 0 0 0\nKd 0 0 1\nKs 0 0 0\n')
+
+        stim = ObjMeshStim(
+            self.win, str(objFile), pos=(0, 0, -3), color=(-1, 1, -1))
+        if case == 'deleted':
+            del stim.material['red']
+        elif case == 'none':
+            stim.material['red'] = None
+        assert set(stim._vao) == {'red', 'blue'}
+
+        front, side = self._renderFrontAndSide(stim)
+        assert self._isColor(front, 2)  # blue material
+        assert self._isColor(side, 1)  # green `color`
+
+    def test_obj_no_usemtl_with_mtllib(self, tmp_path):
+        # faces before any `usemtl` are drawn using `color` when the file has
+        # a material library
+        objFile = self._writePlainObj(tmp_path / 'plain.obj', '{0}/{0}/{0}')
+        objFile.write_text('mtllib cube.mtl\n' + objFile.read_text())
+        (tmp_path / 'cube.mtl').write_text('newmtl blue\nKd 0 0 1\n')
+
+        stim = ObjMeshStim(
+            self.win, str(objFile), pos=(0, 0, -3), color=(1, -1, -1))
+        assert set(stim.material) == {'blue'}
+        assert list(stim._vao) == [None]
+
+        front, side = self._renderFrontAndSide(stim)
+        assert self._isColor(front, 0)
+        assert self._isColor(side, 0)
+
+    def test_obj_material_state_not_leaked(self, tmp_path):
+        # groups drawn using `color` after a material don't pick up its
+        # specular or emission colors
+        objFile = _writeObjFile(tmp_path)
+        (tmp_path / 'cube.mtl').write_text(
+            'newmtl blue\nKd 0 0 1\nKe 1 1 1\nKs 1 1 1\nNs 10\n')
+
+        stim = ObjMeshStim(
+            self.win, str(objFile), pos=(0, 0, -3), color=(-1, 1, -1))
+        reference = ObjMeshStim(
+            self.win, str(objFile), pos=(0, 0, -3), color=(-1, 1, -1),
+            loadMtllib=False)
+
+        _, side = self._renderFrontAndSide(stim)
+        _, expected = self._renderFrontAndSide(reference)
+        assert np.abs(side - expected).max() <= 2, (side, expected)
+
     def test_obj_draw_single_material(self, tmp_path):
         stim = ObjMeshStim(
             self.win, str(_writeObjFile(tmp_path)), pos=(0, 0, -3),
@@ -546,14 +629,19 @@ class TestStim3D:
         actual = self._renderObjFaces(objFile)
         assert np.abs(actual - expected).max() <= 2, (actual, expected)
 
-    @pytest.mark.parametrize('material', ['mtllib', 'single', None])
+    @pytest.mark.parametrize(
+        'material', ['mtllib', 'partial', 'empty', 'single', None])
     def test_draw_unbinds_vao(self, tmp_path, material):
         # VAOs drawn one after another are only unbound after the last one,
         # nothing may be left bound once drawing has finished
         stim = ObjMeshStim(
             self.win, str(_writeObjFile(tmp_path)), pos=(0, 0, -3),
-            loadMtllib=material == 'mtllib')
-        if material == 'single':
+            loadMtllib=material in ('mtllib', 'partial', 'empty'))
+        if material == 'partial':  # some groups are drawn using `color`
+            del stim.material['red']
+        elif material == 'empty':  # all groups are drawn using `color`
+            stim.material.clear()
+        elif material == 'single':
             stim.material = BlinnPhongMaterial(self.win)
         assert len(stim._vao) > 1
 
