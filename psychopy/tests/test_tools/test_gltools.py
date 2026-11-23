@@ -165,6 +165,52 @@ def test_mappedBuffer_range(vbo4x3):
     assert _readBuffer(vbo)[[0, 2, 3]].tolist() == data[[0, 2, 3]].tolist()
 
 
+def _isMapped(vbo):
+    mapped = GL.GLint()
+    GL.glBindBuffer(vbo.target, vbo.name)
+    GL.glGetBufferParameteriv(
+        vbo.target, GL.GL_BUFFER_MAPPED, ctypes.byref(mapped))
+    GL.glBindBuffer(vbo.target, 0)
+    return bool(mapped.value)
+
+
+def test_mappedBuffer_unmaps(vbo4x3):
+    vbo, _ = vbo4x3
+    with gt.mappedBuffer(vbo) as arr:
+        assert _isMapped(vbo)
+        arr[0] = -1
+    assert not _isMapped(vbo)
+    assert _readBuffer(vbo)[0].tolist() == [-1, -1, -1]
+
+
+def test_mappedBuffer_unmaps_on_exception(vbo4x3):
+    vbo, _ = vbo4x3
+    with pytest.raises(RuntimeError, match='in the block'):
+        with gt.mappedBuffer(vbo) as arr:
+            arr[0] = -1
+            raise RuntimeError('in the block')
+
+    # unmapped, and values written before the exception are kept
+    assert not _isMapped(vbo)
+    assert _readBuffer(vbo)[0].tolist() == [-1, -1, -1]
+    assert GL.glGetError() == GL.GL_NO_ERROR
+
+
+def test_mappedBuffer_unmaps_own_buffer(vbo4x3):
+    # binding another buffer in the block doesn't affect which is unmapped
+    vbo, _ = vbo4x3
+    other = gt.createVBO(np.zeros((2, 3), dtype=np.float32))
+    with gt.mappedBuffer(vbo) as arr:
+        gt.bindVBO(other)
+        arr[0] = -1
+    assert not _isMapped(vbo)
+    assert not _isMapped(other)
+    assert _readBuffer(vbo)[0].tolist() == [-1, -1, -1]
+    assert GL.glGetError() == GL.GL_NO_ERROR
+
+    gt.deleteVBO(other)
+
+
 @pytest.mark.parametrize('start, length', [
     (-1, 2), (0, 0), (0, 13), (10, 3), (12, None)])
 def test_mapBuffer_invalid_range(vbo4x3, start, length):

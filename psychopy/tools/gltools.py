@@ -4227,6 +4227,9 @@ def mappedBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False)
     """Context manager for mapping and unmapping a buffer. This is a convenience
     function for using :func:`mapBuffer` and :func:`unmapBuffer` together.
 
+    The buffer is always unmapped when the block exits, even if an exception
+    is raised in it, and the buffer is left bound afterwards.
+
     Parameters
     ----------
     vbo : VertexBufferInfo
@@ -4265,8 +4268,13 @@ def mappedBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False)
     
     """
     arr = mapBuffer(vbo, start, length, read, write, noSync)
-    yield arr
-    unmapBuffer(vbo)
+    try:
+        yield arr
+    finally:
+        # unmap even if an exception was raised in the block, rebinding first
+        # since `glUnmapBuffer` unmaps whichever buffer is bound
+        bindVBO(vbo)
+        unmapBuffer(vbo)
 
 
 def updateVBO(vbo, data, noSync=False):
