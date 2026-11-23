@@ -108,6 +108,75 @@ def test_drawVAO_start(win, indexType, instanceCount, count):
         gt.deleteVBO(indices)
 
 
+_TRIANGLES = np.array(
+    [[-1, -1], [0, -1], [-1, 0],  # lower-left triangle
+     [0, 0], [1, 0], [0, 1]],  # upper-right triangle
+    dtype=np.float32)
+
+
+def _renderClientArrays(win, attribs):
+    """Draw triangles with `drawClientArrays` in white on black, return which
+    pixels were drawn.
+    """
+    win.resetEyeTransform()
+    GL.glUseProgram(0)
+    GL.glClearColor(0., 0., 0., 1.)
+    GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+    GL.glColor4f(1., 1., 1., 1.)
+    gt.drawClientArrays(attribs, 'GL_TRIANGLES')
+    assert GL.glGetError() == GL.GL_NO_ERROR
+
+    frame = np.asarray(win.getMovieFrame(buffer='back'))[:, :, 0] > 128
+    win.movieFrames = []
+    win.flip()
+    return frame
+
+
+def _assertSameAsReference(win, attribs):
+    """Check triangles drawn from `attribs` match `_TRIANGLES` drawn from a
+    plain array.
+    """
+    expected = _renderClientArrays(win, {'gl_Vertex': _TRIANGLES})
+    actual = _renderClientArrays(win, attribs)
+    assert np.array_equal(actual, expected), \
+        '{} pixels differ'.format(np.count_nonzero(actual != expected))
+
+
+def test_drawClientArrays_reference(win):
+    # the reference draws the lower-left and upper-right triangles only
+    frame = _renderClientArrays(win, {'gl_Vertex': _TRIANGLES})
+    h, w = frame.shape
+    assert frame[int(h * 0.9), int(w * 0.1)]  # lower-left
+    assert frame[int(h * 0.4), int(w * 0.6)]  # upper-right
+    assert not frame[int(h * 0.1), int(w * 0.1)]  # upper-left
+    assert not frame[int(h * 0.9), int(w * 0.9)]  # lower-right
+
+
+@pytest.mark.parametrize('dtype', [np.float32, np.float64])
+def test_drawClientArrays_interleaved(win, dtype):
+    # attributes at an offset within interleaved rows
+    other = np.full((6, 3), 99, dtype=dtype)
+    interleaved, sizes, offsets = gt.interleaveAttributes(
+        [other, _TRIANGLES.astype(dtype)])
+    interleaved = interleaved.astype(dtype)
+    assert offsets[1] == 3
+    _assertSameAsReference(
+        win, {'gl_Vertex': (interleaved, sizes[1], offsets[1])})
+
+
+def test_drawClientArrays_non_contiguous(win):
+    # a view of some columns of a larger array
+    wide = np.hstack([np.full((6, 2), 99, dtype=np.float32), _TRIANGLES])
+    view = wide[:, 2:]
+    assert not view.flags['C_CONTIGUOUS']
+    _assertSameAsReference(win, {'gl_Vertex': view})
+
+
+def test_drawClientArrays_list(win):
+    # lists are vertex data, not attribute specifications
+    _assertSameAsReference(win, {'gl_Vertex': _TRIANGLES.tolist()})
+
+
 def test_drawVAO_invalid_range(win, vao):
     for start, count in [(-1, None), (4, None), (1, 3)]:
         with pytest.raises(ValueError):

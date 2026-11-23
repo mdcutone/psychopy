@@ -3613,15 +3613,20 @@ def drawClientArrays(attribBuffers, mode=GL.GL_TRIANGLES, indexBuffer=None):
     ----------
     attribBuffers : dict
         Attributes and associated buffers to draw. Keys are vertex attribute
-        pointer indices, values are buffer arrays. Values can be `tuples` where
-        the first value is the buffer array, the second is the number of
-        attribute components (`int`, either 2, 3 or 4), the third is the offset
-        (`int`), and the last is whether to normalize the array (`bool`). Buffer
-        arrays may be `numpy` arrays or lists. If lists, the arrays will be
-        converted to `numpy` arrays with `float` (`GL_DOUBLE`) data type.
-    mode : int
+        pointer indices or names (e.g. `'gl_Vertex'`, see `VERTEX_ATTRIBS`),
+        values are 2D buffer arrays with a row per vertex. Values can be
+        `tuples` where the first value is the buffer array, the second is the
+        number of attribute components (`int`, either 2, 3 or 4), the third is
+        the offset of the attribute in each row in values (`int`, for
+        interleaved arrays), and the last is whether to normalize the array
+        (`bool`). Buffer arrays may be `numpy` arrays or lists. If lists, the
+        arrays will be converted to `numpy` arrays with `float` (`GL_DOUBLE`)
+        data type. Arrays which aren't contiguous in memory (e.g. slices of
+        columns) are copied.
+    mode : int or str
         Drawing mode to use (e.g. GL_TRIANGLES, GL_QUADS, GL_POINTS, etc.) for
-        rasterization.
+        rasterization. Strings can be used for convenience (e.g.
+        `'GL_TRIANGLES'`).
     indexBuffer : VertexBufferInfo
         Optional index buffer. If `None`, `glDrawArrays` is used, else
         `glDrawElements` is used. The index buffer must be a 2D array that is
@@ -3638,11 +3643,11 @@ def drawClientArrays(attribBuffers, mode=GL.GL_TRIANGLES, indexBuffer=None):
             'gl_Vertex': vertexPos,  # vertex positions
             'gl_Color': vertexColors}  # per vertex colors
 
-        drawClientArrays('triangles', attribArrays)
+        drawClientArrays(attribArrays, 'GL_TRIANGLES')
 
     Drawing using index buffers::
 
-        vertex, normal, texCoord, faces = createAnnulus()  # ring geometry
+        vertex, texCoord, normal, faces = createAnnulus()  # ring geometry
 
         # bind and setup shader uniforms here...
 
@@ -3650,23 +3655,24 @@ def drawClientArrays(attribBuffers, mode=GL.GL_TRIANGLES, indexBuffer=None):
             'gl_Vertex': vertex,
             'gl_Normal': normal,
             'gl_MultiTexCoord0': texCoord}
-        
-        drawClientArrays('triangles', attribs, indexBuffer=faces)
+
+        drawClientArrays(attribs, 'GL_TRIANGLES', indexBuffer=faces)
 
     Using interleaved arrays is recommended for greater performance, all
-    attributes are stored in a single array which reduces the number of 
+    attributes are stored in a single array which reduces the number of
     binding calls::
 
-        vertex, normal, texCoord, faces = createPlane()  # square
-        interleaved, sizes, offsets = interleaveArrays(
+        vertex, texCoord, normal, faces = createPlane()  # square
+        interleaved, sizes, offsets = interleaveAttributes(
             [vertex, normal, texCoord])
 
         # interleaved array layout: 000111222
         attribs = {}
-        for i, attrib in enumerate('gl_Vertex', 'gl_Normal', 'gl_TexCoord'):
+        for i, attrib in enumerate(
+                ['gl_Vertex', 'gl_Normal', 'gl_MultiTexCoord0']):
             attribs[attrib] = (interleaved, sizes[i], offsets[i])
 
-        drawClientArrays('triangles', attribs, indexBuffer=faces)
+        drawClientArrays(attribs, 'GL_TRIANGLES', indexBuffer=faces)
 
     """
     mode = _getGLEnum(mode)
@@ -3686,57 +3692,63 @@ def drawClientArrays(attribBuffers, mode=GL.GL_TRIANGLES, indexBuffer=None):
             raise ValueError('Index buffer must be 2D array.')
 
     boundArrays = []
+    arrays = []  # keep arrays alive until drawn, GL only stores pointers
     for arrIdx, buffer in attribBuffers.items():
         if isinstance(arrIdx, str):
             arrIdx= VERTEX_ATTRIBS.get(arrIdx, None)
             if arrIdx is None:
                 raise ValueError('Invalid attribute name specified.')
 
-        if isinstance(buffer, (list, tuple,)):
-            normalize = False
+        size = None
+        offset = 0
+        normalize = False
+        if isinstance(buffer, tuple):
             nVals = len(buffer)
             if nVals == 1:
-                buffer = buffer[0]  # size 1 tuple or list eg. (buffer,)
-                size = buffer.shape[1]
-                offset = 0
+                buffer, = buffer  # size 1 tuple eg. (buffer,)
             elif nVals == 2:
                 buffer, size = buffer
-                offset = 0
             elif nVals == 3:
                 buffer, size, offset = buffer
             elif nVals == 4:
                 buffer, size, offset, normalize = buffer
             else:
                 raise ValueError('Invalid attribute values.')
-        else:
-            size = buffer.shape[1]
-            offset = 0
-            normalize = False
 
-        # make sure the buffer is contiguous array
-        if not isinstance(buffer, np.ndarray): 
+        # make sure the buffer is a contiguous array, GL reads rows from memory
+        # so views (e.g. slices of columns) must be copied, this does nothing
+        # if the array is already contiguous
+        if isinstance(buffer, np.ndarray):
+            buffer = np.ascontiguousarray(buffer)
+        else:
             buffer = np.ascontiguousarray(buffer, dtype=float)
+        arrays.append(buffer)
 
         if buffer.ndim != 2:
             raise ValueError(
                 'Buffer {} must be 2D array.'.format(arrIdx))
-        
+
+        if size is None:
+            size = buffer.shape[1]
+
         numVertices = buffer.shape[0]
-        
+
         # enable and set attribute pointers
         GL.glEnableVertexAttribArray(arrIdx)
-        
+
         arrayTypes = ARRAY_TYPES.get(buffer.dtype.type, None)
         if arrayTypes is None:
             raise ValueError('Unable to determine data type from buffer.')
 
+        # `offset` is in values, rows of interleaved arrays are `stride` bytes
+        # apart
         GL.glVertexAttribPointer(
             arrIdx,
             size,
             arrayTypes[0],
             GL.GL_TRUE if normalize else GL.GL_FALSE,
-            offset,
-            buffer.ctypes)
+            buffer.strides[0],
+            ctypes.c_void_p(buffer.ctypes.data + offset * buffer.itemsize))
 
         boundArrays.append(arrIdx)
 
