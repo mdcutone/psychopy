@@ -211,6 +211,76 @@ def test_mappedBuffer_unmaps_own_buffer(vbo4x3):
     gt.deleteVBO(other)
 
 
+@pytest.mark.parametrize('kwargs, expected', [
+    ({}, GL.GL_MAP_READ_BIT | GL.GL_MAP_WRITE_BIT),
+    ({'read': False}, GL.GL_MAP_WRITE_BIT),
+    ({'write': False}, GL.GL_MAP_READ_BIT),
+    # reading isn't allowed when not synchronizing or invalidating
+    ({'noSync': True}, GL.GL_MAP_WRITE_BIT | GL.GL_MAP_UNSYNCHRONIZED_BIT),
+    ({'invalidate': True},
+     GL.GL_MAP_WRITE_BIT | GL.GL_MAP_INVALIDATE_BUFFER_BIT),
+    ({'invalidate': True, 'start': 3, 'length': 3},
+     GL.GL_MAP_WRITE_BIT | GL.GL_MAP_INVALIDATE_RANGE_BIT),
+    ({'invalidate': True, 'noSync': True},
+     GL.GL_MAP_WRITE_BIT | GL.GL_MAP_INVALIDATE_BUFFER_BIT |
+     GL.GL_MAP_UNSYNCHRONIZED_BIT),
+])
+def test_mapBuffer_access_flags(vbo4x3, kwargs, expected):
+    vbo, _ = vbo4x3
+    gt.mapBuffer(vbo, **kwargs)
+    flags = GL.GLint()
+    GL.glGetBufferParameteriv(
+        vbo.target, GL.GL_BUFFER_ACCESS_FLAGS, ctypes.byref(flags))
+    assert gt.unmapBuffer(vbo)
+    gt.unbindVBO(vbo)
+
+    assert flags.value == expected
+    assert GL.glGetError() == GL.GL_NO_ERROR
+
+
+def test_mapBuffer_invalidate_range(vbo4x3):
+    # only the mapped values are discarded
+    vbo, data = vbo4x3
+    with gt.mappedBuffer(vbo, start=3, length=3, invalidate=True) as arr:
+        arr[:] = -1
+    gt.unbindVBO(vbo)
+
+    expected = data.copy()
+    expected[1] = -1
+    assert _readBuffer(vbo).tolist() == expected.tolist()
+
+
+@pytest.mark.parametrize('kwargs', [
+    {'read': False, 'write': False},
+    {'write': False, 'noSync': True},
+    {'write': False, 'invalidate': True},
+])
+def test_mapBuffer_no_access(vbo4x3, kwargs):
+    vbo, _ = vbo4x3
+    with pytest.raises(ValueError):
+        gt.mapBuffer(vbo, **kwargs)
+    assert not _isMapped(vbo)
+
+
+@pytest.mark.parametrize('noSync', [False, True])
+def test_updateVBO(vbo4x3, monkeypatch, noSync):
+    vbo, data = vbo4x3
+
+    # the buffer is only mapped for writing, and invalidated if `noSync`
+    calls = []
+    mapBuffer = gt.mapBuffer
+    def spyMapBuffer(*args, **kwargs):
+        calls.append(kwargs)
+        return mapBuffer(*args, **kwargs)
+    monkeypatch.setattr(gt, 'mapBuffer', spyMapBuffer)
+
+    assert gt.updateVBO(vbo, -data, noSync=noSync)
+    gt.unbindVBO(vbo)
+    assert calls == [{'read': False, 'invalidate': noSync}]
+    assert _readBuffer(vbo).tolist() == (-data).tolist()
+    assert GL.glGetError() == GL.GL_NO_ERROR
+
+
 @pytest.mark.parametrize('start, length', [
     (-1, 2), (0, 0), (0, 13), (10, 3), (12, None)])
 def test_mapBuffer_invalid_range(vbo4x3, start, length):

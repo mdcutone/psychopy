@@ -4075,7 +4075,8 @@ def unbindVBO(vbo):
         raise TypeError('Specified `vbo` is not a `VertexBufferInfo`.')
 
 
-def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False):
+def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False,
+              invalidate=False):
     """Map a vertex buffer object to client memory. This allows you to modify
     its contents.
 
@@ -4103,15 +4104,27 @@ def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False):
         `start` to the end of the buffer are mapped.
     read : bool, optional
         Allow data to be read from the buffer (sets `GL_MAP_READ_BIT`). This is
-        ignored if `noSync` is `True`.
+        ignored if `noSync` or `invalidate` is `True`, which don't allow
+        reading.
     write : bool, optional
         Allow data to be written to the buffer (sets `GL_MAP_WRITE_BIT`).
     noSync : bool, optional
-        If `True`, GL will not wait until the buffer is free (i.e. not being
-        processed by the GPU) to map it (sets `GL_MAP_UNSYNCHRONIZED_BIT`). The
-        contents of the previous storage buffer are discarded and the driver
-        returns a new one. This prevents the CPU from stalling until the buffer
-        is available.
+        If `True`, GL will not wait until the GPU has finished using the buffer
+        (e.g. drawing a previous frame with it) before mapping it (sets
+        `GL_MAP_UNSYNCHRONIZED_BIT`). This prevents the CPU from stalling, but
+        the previous contents are kept and nothing prevents them from being
+        changed while the GPU is still reading them, which may result in
+        rendering partially updated data. Only use this if you're sure the
+        values being written aren't in use (e.g. a part of the buffer which
+        isn't drawn), otherwise use `invalidate` instead.
+    invalidate : bool, optional
+        If `True`, the previous contents of the mapped values are discarded
+        (sets `GL_MAP_INVALIDATE_BUFFER_BIT` if the whole buffer is mapped, or
+        else `GL_MAP_INVALIDATE_RANGE_BIT`). The driver may then provide new
+        memory instead of waiting for the GPU to finish using the buffer, so
+        the CPU doesn't stall and rendering isn't affected. Use this if every
+        mapped value will be overwritten, since their values are undefined
+        until written. Values outside the mapped range are kept.
 
     Returns
     -------
@@ -4125,7 +4138,8 @@ def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False):
     Raises
     ------
     ValueError
-        If the range of values isn't within the buffer.
+        If the range of values isn't within the buffer, or the buffer would be
+        mapped without allowing reading or writing.
     RuntimeError
         If the buffer can't be mapped.
 
@@ -4171,14 +4185,26 @@ def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False):
     else:
         shape = (length,)
 
-    accessFlags = GL.GL_NONE
-    if noSync:  # if set, don't set GL_MAP_READ_BIT
-        accessFlags |= GL.GL_MAP_UNSYNCHRONIZED_BIT
-    elif read:
-        accessFlags |= GL.GL_MAP_READ_BIT
+    # reading isn't allowed when mapping without synchronization or when
+    # invalidating, GL raises an error if `GL_MAP_READ_BIT` is combined with
+    # either
+    read = read and not (noSync or invalidate)
+    if not (read or write):
+        raise ValueError(
+            "Buffer must be mapped for reading or writing, reading is not "
+            "possible if `noSync` or `invalidate` is `True`.")
 
+    accessFlags = GL.GL_NONE
+    if read:
+        accessFlags |= GL.GL_MAP_READ_BIT
     if write:
         accessFlags |= GL.GL_MAP_WRITE_BIT
+    if noSync:
+        accessFlags |= GL.GL_MAP_UNSYNCHRONIZED_BIT
+    if invalidate:
+        accessFlags |= GL.GL_MAP_INVALIDATE_BUFFER_BIT \
+            if start == 0 and length == nValues \
+            else GL.GL_MAP_INVALIDATE_RANGE_BIT
 
     bindVBO(vbo)  # bind the buffer for mapping
 
@@ -4223,7 +4249,8 @@ def unmapBuffer(vbo):
 
 
 @contextmanager
-def mappedBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False):
+def mappedBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False,
+                 invalidate=False):
     """Context manager for mapping and unmapping a buffer. This is a convenience
     function for using :func:`mapBuffer` and :func:`unmapBuffer` together.
 
@@ -4242,15 +4269,18 @@ def mappedBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False)
         `start` to the end of the buffer are mapped.
     read : bool, optional
         Allow data to be read from the buffer (sets `GL_MAP_READ_BIT`). This is
-        ignored if `noSync` is `True`.
+        ignored if `noSync` or `invalidate` is `True`.
     write : bool, optional
         Allow data to be written to the buffer (sets `GL_MAP_WRITE_BIT`).
     noSync : bool, optional
-        If `True`, GL will not wait until the buffer is free (i.e. not being
-        processed by the GPU) to map it (sets `GL_MAP_UNSYNCHRONIZED_BIT`). The
-        contents of the previous storage buffer are discarded and the driver
-        returns a new one. This prevents the CPU from stalling until the buffer
-        is available
+        Map the buffer without waiting for the GPU to finish using it (sets
+        `GL_MAP_UNSYNCHRONIZED_BIT`). See :func:`mapBuffer` for the risks of
+        this, use `invalidate` instead if all mapped values will be
+        overwritten.
+    invalidate : bool, optional
+        Discard the previous contents of the mapped values, so the CPU doesn't
+        stall waiting for the GPU to finish using them. Use this if all mapped
+        values will be overwritten, see :func:`mapBuffer`.
 
     Yields
     ------
@@ -4267,7 +4297,7 @@ def mappedBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False)
             arr[:, :] += 2.0
     
     """
-    arr = mapBuffer(vbo, start, length, read, write, noSync)
+    arr = mapBuffer(vbo, start, length, read, write, noSync, invalidate)
     try:
         yield arr
     finally:
@@ -4291,11 +4321,12 @@ def updateVBO(vbo, data, noSync=False):
         New data to write to the buffer. The shape of the data must match the
         shape of the buffer.
     noSync : bool, optional
-        If `True`, GL will not wait until the buffer is free (i.e. not being
-        processed by the GPU) to map it (sets `GL_MAP_UNSYNCHRONIZED_BIT`). The
-        contents of the previous storage buffer are discarded and the driver
-        returns a new one. This prevents the CPU from stalling until the buffer
-        is available.
+        If `True`, GL will not wait until the GPU has finished using the buffer
+        (e.g. drawing a previous frame with it) before updating it. The
+        contents of the previous storage are discarded and the driver may
+        provide new storage (sets `GL_MAP_INVALIDATE_BUFFER_BIT`). This
+        prevents the CPU from stalling until the buffer is available, and is
+        safe since every value in the buffer is replaced.
 
     Returns
     -------
@@ -4323,7 +4354,9 @@ def updateVBO(vbo, data, noSync=False):
         raise ValueError('Data shape does not match VBO shape, expected {} '
                          'but got {}.'.format(vbo.shape, data.shape))
 
-    mappedArray = mapBuffer(vbo, noSync=noSync)
+    # all values are replaced, so the buffer never needs to be read and its
+    # previous contents can be discarded
+    mappedArray = mapBuffer(vbo, read=False, invalidate=noSync)
     mappedArray[:, :] = data[:, :]  # transfer data to GPU buffer array
 
     return unmapBuffer(vbo)
