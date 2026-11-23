@@ -3680,9 +3680,12 @@ def drawClientArrays(attribBuffers, mode=GL.GL_TRIANGLES, indexBuffer=None):
         raise ValueError('Invalid drawing mode specified.')
 
     GL.glEnable(GL.GL_VERTEX_ARRAY)
+    # unbind any VAO first, the index buffer binding is part of the bound VAO's
+    # state so unbinding it while a VAO is bound would remove the VAO's index
+    # buffer
+    GL.glBindVertexArray(0)
     GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
     GL.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, 0)
-    GL.glBindVertexArray(0)
 
     useIndexBuffer = indexBuffer is not None
     if useIndexBuffer:
@@ -3914,6 +3917,54 @@ class VertexBufferInfo:
         return isValid
 
 
+# queries for the buffer bound to each target
+_BUFFER_BINDING_QUERIES = {
+    GL.GL_ARRAY_BUFFER: GL.GL_ARRAY_BUFFER_BINDING,
+    GL.GL_ELEMENT_ARRAY_BUFFER: GL.GL_ELEMENT_ARRAY_BUFFER_BINDING}
+
+
+def _getBufferBinding(target):
+    """Get the buffer bound to `target` so it can be restored later with
+    `_restoreBufferBinding`.
+
+    The index buffer binding (`GL_ELEMENT_ARRAY_BUFFER`) is part of the state
+    of the bound VAO, so changing it while a VAO is bound changes which index
+    buffer the VAO draws with. The bound VAO is recorded for index buffers so
+    the binding is only restored for the same VAO.
+
+    Returns
+    -------
+    tuple or None
+        The target, buffer name and VAO name (`None` if not an index buffer),
+        or `None` if bindings of `target` aren't tracked.
+
+    """
+    query = _BUFFER_BINDING_QUERIES.get(target)
+    if query is None:
+        return None
+
+    vao = None
+    if target == GL.GL_ELEMENT_ARRAY_BUFFER:
+        vao = getIntegerv(GL.GL_VERTEX_ARRAY_BINDING)
+
+    return target, getIntegerv(query), vao
+
+
+def _restoreBufferBinding(binding):
+    """Restore a buffer binding returned by `_getBufferBinding`. Index buffer
+    bindings are only restored if the same VAO is bound, so the index buffer
+    of another VAO isn't changed.
+    """
+    if binding is None:
+        return
+
+    target, name, vao = binding
+    if vao is not None and getIntegerv(GL.GL_VERTEX_ARRAY_BINDING) != vao:
+        return
+
+    GL.glBindBuffer(target, name)
+
+
 def createVBO(data,
               target=GL.GL_ARRAY_BUFFER,
               dataType=None,
@@ -4035,10 +4086,15 @@ def createVBO(data,
     bufferName = GL.GLuint()
     GL.glGenBuffers(1, ctypes.byref(bufferName))
 
-    # bind and upload
+    # bind and upload, then restore the previous binding so the index buffer
+    # of a bound VAO isn't changed
+    previousBinding = _getBufferBinding(target)
     GL.glBindBuffer(target, bufferName)
     GL.glBufferData(target, bufferSize, bufferPtr, usage)
-    GL.glBindBuffer(target, 0)
+    if previousBinding is not None:
+        _restoreBufferBinding(previousBinding)
+    else:
+        GL.glBindBuffer(target, 0)
 
     vboInfo = VertexBufferInfo(
         bufferName,
@@ -4096,6 +4152,9 @@ def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False,
     If planning to update VBO vertex data, make sure the VBO `usage` types are
     `GL_DYNAMIC_*` or `GL_STREAM_*` or else serious performance issues may
     arise.
+
+    The buffer is bound to its target while mapped, :func:`unmapBuffer` binds
+    the previously bound buffer again.
 
     Warnings
     --------
@@ -4219,7 +4278,10 @@ def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False,
             if start == 0 and length == nValues \
             else GL.GL_MAP_INVALIDATE_RANGE_BIT
 
-    bindVBO(vbo)  # bind the buffer for mapping
+    # bind the buffer for mapping, the previous binding is restored by
+    # `unmapBuffer`
+    previousBinding = _getBufferBinding(vbo.target)
+    bindVBO(vbo)
 
     # get pointer to the buffer, offsets are in bytes
     bufferPtr = GL.glMapBufferRange(
@@ -4229,9 +4291,13 @@ def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False,
         accessFlags)
 
     if not bufferPtr:  # don't create an array from a null pointer
+        glError = GL.glGetError()
+        _restoreBufferBinding(previousBinding)
         raise RuntimeError(
             "Failed to map buffer, `glMapBufferRange` returned NULL (GL error "
-            "{}).".format(GL.glGetError()))
+            "{}).".format(glError))
+
+    vbo.userData['_bindingBeforeMap'] = previousBinding
 
     bufferArray = np.ctypeslib.as_array(
         ctypes.cast(bufferPtr, ctypes.POINTER(glType)),
@@ -4246,6 +4312,12 @@ def unmapBuffer(vbo):
     called. Failing to call this before using the buffer could result in a
     system error.
 
+    The buffer bound to the target of `vbo` before :func:`mapBuffer` was called
+    is bound again afterwards. Index buffer bindings are part of the state of
+    the bound VAO, these are restored for the VAO which was bound when the
+    buffer was mapped, so mapping a buffer never changes the index buffer of
+    any VAO.
+
     Parameters
     ----------
     vbo : VertexBufferInfo
@@ -4258,7 +4330,29 @@ def unmapBuffer(vbo):
         data was corrupted for some reason and needs to be resubmitted.
 
     """
-    return GL.glUnmapBuffer(vbo.target) == GL.GL_TRUE
+    bindingBeforeMap = vbo.userData.pop('_bindingBeforeMap', None)
+    bindingBeforeUnmap = _getBufferBinding(vbo.target)
+
+    # `glUnmapBuffer` unmaps whichever buffer is bound to the target
+    bindVBO(vbo)
+    success = GL.glUnmapBuffer(vbo.target) == GL.GL_TRUE
+
+    if bindingBeforeMap is None:  # not mapped by `mapBuffer`
+        _restoreBufferBinding(bindingBeforeUnmap)
+    elif bindingBeforeMap[2] is None or \
+            bindingBeforeMap[2] == bindingBeforeUnmap[2]:
+        # restore the binding from before the buffer was mapped
+        _restoreBufferBinding(bindingBeforeMap)
+    else:
+        # a different VAO was bound while the index buffer was mapped, restore
+        # the index buffer of the VAO bound when mapping, then of this one
+        target, name, vao = bindingBeforeMap
+        _glBindVertexArray(vao)
+        GL.glBindBuffer(target, name)
+        _glBindVertexArray(bindingBeforeUnmap[2])
+        _restoreBufferBinding(bindingBeforeUnmap)
+
+    return success
 
 
 @contextmanager
@@ -4268,7 +4362,8 @@ def mappedBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False,
     function for using :func:`mapBuffer` and :func:`unmapBuffer` together.
 
     The buffer is always unmapped when the block exits, even if an exception
-    is raised in it, and the buffer is left bound afterwards.
+    is raised in it, and the buffer previously bound to its target is bound
+    again (see :func:`unmapBuffer`).
 
     Parameters
     ----------
@@ -4314,9 +4409,7 @@ def mappedBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False,
     try:
         yield arr
     finally:
-        # unmap even if an exception was raised in the block, rebinding first
-        # since `glUnmapBuffer` unmaps whichever buffer is bound
-        bindVBO(vbo)
+        # unmap even if an exception was raised in the block
         unmapBuffer(vbo)
 
 
@@ -4370,7 +4463,7 @@ def updateVBO(vbo, data, noSync=False):
     # all values are replaced, so the buffer never needs to be read and its
     # previous contents can be discarded
     mappedArray = mapBuffer(vbo, read=False, invalidate=noSync)
-    mappedArray[:, :] = data[:, :]  # transfer data to GPU buffer array
+    mappedArray[...] = data  # transfer data to GPU buffer array, any shape
 
     return unmapBuffer(vbo)
 

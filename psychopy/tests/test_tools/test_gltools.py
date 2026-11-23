@@ -177,6 +177,127 @@ def test_drawClientArrays_list(win):
     _assertSameAsReference(win, {'gl_Vertex': _TRIANGLES.tolist()})
 
 
+def _createIndexBuffer(n=6):
+    return gt.createVBO(
+        np.arange(n, dtype=np.uint32), target=GL.GL_ELEMENT_ARRAY_BUFFER,
+        dataType=GL.GL_UNSIGNED_INT)
+
+
+@pytest.fixture
+def indexedVAO(win):
+    """VAO drawing `_TRIANGLES` with an index buffer, and its index buffer."""
+    vertices = gt.createVBO(
+        np.hstack([_TRIANGLES, np.zeros((6, 1), np.float32)]))
+    indices = _createIndexBuffer()
+    vao = gt.createVAO(
+        {GL.GL_VERTEX_ARRAY: vertices}, indexBuffer=indices, legacy=True)
+    yield vao, indices
+    gt._glBindVertexArray(0)
+    gt.deleteVAO(vao)
+    gt.deleteVBO(vertices)
+    gt.deleteVBO(indices)
+
+
+def _vaoIndexBuffer(vao):
+    """Get the index buffer of a VAO, leaving the bound VAO unchanged."""
+    bound = _boundVAO()
+    gt._glBindVertexArray(vao.name)
+    name = _getInteger(GL.GL_ELEMENT_ARRAY_BUFFER_BINDING)
+    gt._glBindVertexArray(bound)
+    return name
+
+
+def _assertVAOIntact(win, vao, indices):
+    assert _vaoIndexBuffer(vao) == indices.name.value
+    assert _drawnTriangles(win, vao) == (True, True)
+
+
+def test_createVBO_keeps_bindings(win, indexedVAO):
+    vao, indices = indexedVAO
+    other = gt.createVBO(np.zeros((2, 3), dtype=np.float32))
+
+    gt._glBindVertexArray(vao.name)
+    gt.bindVBO(other)
+    newIndices = _createIndexBuffer()
+    newVertices = gt.createVBO(np.zeros((2, 3), dtype=np.float32))
+    assert _getInteger(GL.GL_ARRAY_BUFFER_BINDING) == other.name.value
+    gt.unbindVBO(other)
+    gt._glBindVertexArray(0)
+
+    _assertVAOIntact(win, vao, indices)
+    for buffer in (other, newIndices, newVertices):
+        gt.deleteVBO(buffer)
+
+
+@pytest.mark.parametrize('method', ['mapBuffer', 'mappedBuffer', 'updateVBO'])
+def test_mapBuffer_keeps_bindings(win, indexedVAO, method):
+    # mapping another index buffer while a VAO is bound doesn't change the
+    # VAO's index buffer, and array buffer bindings are restored too
+    vao, indices = indexedVAO
+    other = gt.createVBO(np.zeros((2, 3), dtype=np.float32))
+    otherIndices = _createIndexBuffer()
+    vertices = gt.createVBO(
+        np.zeros((2, 3), dtype=np.float32), usage=GL.GL_DYNAMIC_DRAW)
+
+    gt._glBindVertexArray(vao.name)
+    gt.bindVBO(other)
+    for vbo in (otherIndices, vertices):
+        if method == 'mapBuffer':
+            gt.mapBuffer(vbo)
+            assert gt.unmapBuffer(vbo)
+        elif method == 'mappedBuffer':
+            with gt.mappedBuffer(vbo):
+                pass
+        else:
+            assert gt.updateVBO(vbo, np.zeros(vbo.shape))
+    assert _getInteger(GL.GL_ELEMENT_ARRAY_BUFFER_BINDING) == \
+        indices.name.value
+    assert _getInteger(GL.GL_ARRAY_BUFFER_BINDING) == other.name.value
+    gt.unbindVBO(other)
+    gt._glBindVertexArray(0)
+
+    _assertVAOIntact(win, vao, indices)
+    assert GL.glGetError() == GL.GL_NO_ERROR
+    for buffer in (other, otherIndices, vertices):
+        gt.deleteVBO(buffer)
+
+
+def test_unmapBuffer_other_vao_bound(win, indexedVAO):
+    # changing the bound VAO while an index buffer is mapped doesn't change
+    # the index buffer of either VAO
+    vao, indices = indexedVAO
+    otherIndices = _createIndexBuffer()
+    otherVAO = gt.createVAO(
+        {GL.GL_VERTEX_ARRAY: gt.createVBO(np.zeros((3, 3), np.float32))},
+        indexBuffer=otherIndices, legacy=True)
+    mapped = _createIndexBuffer()
+
+    gt._glBindVertexArray(vao.name)
+    gt.mapBuffer(mapped)
+    gt._glBindVertexArray(otherVAO.name)
+    assert gt.unmapBuffer(mapped)
+    assert _boundVAO() == otherVAO.name
+    gt._glBindVertexArray(0)
+
+    assert _vaoIndexBuffer(otherVAO) == otherIndices.name.value
+    _assertVAOIntact(win, vao, indices)
+    assert GL.glGetError() == GL.GL_NO_ERROR
+
+    for buffer in [otherIndices, mapped] + list(
+            otherVAO.activeAttribs.values()):
+        gt.deleteVBO(buffer)
+    gt.deleteVAO(otherVAO)
+
+
+def test_drawClientArrays_keeps_vao_index_buffer(win, indexedVAO):
+    # drawing client arrays while a VAO is bound doesn't remove its index
+    # buffer
+    vao, indices = indexedVAO
+    gt._glBindVertexArray(vao.name)
+    _renderClientArrays(win, {'gl_Vertex': _TRIANGLES})
+    _assertVAOIntact(win, vao, indices)
+
+
 def test_drawVAO_invalid_range(win, vao):
     for start, count in [(-1, None), (4, None), (1, 3)]:
         with pytest.raises(ValueError):
@@ -329,6 +450,19 @@ def test_mapBuffer_no_access(vbo4x3, kwargs):
     with pytest.raises(ValueError):
         gt.mapBuffer(vbo, **kwargs)
     assert not _isMapped(vbo)
+
+
+def test_updateVBO_1d(win):
+    # index buffers are 1D
+    indices = _createIndexBuffer()
+    assert gt.updateVBO(indices, np.arange(6)[::-1])
+    data = np.zeros(6, dtype=np.uint32)
+    GL.glBindBuffer(indices.target, indices.name)
+    GL.glGetBufferSubData(
+        indices.target, 0, indices.size, data.ctypes.data_as(ctypes.c_void_p))
+    GL.glBindBuffer(indices.target, 0)
+    assert data.tolist() == [5, 4, 3, 2, 1, 0]
+    gt.deleteVBO(indices)
 
 
 @pytest.mark.parametrize('noSync', [False, True])
