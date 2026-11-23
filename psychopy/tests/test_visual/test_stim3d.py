@@ -772,6 +772,78 @@ class TestStim3D:
         with pytest.raises(TypeError):
             SceneSkybox(self.win, tex='face.png')
 
+    @staticmethod
+    def _writeSkyFaces(tmp_path):
+        faces = []
+        for i in range(6):
+            path = tmp_path / 'face{}.png'.format(i)
+            Image.new('RGB', (8, 8), (255, 0, 0)).save(path)
+            faces.append(str(path))
+        return faces
+
+    def test_skybox_draw_with_window(self, tmp_path):
+        # passing the window explicitly makes it current before drawing
+        sky = SceneSkybox(self.win, tex=self._writeSkyFaces(tmp_path))
+        self.win.setPerspectiveView()
+        sky.draw(self.win)
+        self.win.resetEyeTransform()
+        self.win.flip()
+        sky.free()
+
+    def test_skybox_free(self, tmp_path):
+        sky = SceneSkybox(self.win, tex=self._writeSkyFaces(tmp_path))
+        vaoNames, bufferNames = self._glNames(sky)
+        cubemapName = sky.skyCubeMap.name.value
+        program = sky._shaderProg
+        assert GL.glIsTexture(cubemapName) and GL.glIsProgram(program)
+
+        sky.free()
+        assert not any(GL.glIsVertexArray(n) for n in vaoNames)
+        assert not any(GL.glIsBuffer(n) for n in bufferNames)
+        assert not GL.glIsTexture(cubemapName)
+        assert not GL.glIsProgram(program)
+        assert sky.skyCubeMap is None
+
+        # nothing is drawn afterwards, and freeing again does nothing
+        frame = self._render(sky)
+        assert np.all(frame == frame[0, 0])
+        sky.free()
+        assert GL.glGetError() == GL.GL_NO_ERROR
+
+    def test_skybox_free_keeps_user_cubemap(self, tmp_path):
+        # cubemaps assigned by the user aren't freed
+        owner = SceneSkybox(self.win, tex=self._writeSkyFaces(tmp_path))
+        cubemap = owner.skyCubeMap
+        sky = SceneSkybox(self.win, tex=cubemap)
+        sky.free()
+        assert GL.glIsTexture(cubemap.name.value)
+        assert sky.skyCubeMap is cubemap
+
+        owner.free()
+        assert not GL.glIsTexture(cubemap.name.value)
+
+    # --------------------------------------------------------------------------
+    # Colors
+    #
+
+    @pytest.mark.parametrize('colorSpace, color', [
+        ('rgb', (1, -1, -1)), ('rgb1', (1, 0, 0)), ('rgb255', (255, 0, 0))])
+    def test_material_color_space(self, colorSpace, color):
+        # the color space applies to colors given to the constructor
+        mat = BlinnPhongMaterial(
+            self.win, diffuseColor=color, specularColor=color,
+            ambientColor=color, emissionColor=color, colorSpace=colorSpace)
+        for attrib in ('diffuse', 'specular', 'ambient', 'emission'):
+            assert getattr(mat, attrib + 'RGB') == pytest.approx([1, 0, 0])
+            assert getattr(mat, attrib + 'Color') == pytest.approx(color)
+
+    @pytest.mark.parametrize('stimClass', [SphereStim, BoxStim, PlaneStim])
+    def test_contrast_argument(self, stimClass):
+        # contrast given to the constructor is applied to `color`
+        stim = stimClass(self.win, color=(1, 1, 1), contrast=0.0)
+        assert stim.contrast == 0.0
+        assert stim._foreColor.render('rgb1') == pytest.approx([0.5] * 3)
+
 
 class _Stim3DRenderTest:
     """Base class for tests which render 3D stimuli and check the resulting

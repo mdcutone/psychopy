@@ -79,6 +79,31 @@ def test_depthFunc_invalid(win):
         win.depthFunc = 'sometimes'
 
 
+def test_bindTexture_default_target(win):
+    texData = np.zeros((4, 4, 4), dtype=np.uint8)
+    texture = gt.createTexImage2D(
+        4, 4, internalFormat=GL.GL_RGBA, pixelFormat=GL.GL_RGBA,
+        dataType=GL.GL_UNSIGNED_BYTE, data=texData.ctypes, unpackAlignment=1)
+    name = texture.name.value
+
+    # the target is taken from the descriptor, or `GL_TEXTURE_2D` otherwise
+    for tex in (texture, name, GL.GLuint(name)):
+        gt.bindTexture(tex)
+        assert _getInteger(GL.GL_TEXTURE_BINDING_2D) == name
+        gt.bindTexture(None)
+        assert _getInteger(GL.GL_TEXTURE_BINDING_2D) == 0
+
+    gt.deleteTexture(texture)
+
+
+def test_SimpleMaterial_deprecated():
+    with pytest.warns(DeprecationWarning, match='BlinnPhongMaterial'):
+        try:
+            gt.SimpleMaterial()
+        except AttributeError:
+            pass  # only the warning is tested, the class is known to be broken
+
+
 # ------------------------------------------------------------------------------
 # OBJ loading, does not require a GL context
 #
