@@ -653,6 +653,92 @@ class TestStim3D:
             assert binding.value == 0, thisStim
 
     # --------------------------------------------------------------------------
+    # Freeing resources
+    #
+
+    @staticmethod
+    def _glNames(stim):
+        """Get the names of the VAOs and buffers used by a stimulus."""
+        def name(obj):
+            return getattr(obj.name, 'value', obj.name)
+
+        vaos = (list(stim._vao.values()) if isinstance(stim._vao, dict)
+                else [stim._vao])
+        buffers = [b for vao in vaos
+                   for b in list(vao.activeAttribs.values()) + [vao.indexBuffer]]
+        return [name(v) for v in vaos], [name(b) for b in buffers]
+
+    @pytest.mark.parametrize('stimClass', [
+        SphereStim, BoxStim, PlaneStim, ObjMeshStim])
+    def test_free(self, tmp_path, stimClass):
+        if stimClass is ObjMeshStim:
+            stim = ObjMeshStim(
+                self.win, str(_writeObjFile(tmp_path)), pos=(0, 0, -3))
+        else:
+            stim = stimClass(self.win, pos=(0, 0, -3))
+        self._assertDrawn(self._render(stim))
+
+        vaoNames, bufferNames = self._glNames(stim)
+        assert all(GL.glIsVertexArray(n) for n in vaoNames)
+        assert all(GL.glIsBuffer(n) for n in bufferNames)
+
+        stim.free()
+        assert not any(GL.glIsVertexArray(n) for n in vaoNames)
+        assert not any(GL.glIsBuffer(n) for n in bufferNames)
+
+        # nothing is drawn afterwards, and freeing again does nothing
+        frame = self._render(stim)
+        assert np.all(frame == frame[0, 0])
+        stim.free()
+        assert GL.glGetError() == GL.GL_NO_ERROR
+
+    def test_free_obj_textures(self, tmp_path):
+        Image.new('RGB', (4, 4), (255, 0, 0)).save(tmp_path / 'red.png')
+        objFile = _writeObjFile(tmp_path)
+        (tmp_path / 'cube.mtl').write_text(
+            'newmtl red\nKd 1 1 1\nmap_Kd red.png\n'
+            'newmtl blue\nKd 1 1 1\nmap_Kd red.png\n')
+
+        stim = ObjMeshStim(self.win, str(objFile), pos=(0, 0, -3))
+        texture = stim.material['red'].diffuseTexture
+        textureName = texture.name.value
+        assert GL.glIsTexture(textureName)
+
+        stim.free()
+        assert not GL.glIsTexture(textureName)
+        # loaded materials don't keep references to freed textures
+        assert stim.material['red'].diffuseTexture is None
+        assert stim.material['blue'].diffuseTexture is None
+
+    def test_free_keeps_user_textures(self, tmp_path):
+        # textures of materials supplied by the user aren't freed
+        texData = np.full((4, 4, 4), 255, dtype=np.uint8)
+        texture = gt.createTexImage2D(
+            4, 4, internalFormat=GL.GL_RGBA, pixelFormat=GL.GL_RGBA,
+            dataType=GL.GL_UNSIGNED_BYTE, data=texData.ctypes,
+            unpackAlignment=1)
+        mat = BlinnPhongMaterial(self.win, diffuseTexture=texture)
+
+        stim = ObjMeshStim(
+            self.win, str(_writeObjFile(tmp_path)), pos=(0, 0, -3),
+            useMaterial=mat)
+        stim.free()
+        assert GL.glIsTexture(texture.name.value)
+        assert mat.diffuseTexture is texture
+
+        gt.deleteTexture(texture)
+
+    def test_free_independent(self, tmp_path):
+        # stimuli loaded from the same file don't share resources
+        objFile = str(_writeObjFile(tmp_path))
+        first = ObjMeshStim(self.win, objFile, pos=(0, 0, -3))
+        second = ObjMeshStim(self.win, objFile, pos=(0, 0, -3))
+
+        first.free()
+        self._assertDrawn(self._render(second))
+        second.free()
+
+    # --------------------------------------------------------------------------
     # SceneSkybox
     #
 
