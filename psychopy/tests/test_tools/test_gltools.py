@@ -58,6 +58,62 @@ def test_drawVAO_unbind(win, vao):
     assert _boundVAO() == 0
 
 
+def _drawnTriangles(win, vao, **kwargs):
+    """Draw two triangles from a VAO in white on black, return whether the
+    first (lower-left) and second (upper-right) triangles were drawn.
+    """
+    win.resetEyeTransform()  # vertex coordinates are -1 to 1 across the window
+    GL.glUseProgram(0)
+    GL.glClearColor(0., 0., 0., 1.)
+    GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+    GL.glColor4f(1., 1., 1., 1.)
+    gt.drawVAO(vao, GL.GL_TRIANGLES, **kwargs)
+    assert GL.glGetError() == GL.GL_NO_ERROR
+
+    frame = np.asarray(win.getMovieFrame(buffer='back'))[:, :, 0]
+    win.movieFrames = []
+    win.flip()
+    h, w = frame.shape
+    return frame[int(h * 0.9), int(w * 0.1)] > 128, \
+        frame[int(h * 0.4), int(w * 0.6)] > 128
+
+
+@pytest.mark.parametrize('indexType', [np.uint32, np.uint16, None])
+@pytest.mark.parametrize('instanceCount', [None, 1])
+@pytest.mark.parametrize('count', [3, None])
+def test_drawVAO_start(win, indexType, instanceCount, count):
+    # `start` is the first element (vertex or index) to draw, not a byte offset
+    vertices = gt.createVBO(np.array(
+        [[-1, -1, 0], [0, -1, 0], [-1, 0, 0],  # lower-left triangle
+         [0, 0, 0], [1, 0, 0], [0, 1, 0]],  # upper-right triangle
+        dtype=np.float32))
+    indices = None
+    if indexType is not None:
+        indices = gt.createVBO(
+            np.arange(6, dtype=indexType),
+            target=GL.GL_ELEMENT_ARRAY_BUFFER,
+            dataType=gt.ARRAY_TYPES[indexType][0])
+    vao = gt.createVAO(
+        {GL.GL_VERTEX_ARRAY: vertices}, indexBuffer=indices, legacy=True)
+
+    assert _drawnTriangles(win, vao) == (True, True)
+    assert _drawnTriangles(
+        win, vao, start=3, count=count, instanceCount=instanceCount) == \
+        (False, True)
+    assert _drawnTriangles(win, vao, start=0, count=3) == (True, False)
+
+    gt.deleteVAO(vao)
+    gt.deleteVBO(vertices)
+    if indices is not None:
+        gt.deleteVBO(indices)
+
+
+def test_drawVAO_invalid_range(win, vao):
+    for start, count in [(-1, None), (4, None), (1, 3)]:
+        with pytest.raises(ValueError):
+            gt.drawVAO(vao, GL.GL_TRIANGLES, start=start, count=count)
+
+
 @pytest.mark.parametrize('name, value', [
     ('never', GL.GL_NEVER), ('less', GL.GL_LESS), ('equal', GL.GL_EQUAL),
     ('lequal', GL.GL_LEQUAL), ('greater', GL.GL_GREATER),

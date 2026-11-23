@@ -3501,11 +3501,13 @@ def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, instanceCount=None,
         rasterization. Default is `GL_TRIANGLES`. Strings can be used for
         convenience (e.g. 'GL_TRIANGLES', 'GL_QUADS', 'GL_POINTS').
     start : int, optional
-        Starting index for array elements. Default is `0` which is the beginning
-        of the array.
+        Index of the first element to draw. Elements are vertices, or indices
+        in the index buffer if the VAO has one. Default is `0` which is the
+        beginning of the array.
     count : int, optional
-        Number of indices to draw from `start`. Must not exceed `vao.count` -
-        `start`.
+        Number of elements to draw from `start`. Must not exceed `vao.count` -
+        `start`. If `None`, all elements from `start` to the end of the array
+        are drawn.
     instanceCount : int or None
         Number of instances to draw. If >0 and not `None`, instanced drawing
         will be used.
@@ -3534,23 +3536,29 @@ def drawVAO(vao, mode=GL.GL_TRIANGLES, start=0, count=None, instanceCount=None,
         if mode is None:
             raise ValueError('Invalid drawing mode specified.')
 
+    if not 0 <= start <= vao.count:
+        raise ValueError(
+            "Value of `start` must be between 0 and {}.".format(vao.count))
+
+    if count is None:  # draw the remaining elements
+        count = vao.count - start
+    elif count > vao.count - start:
+        raise ValueError(
+            "Value of `count` cannot exceed `{}`.".format(vao.count - start))
+
     # draw the array
     _glBindVertexArray(vao.name)
 
-    if count is None:
-        count = vao.count
-    else:
-        if count > vao.count - start:
-            raise ValueError(
-                "Value of `count` cannot exceed `{}`.".format(
-                    vao.count - start))
-
     if vao.indexBuffer is not None:
+        # the offset into the index buffer is given in bytes
+        indexType = vao.indexBuffer.dataType
+        offset = start * ctypes.sizeof(ARRAY_TYPES[indexType][1]) \
+            if start else 0
         if instanceCount is None:
-            GL.glDrawElements(mode, count, vao.indexBuffer.dataType, start)
+            GL.glDrawElements(mode, count, indexType, offset)
         else:
-            GL.glDrawElementsInstanced(mode, count, vao.indexBuffer.dataType,
-                                       start, instanceCount)
+            GL.glDrawElementsInstanced(
+                mode, count, indexType, offset, instanceCount)
     else:
         if instanceCount is None:
             GL.glDrawArrays(mode, start, count)
