@@ -114,6 +114,71 @@ def test_drawVAO_invalid_range(win, vao):
             gt.drawVAO(vao, GL.GL_TRIANGLES, start=start, count=count)
 
 
+def _readBuffer(vbo):
+    """Read the contents of a float32 VBO without mapping it."""
+    data = np.zeros(vbo.shape, dtype=np.float32)
+    GL.glBindBuffer(vbo.target, vbo.name)
+    GL.glGetBufferSubData(
+        vbo.target, 0, vbo.size, data.ctypes.data_as(ctypes.c_void_p))
+    GL.glBindBuffer(vbo.target, 0)
+    return data
+
+
+@pytest.fixture
+def vbo4x3(win):
+    data = np.arange(12, dtype=np.float32).reshape((4, 3))
+    vbo = gt.createVBO(data, usage=GL.GL_DYNAMIC_DRAW)
+    yield vbo, data
+    gt.deleteVBO(vbo)
+
+
+@pytest.mark.parametrize('start, length, expected', [
+    (0, None, np.arange(12).reshape((4, 3))),  # whole buffer, keeps its shape
+    (3, 6, np.arange(3, 9).reshape((2, 3))),  # whole rows
+    (6, None, np.arange(6, 12).reshape((2, 3))),  # rows to the end
+    (4, 2, np.arange(4, 6)),  # part of a row
+    (2, 4, np.arange(2, 6)),  # crosses rows
+    (11, 1, np.arange(11, 12)),  # last value
+])
+def test_mapBuffer_range(vbo4x3, start, length, expected):
+    vbo, data = vbo4x3
+    arr = gt.mapBuffer(vbo, start=start, length=length)
+    assert arr.shape == expected.shape
+    assert arr.tolist() == expected.tolist()
+
+    # only the mapped values are changed
+    arr *= 10
+    assert gt.unmapBuffer(vbo)
+    gt.unbindVBO(vbo)
+    changed = data.flatten()
+    changed[start:start + expected.size] *= 10
+    assert _readBuffer(vbo).flatten().tolist() == changed.tolist()
+
+
+def test_mappedBuffer_range(vbo4x3):
+    vbo, data = vbo4x3
+    with gt.mappedBuffer(vbo, start=3, length=3) as arr:
+        assert arr.shape == (1, 3)
+        arr[:] = -1
+    gt.unbindVBO(vbo)
+    assert _readBuffer(vbo)[1].tolist() == [-1, -1, -1]
+    assert _readBuffer(vbo)[[0, 2, 3]].tolist() == data[[0, 2, 3]].tolist()
+
+
+@pytest.mark.parametrize('start, length', [
+    (-1, 2), (0, 0), (0, 13), (10, 3), (12, None)])
+def test_mapBuffer_invalid_range(vbo4x3, start, length):
+    vbo, _ = vbo4x3
+    with pytest.raises(ValueError):
+        gt.mapBuffer(vbo, start=start, length=length)
+
+    # the buffer isn't left mapped
+    arr = gt.mapBuffer(vbo)
+    assert arr.shape == (4, 3)
+    assert gt.unmapBuffer(vbo)
+    gt.unbindVBO(vbo)
+
+
 @pytest.mark.parametrize('name, value', [
     ('never', GL.GL_NEVER), ('less', GL.GL_LESS), ('equal', GL.GL_EQUAL),
     ('lequal', GL.GL_LEQUAL), ('greater', GL.GL_GREATER),

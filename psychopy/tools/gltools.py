@@ -4095,10 +4095,12 @@ def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False):
     vbo : VertexBufferInfo
         Vertex buffer to map to client memory.
     start : int
-        Initial index of the sub-range of the buffer to modify.
+        Index of the first value of the sub-range of the buffer to map. Indices
+        are of individual values (not rows or bytes), as if the buffer were
+        flattened.
     length : int or None
-        Number of elements of the sub-array to map from `offset`. If `None`, all
-        elements to from `offset` to the end of the array are mapped.
+        Number of values to map from `start`. If `None`, all values from
+        `start` to the end of the buffer are mapped.
     read : bool, optional
         Allow data to be read from the buffer (sets `GL_MAP_READ_BIT`). This is
         ignored if `noSync` is `True`.
@@ -4114,8 +4116,18 @@ def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False):
     Returns
     -------
     ndarray
-        View of the data. The type of the returned array is one which best
-        matches the data type of the buffer.
+        View of the mapped values. The type of the returned array is one which
+        best matches the data type of the buffer. If the whole buffer is
+        mapped, the array has the shape of the buffer. If the sub-range
+        contains whole rows of a 2D buffer, the array has those rows. Otherwise
+        the array is 1D.
+
+    Raises
+    ------
+    ValueError
+        If the range of values isn't within the buffer.
+    RuntimeError
+        If the buffer can't be mapped.
 
     Examples
     --------
@@ -4129,20 +4141,35 @@ def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False):
         del arr
 
     Modify a sub-range of data by specifying `start` and `length`, indices
-    correspond to values, not byte offsets::
+    correspond to values, not byte offsets. For a buffer of 3D vertices, this
+    maps the third and fourth vertices (values 6 to 11) as a 2x3 array::
 
-        arr = mapBuffer(vbo, start=12, end=24)
+        arr = mapBuffer(vbo, start=6, length=6)
         arr[:, :] *= 10.0
         unmapBuffer(vbo)
 
     """
     _, glType, npType = ARRAY_TYPES[vbo.dataType]
-    start *= ctypes.sizeof(glType)
+    itemSize = ctypes.sizeof(glType)
+    nValues = vbo.size // itemSize  # number of values in the buffer
 
-    if length is None:
-        length = vbo.size
+    if length is None:  # map to the end of the buffer
+        length = nValues - start
+
+    if start < 0 or length <= 0 or start + length > nValues:
+        raise ValueError(
+            "Range of values to map (start={}, length={}) is not within the "
+            "buffer, which has {} values.".format(start, length, nValues))
+
+    # shape of the returned array, rows are kept if the range contains whole
+    # rows of a 2D buffer
+    if start == 0 and length == nValues:
+        shape = tuple(vbo.shape)
+    elif len(vbo.shape) == 2 and \
+            start % vbo.shape[1] == 0 and length % vbo.shape[1] == 0:
+        shape = (length // vbo.shape[1], vbo.shape[1])
     else:
-        length *= ctypes.sizeof(glType)
+        shape = (length,)
 
     accessFlags = GL.GL_NONE
     if noSync:  # if set, don't set GL_MAP_READ_BIT
@@ -4155,16 +4182,21 @@ def mapBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False):
 
     bindVBO(vbo)  # bind the buffer for mapping
 
-    # get pointer to the buffer
+    # get pointer to the buffer, offsets are in bytes
     bufferPtr = GL.glMapBufferRange(
         vbo.target,
-        GL.GLintptr(start),
-        GL.GLintptr(length),
+        GL.GLintptr(start * itemSize),
+        GL.GLsizeiptr(length * itemSize),
         accessFlags)
+
+    if not bufferPtr:  # don't create an array from a null pointer
+        raise RuntimeError(
+            "Failed to map buffer, `glMapBufferRange` returned NULL (GL error "
+            "{}).".format(GL.glGetError()))
 
     bufferArray = np.ctypeslib.as_array(
         ctypes.cast(bufferPtr, ctypes.POINTER(glType)),
-        shape=vbo.shape)
+        shape=shape)
 
     return bufferArray
 
@@ -4200,10 +4232,11 @@ def mappedBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False)
     vbo : VertexBufferInfo
         Vertex buffer to map to client memory.
     start : int
-        Initial index of the sub-range of the buffer to modify.
+        Index of the first value of the sub-range of the buffer to map, see
+        :func:`mapBuffer`.
     length : int or None
-        Number of elements of the sub-array to map from `offset`. If `None`, all
-        elements to from `offset` to the end of the array are mapped.
+        Number of values to map from `start`. If `None`, all values from
+        `start` to the end of the buffer are mapped.
     read : bool, optional
         Allow data to be read from the buffer (sets `GL_MAP_READ_BIT`). This is
         ignored if `noSync` is `True`.
@@ -4219,8 +4252,9 @@ def mappedBuffer(vbo, start=0, length=None, read=True, write=True, noSync=False)
     Yields
     ------
     ndarray
-        View of the data. The type of the returned array is one which best
-        matches the data type of the buffer.
+        View of the mapped values, see :func:`mapBuffer` for its shape. The
+        type of the returned array is one which best matches the data type of
+        the buffer.
 
     Examples
     --------
