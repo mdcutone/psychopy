@@ -18,7 +18,6 @@ import psychopy.tools.arraytools as at
 import psychopy.tools.viewtools as vt
 import psychopy.visual.shaders as _shaders
 
-import os
 from PIL import Image
 
 import numpy as np
@@ -701,7 +700,7 @@ class BlinnPhongMaterial:
         self._specularColor = Color()
         self._ambientColor = Color()
         self._emissionColor = Color()
-        self._shininess = float(shininess)
+        self.shininess = shininess
         self._opacity = 1.0  # set later
         self._face = None  # set later
 
@@ -802,15 +801,17 @@ class BlinnPhongMaterial:
         """Material shininess coefficient (`float`).
 
         This is used to specify the 'tightness' of the specular highlights.
-        Values usually range between 0 and 128, but the range depends on the
-        specular highlight formula used by the shader.
+        Values are clamped to between 0 and 128, which is the range supported
+        by OpenGL.
 
         """
         return self._shininess
 
     @shininess.setter
     def shininess(self, value):
-        self._shininess = float(value)
+        # OpenGL rejects values outside this range, leaving the shininess of
+        # the previously used material in effect
+        self._shininess = min(max(float(value), 0.0), 128.0)
 
     @property
     def opacity(self):
@@ -2032,57 +2033,26 @@ class ObjMeshStim(BaseRigidBodyStim):
         mtlFile : str
             Path to MTL file.
 
+        Returns
+        -------
+        dict
+            Material names and `BlinnPhongMaterial` instances.
+
         """
-        with open(mtlFile, 'r') as mtl:
-            mtlLines = mtl.readlines()
+        materials = {}
+        for name, props in gt.loadMtlFile(mtlFile).items():
+            kwargs = {}
+            for key in ('diffuseColor', 'specularColor', 'ambientColor',
+                        'emissionColor'):
+                if key in props:  # MTL colors are 0-1, materials use -1 to 1
+                    kwargs[key] = 2.0 * np.asarray(props[key]) - 1.0
+            for key in ('shininess', 'opacity', 'diffuseTexture'):
+                if key in props:
+                    kwargs[key] = props[key]
 
-        foundMaterials = {}
-        foundTextures = {}
-        thisMaterial = 0
-        for line in mtlLines:
-            line = line.strip()
-            if line.startswith('newmtl '):  # new material
-                thisMaterial = line[7:]
-                foundMaterials[thisMaterial] = BlinnPhongMaterial(self.win)
-            elif line.startswith('Ns '):  # specular exponent
-                foundMaterials[thisMaterial].shininess = line[3:]
-            elif line.startswith('Ks '):  # specular color
-                specularColor = np.asarray(list(map(float, line[3:].split(' '))))
-                specularColor = 2.0 * specularColor - 1
-                foundMaterials[thisMaterial].specularColor = specularColor
-            elif line.startswith('Kd '):  # diffuse color
-                diffuseColor = np.asarray(list(map(float, line[3:].split(' '))))
-                diffuseColor = 2.0 * diffuseColor - 1
-                foundMaterials[thisMaterial].diffuseColor = diffuseColor
-            elif line.startswith('Ka '):  # ambient color
-                ambientColor = np.asarray(list(map(float, line[3:].split(' '))))
-                ambientColor = 2.0 * ambientColor - 1
-                foundMaterials[thisMaterial].ambientColor = ambientColor
-            elif line.startswith('map_Kd '):  # diffuse color map
-                # load a diffuse texture from file
-                textureName = line[7:]
-                if textureName not in foundTextures:
-                    im = Image.open(
-                        os.path.join(os.path.split(mtlFile)[0], textureName))
-                    im = im.transpose(Image.FLIP_TOP_BOTTOM)
-                    im = im.convert("RGBA")
-                    pixelData = np.array(im).ctypes
-                    width = pixelData.shape[1]
-                    height = pixelData.shape[0]
-                    foundTextures[textureName] = gt.createTexImage2D(
-                        width,
-                        height,
-                        internalFormat=GL.GL_RGBA,
-                        pixelFormat=GL.GL_RGBA,
-                        dataType=GL.GL_UNSIGNED_BYTE,
-                        data=pixelData,
-                        unpackAlignment=1,
-                        texParams={GL.GL_TEXTURE_MAG_FILTER: GL.GL_LINEAR,
-                                   GL.GL_TEXTURE_MIN_FILTER: GL.GL_LINEAR})
-                foundMaterials[thisMaterial].diffuseTexture = \
-                    foundTextures[textureName]
+            materials[name] = BlinnPhongMaterial(self.win, **kwargs)
 
-        return foundMaterials
+        return materials
 
     def draw(self, win=None):
         """Draw the mesh.

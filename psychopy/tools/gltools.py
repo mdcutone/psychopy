@@ -140,6 +140,7 @@ import os
 import sys
 import platform
 import warnings
+from psychopy import logging
 import psychopy.tools.mathtools as mt
 
 _thisPlatform = platform.system()
@@ -5544,8 +5545,10 @@ def loadObjFile(objFile):
     Loading a `*.obj` mode from file::
 
         objModel = loadObjFile('/path/to/file.obj')
-        # load the material (*.mtl) file, textures are also loaded
-        mtllib = loadMtl('/path/to/' + objModel.mtlFile)
+        # load the material (*.mtl) file if there is one, textures are also
+        # loaded
+        if objModel.mtlFile is not None:
+            materials = loadMtlFile(objModel.mtlFile)
 
     Creating separate vertex buffer objects (VBOs) for each vertex attribute::
 
@@ -5585,10 +5588,12 @@ def loadObjFile(objFile):
     To render the VAOs using `objVAOs` created above, do the following::
 
         for material, vao in objVAOs.items():
-            useMaterial(mtllib[material])
+            # set up the material using `materials[material]` here, faces
+            # without a material have the key `None`
             drawVAO(vao)
 
-        useMaterial(None)  # disable materials when done
+    :class:`~psychopy.visual.stim3d.ObjMeshStim` loads and draws OBJ files
+    with their materials this way.
 
     Optionally, you can create a single-storage, interleaved VBO by using
     `numpy.hstack`. On some GL implementations, using single-storage buffers
@@ -5619,7 +5624,7 @@ def loadObjFile(objFile):
 
     """
     # open the file, read it into memory
-    with open(objFile, 'r') as f:
+    with open(objFile, 'r', encoding='utf-8', errors='replace') as f:
         objBuffer = StringIO(f.read())
 
     mtlFile = None
@@ -5740,26 +5745,227 @@ def loadObjFile(objFile):
                        mtlFile)
 
 
-def loadMtlFile(mtllib, texParams=None):
-    """Load a material library file (*.mtl).
+# MTL color statements and the material properties they set
+_MTL_COLORS = {
+    'Ka': 'ambientColor',
+    'Kd': 'diffuseColor',
+    'Ks': 'specularColor',
+    'Ke': 'emissionColor'}
+
+# options for texture map statements (e.g. `map_Kd -s 1 1 1 file.png`) and the
+# minimum and maximum number of arguments they take, optional arguments are
+# always numbers
+_MTL_MAP_OPTIONS = {
+    '-blendu': (1, 1),
+    '-blendv': (1, 1),
+    '-bm': (1, 1),
+    '-boost': (1, 1),
+    '-cc': (1, 1),
+    '-clamp': (1, 1),
+    '-imfchan': (1, 1),
+    '-mm': (2, 2),
+    '-o': (1, 3),
+    '-s': (1, 3),
+    '-t': (1, 3),
+    '-texres': (1, 1),
+    '-type': (1, 1)}
+
+# range of shininess values supported by OpenGL
+_MAX_SHININESS = 128.0
+
+
+def _isNumber(value):
+    """Check if a string can be converted to a `float`."""
+    try:
+        float(value)
+    except ValueError:
+        return False
+
+    return True
+
+
+def _clamp(value, low, high):
+    return min(max(value, low), high)
+
+
+def _mtlColor(values):
+    """Convert the values of an MTL color statement (`r [g b]`) to an RGB tuple
+    with components between 0 and 1. If only `r` is given, it is used for all
+    components. Returns `None` for unsupported color formats (`spectral` and
+    `xyz`).
+    """
+    if not values or not _isNumber(values[0]):
+        return None
+
+    rgb = [float(v) for v in values[:3]]
+    if len(rgb) < 3:
+        rgb = [rgb[0]] * 3
+
+    return tuple(_clamp(c, 0.0, 1.0) for c in rgb)
+
+
+def _mtlMapFile(values):
+    """Get the file name from the values of a texture map statement, skipping
+    any options before it. File names may contain spaces. Returns `None` if
+    there is no file name.
+    """
+    i = 0
+    while i < len(values) and values[i] in _MTL_MAP_OPTIONS:
+        minArgs, maxArgs = _MTL_MAP_OPTIONS[values[i]]
+        i += 1 + minArgs
+        # optional arguments are numbers
+        for _ in range(maxArgs - minArgs):
+            if i < len(values) and _isNumber(values[i]):
+                i += 1
+
+    return ' '.join(values[i:]) or None
+
+
+def _parseMtlFile(mtllib):
+    """Parse a material library file (*.mtl) without loading any textures.
 
     Parameters
     ----------
     mtllib : str
         Path to the material library file.
-    texParams : list or tuple
-        Optional texture parameters for loaded textures. Texture parameters are
-        specified as a list of tuples. Each item specifies the option and
-        parameter. For instance,
-        `[(GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR), ...]`. By default, linear
+
+    Returns
+    -------
+    dict
+        Material names and dictionaries of their properties. See `loadMtlFile`
+        for the properties, texture maps are given as absolute file paths.
+
+    """
+    with open(mtllib, 'r', encoding='utf-8', errors='replace') as f:
+        lines = f.readlines()
+
+    mtlDir = os.path.dirname(os.path.abspath(mtllib))
+    materials = {}
+    material = None
+    hasDissolve = False  # `d` takes precedence over `Tr`
+    for lineNum, line in enumerate(lines, start=1):
+        tokens = line.split()
+        if not tokens or tokens[0].startswith('#'):
+            continue
+
+        statement, values = tokens[0], tokens[1:]
+        if statement == 'newmtl':
+            # names are everything after the statement
+            material = materials[line.strip()[len(statement):].strip()] = {}
+            hasDissolve = False
+            continue
+
+        if statement not in _MTL_COLORS and statement not in (
+                'Ns', 'd', 'Tr', 'map_Kd'):
+            continue  # unsupported statement
+
+        if material is None:
+            logging.warning(
+                "Ignoring '{}' on line {} of material library '{}', it "
+                "appears before any `newmtl` statement.".format(
+                    statement, lineNum, mtllib))
+            continue
+
+        try:
+            if statement in _MTL_COLORS:
+                color = _mtlColor(values)
+                if color is None:
+                    raise ValueError('unsupported color format')
+                material[_MTL_COLORS[statement]] = color
+            elif statement == 'Ns':
+                # files may use values up to 1000, but OpenGL only accepts up
+                # to 128
+                material['shininess'] = _clamp(
+                    float(values[0]), 0.0, _MAX_SHININESS)
+            elif statement == 'd':
+                # the value is last, after the optional `-halo` option
+                material['opacity'] = _clamp(float(values[-1]), 0.0, 1.0)
+                hasDissolve = True
+            elif statement == 'Tr':  # transparency, the inverse of `d`
+                if not hasDissolve:
+                    material['opacity'] = \
+                        1.0 - _clamp(float(values[0]), 0.0, 1.0)
+            elif statement == 'map_Kd':
+                fileName = _mtlMapFile(values)
+                if fileName is None:
+                    raise ValueError('no file name')
+                # paths written on Windows may use backslashes
+                material['diffuseTexture'] = os.path.normpath(
+                    os.path.join(mtlDir, fileName.replace('\\', '/')))
+        except (ValueError, IndexError) as e:
+            logging.warning(
+                "Ignoring invalid '{}' on line {} of material library "
+                "'{}': {}".format(statement, lineNum, mtllib, e))
+
+    return materials
+
+
+def _loadMtlTexture(fileName, texParams):
+    """Load a texture referenced by a material library. Returns `None` if the
+    image can't be loaded.
+    """
+    try:
+        with Image.open(fileName) as im:
+            pixelData = np.array(
+                im.transpose(Image.FLIP_TOP_BOTTOM).convert('RGBA'))
+    except OSError as e:
+        logging.warning(
+            "Failed to load texture '{}' for material: {}".format(fileName, e))
+        return None
+
+    height, width = pixelData.shape[:2]
+
+    return createTexImage2D(
+        width,
+        height,
+        internalFormat=GL.GL_RGBA,
+        pixelFormat=GL.GL_RGBA,
+        dataType=GL.GL_UNSIGNED_BYTE,
+        data=pixelData.ctypes,
+        unpackAlignment=1,
+        texParams=texParams)
+
+
+def loadMtlFile(mtllib, texParams=None):
+    """Load a material library file (*.mtl).
+
+    Materials are returned as dictionaries of properties, which can be used to
+    create materials for rendering (e.g.
+    :class:`~psychopy.visual.stim3d.BlinnPhongMaterial`). Only properties
+    which are specified in the file are present. These are:
+
+    * `ambientColor`, `diffuseColor`, `specularColor` and `emissionColor` from
+      `Ka`, `Kd`, `Ks` and `Ke`, as `(r, g, b)` tuples with components between
+      0.0 and 1.0. If only one component is given in the file, it is used for
+      all three. Spectral and CIE XYZ colors are not supported.
+    * `shininess` from `Ns`, clamped to between 0.0 and 128.0 which is the
+      range supported by OpenGL.
+    * `opacity` from `d`, or `1 - Tr` if there is no `d`.
+    * `diffuseTexture` from `map_Kd`, as a `TexImage2DInfo`. Options before
+      the file name are ignored. Textures used by more than one material are
+      only loaded once. Textures which can't be loaded are left out and a
+      warning is logged.
+
+    Other statements are ignored. Invalid statements are ignored and a warning
+    is logged.
+
+    Parameters
+    ----------
+    mtllib : str
+        Path to the material library file. Texture paths are relative to the
+        directory containing this file.
+    texParams : dict or None
+        Optional texture parameters for loaded textures, where keys are
+        parameter names and values are their values. For instance,
+        `{GL.GL_TEXTURE_MAG_FILTER: GL.GL_LINEAR, ...}`. By default, linear
         filtering is used for both the minifying and magnification filter
         functions. This is adequate for most uses.
 
     Returns
     -------
     dict
-        Dictionary of materials. Where each key is the material name found in
-        the file, and values are `Material` namedtuple objects.
+        Dictionary of materials, where each key is a material name found in the
+        file and values are dictionaries of properties.
 
     See Also
     --------
@@ -5767,74 +5973,37 @@ def loadMtlFile(mtllib, texParams=None):
 
     Examples
     --------
-    Load material associated with an `*.OBJ` file::
+    Load the materials associated with an `*.OBJ` file::
 
         objModel = loadObjFile('/path/to/file.obj')
-        # load the material (*.mtl) file, textures are also loaded
-        mtllib = loadMtl('/path/to/' + objModel.mtlFile)
+        # `mtlFile` is `None` if the OBJ file doesn't reference one
+        materials = loadMtlFile(objModel.mtlFile)
 
-    Use a material when rendering vertex arrays::
-
-        useMaterial(mtllib[material])
-        drawVAO(vao)
-        useMaterial(None)  # disable materials when done
+        # get the diffuse color of a material
+        diffuseColor = materials['myMaterial'].get('diffuseColor')
 
     """
-    # open the file, read it into memory
-    with open(mtllib, 'r') as mtlFile:
-        mtlBuffer = StringIO(mtlFile.read())
-
-    # default texture parameters
     if texParams is None:
         texParams = {GL.GL_TEXTURE_MAG_FILTER: GL.GL_LINEAR,
                      GL.GL_TEXTURE_MIN_FILTER: GL.GL_LINEAR}
 
-    foundMaterials = {}
-    foundTextures = {}
-    thisMaterial = 0
-    for line in mtlBuffer.readlines():
-        line = line.strip()
-        if line.startswith('newmtl '):  # new material
-            thisMaterial = line[7:]
-            foundMaterials[thisMaterial] = SimpleMaterial()
-        elif line.startswith('Ns '):  # specular exponent
-            foundMaterials[thisMaterial].shininess = line[3:]
-        elif line.startswith('Ks '):  # specular color
-            specularColor = np.asarray(list(map(float, line[3:].split(' '))))
-            specularColor = 2.0 * specularColor - 1
-            foundMaterials[thisMaterial].specularColor = specularColor
-        elif line.startswith('Kd '):  # diffuse color
-            diffuseColor = np.asarray(list(map(float, line[3:].split(' '))))
-            diffuseColor = 2.0 * diffuseColor - 1
-            foundMaterials[thisMaterial].diffuseColor = diffuseColor
-        elif line.startswith('Ka '):  # ambient color
-            ambientColor = np.asarray(list(map(float, line[3:].split(' '))))
-            ambientColor = 2.0 * ambientColor - 1
-            foundMaterials[thisMaterial].ambientColor = ambientColor
-        elif line.startswith('map_Kd '):  # diffuse color map
-            # load a diffuse texture from file
-            textureName = line[7:]
-            if textureName not in foundTextures.keys():
-                im = Image.open(
-                    os.path.join(os.path.split(mtllib)[0], textureName))
-                im = im.transpose(Image.FLIP_TOP_BOTTOM)
-                im = im.convert("RGBA")
-                pixelData = np.array(im).ctypes
-                width = pixelData.shape[1]
-                height = pixelData.shape[0]
-                foundTextures[textureName] = createTexImage2D(
-                    width,
-                    height,
-                    internalFormat=GL.GL_RGBA,
-                    pixelFormat=GL.GL_RGBA,
-                    dataType=GL.GL_UNSIGNED_BYTE,
-                    data=pixelData,
-                    unpackAlignment=1,
-                    texParams=texParams)
-            foundMaterials[thisMaterial].diffuseTexture = \
-                foundTextures[textureName]
+    materials = _parseMtlFile(mtllib)
 
-    return foundMaterials
+    textures = {}  # textures loaded so far by file name
+    for material in materials.values():
+        fileName = material.get('diffuseTexture')
+        if fileName is None:
+            continue
+
+        if fileName not in textures:
+            textures[fileName] = _loadMtlTexture(fileName, texParams)
+
+        if textures[fileName] is None:
+            del material['diffuseTexture']
+        else:
+            material['diffuseTexture'] = textures[fileName]
+
+    return materials
 
 
 def createUVSphere(radius=0.5, sectors=16, stacks=16, flipFaces=False):
