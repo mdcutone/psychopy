@@ -5427,6 +5427,48 @@ class ObjMeshInfo:
         self.mtlFile = mtlFile
 
 
+def _objFloats(values, n):
+    """Convert the first `n` values of an OBJ statement to floats. Missing
+    values are filled with zeros.
+    """
+    floats = [float(v) for v in values[:n]]
+    floats += [0.0] * (n - len(floats))
+
+    return floats
+
+
+def _objFaceVertex(token):
+    """Parse a face vertex token (`v`, `v/vt`, `v//vn` or `v/vt/vn`) into
+    zero-based `(position, texCoord, normal)` indices. Missing indices are
+    `None`.
+    """
+    indices = [int(i) - 1 if i else None for i in token.split('/')[:3]]
+    indices += [None] * (3 - len(indices))
+    if indices[0] is None:
+        raise ValueError(
+            "Invalid OBJ face vertex '{}', no position index.".format(token))
+
+    return tuple(indices)
+
+
+def _polygonNormal(points):
+    """Compute the unit normal of a polygon with counter-clockwise winding
+    using Newell's method, which also works for polygons which are not planar.
+    Returns a zero vector for degenerate polygons.
+    """
+    nx = ny = nz = 0.0
+    for (x0, y0, z0), (x1, y1, z1) in zip(points, points[1:] + points[:1]):
+        nx += (y0 - y1) * (z0 + z1)
+        ny += (z0 - z1) * (x0 + x1)
+        nz += (x0 - x1) * (y0 + y1)
+
+    length = (nx * nx + ny * ny + nz * nz) ** 0.5
+    if length == 0.0:
+        return (0.0, 0.0, 0.0)
+
+    return (nx / length, ny / length, nz / length)
+
+
 def loadObjFile(objFile):
     """Load a Wavefront OBJ file (*.obj).
 
@@ -5434,11 +5476,18 @@ def loadObjFile(objFile):
     into arrays. These arrays can be processed then loaded into vertex buffer
     objects (VBOs) for rendering. The `*.obj` file must at least specify vertex
     position data to be loaded successfully. Normals and texture coordinates are
-    optional.
+    optional. The returned attribute arrays always have the same number of rows
+    and have 3 (positions and normals) or 2 (texture coordinates) columns. Faces
+    without texture coordinates are given `(0, 0)`, and faces without normals
+    are given the normal of the face, computed from its vertex positions
+    assuming counter-clockwise winding (i.e. flat shading). Extra components
+    (e.g. vertex colors following positions, or a third texture coordinate) are
+    ignored.
 
     Faces can be either triangles or quads, but not both. Faces are grouped by
     their materials. Index arrays are generated for each material present in the
-    file.
+    file. Faces which are not assigned a material with a `usemtl` statement are
+    grouped under the key `None`.
 
     Data from the returned `ObjMeshInfo` object can be used to create vertex
     buffer objects and arrays for rendering. See `Examples` below for details on
@@ -5550,89 +5599,88 @@ def loadObjFile(objFile):
 
     mtlFile = None
 
-    # unsorted attribute data lists
+    # attribute definitions, only the components used for rendering are kept
+    # (e.g. `v x y z w` and `v x y z r g b` give `x y z`, `vt u v w` gives
+    # `u v`)
     positionDefs = []
     texCoordDefs = []
     normalDefs = []
-    vertexAttrs = {}
 
-    # material groups
+    # faces in the order they appear in the file, as tuples of the material
+    # group and the `(position, texCoord, normal)` indices of each vertex,
+    # faces which appear before any `usemtl` statement (or in files without
+    # any) are put in the group with key `None`
+    faceDefs = []
     materialGroup = None
-    materialGroups = {}
 
-    nVertices = nTextureCoords = nNormals = nFaces = 0
-    vertexIdx = 0
-    # first pass, examine the file and load up vertex attributes
+    # first pass, read attribute definitions and faces
     for line in objBuffer.readlines():
-        line = line.strip()  # clean up like
-        if line.startswith('v '):
-            positionDefs.append(tuple(map(float, line[2:].split(' '))))
-            nVertices += 1
-        elif line.startswith('vt '):
-            texCoordDefs.append(tuple(map(float, line[3:].split(' '))))
-            nTextureCoords += 1
-        elif line.startswith('vn '):
-            normalDefs.append(tuple(map(float, line[3:].split(' '))))
-            nNormals += 1
-        elif line.startswith('f '):
-            faceAttrs = []  # attributes this face
-            for attrs in line[2:].split(' '):  # triangle vertex attrs
-                if attrs not in vertexAttrs.keys():
-                    vertexAttrs[attrs] = vertexIdx
-                    vertexIdx += 1
-                faceAttrs.append(vertexAttrs[attrs])
-            materialGroups[materialGroup].append(faceAttrs)
-            nFaces += 1
-        elif line.startswith('o '):  # ignored for now
-            pass
-        elif line.startswith('g '):  # ignored for now
-            pass
-        elif line.startswith('usemtl '):
-            foundMaterial = line[7:]
-            if foundMaterial not in materialGroups.keys():
-                materialGroups[foundMaterial] = []
-            materialGroup = foundMaterial
-        elif line.startswith('mtllib '):
-            mtlFile = line.strip()[7:]
+        # tokens may be separated by any amount of whitespace (some exporters
+        # write `v  x y z` or use tabs)
+        tokens = line.split()
+        if not tokens:
+            continue
+
+        statement, values = tokens[0], tokens[1:]
+        if statement == 'v':
+            positionDefs.append(_objFloats(values, 3))
+        elif statement == 'vt':
+            texCoordDefs.append(_objFloats(values, 2))
+        elif statement == 'vn':
+            normalDefs.append(_objFloats(values, 3))
+        elif statement == 'f':
+            faceDefs.append(
+                (materialGroup, [_objFaceVertex(v) for v in values]))
+        elif statement == 'usemtl':
+            # names are everything after the statement
+            materialGroup = line.strip()[len(statement):].strip()
+        elif statement == 'mtllib':
+            mtlFile = line.strip()[len(statement):].strip()
+        # other statements (e.g. `o`, `g`, `s` and comments) are ignored
 
     # at the very least, we need vertices and facedefs
-    if nVertices == 0 or nFaces == 0:
+    if not positionDefs or not faceDefs:
         raise RuntimeError(
             "Failed to load OBJ file, file contains no vertices or faces.")
+
+    # second pass, build vertices from unique combinations of attributes
+    vertexIndices = {}
+    vertexPos = []
+    vertexTexCoord = []
+    vertexNormal = []
+    materialGroups = {}
+    for faceIdx, (group, faceVertices) in enumerate(faceDefs):
+        # vertices without a normal are given the normal of the face (flat
+        # shading), these vertices can't be shared with other faces
+        faceNormal = None
+        if any(n is None for _, _, n in faceVertices):
+            faceNormal = _polygonNormal(
+                [positionDefs[p] for p, _, _ in faceVertices])
+
+        faceIndices = []
+        for p, t, n in faceVertices:
+            key = (p, t, n) if n is not None else (p, t, None, faceIdx)
+            idx = vertexIndices.get(key)
+            if idx is None:
+                idx = vertexIndices[key] = len(vertexPos)
+                vertexPos.append(positionDefs[p])
+                vertexTexCoord.append(
+                    texCoordDefs[t] if t is not None else (0., 0.))
+                vertexNormal.append(
+                    normalDefs[n] if n is not None else faceNormal)
+            faceIndices.append(idx)
+
+        # groups are only created once they have faces
+        materialGroups.setdefault(group, []).append(faceIndices)
 
     # convert indices for materials to numpy arrays
     for key, val in materialGroups.items():
         materialGroups[key] = np.asarray(val, dtype=int)
 
-    # indicate if file has any texture coordinates of normals
-    hasTexCoords = nTextureCoords > 0
-    hasNormals = nNormals > 0
-
-    # lists for vertex attributes
-    vertexPos = []
-    vertexTexCoord = []
-    vertexNormal = []
-
-    # populate vertex attribute arrays
-    for attrs, idx in vertexAttrs.items():
-        attr = attrs.split('/')
-        vertexPos.append(positionDefs[int(attr[0]) - 1])
-        if len(attr) > 1:  # has texture coords
-            if hasTexCoords:
-                if attr[1] != '':  # texcoord field not empty
-                    vertexTexCoord.append(texCoordDefs[int(attr[1]) - 1])
-                else:
-                    vertexTexCoord.append([0., 0.])  # fill with zeros
-        if len(attr) > 2:  # has normals too
-            if hasNormals:
-                vertexNormal.append(normalDefs[int(attr[2]) - 1])
-            else:
-                vertexNormal.append([0., 0., 0.])  # fill with zeros
-
     # convert vertex attribute lists to numeric arrays
-    vertexPos = np.asarray(vertexPos)
-    vertexTexCoord = np.asarray(vertexTexCoord)
-    vertexNormal = np.asarray(vertexNormal)
+    vertexPos = np.asarray(vertexPos, dtype=float)
+    vertexTexCoord = np.asarray(vertexTexCoord, dtype=float)
+    vertexNormal = np.asarray(vertexNormal, dtype=float)
 
     # compute the extents of the model, needed for axis-aligned bounding boxes
     extents = (vertexPos.min(axis=0), vertexPos.max(axis=0))
