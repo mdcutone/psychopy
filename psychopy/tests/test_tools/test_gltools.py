@@ -281,6 +281,57 @@ def test_updateVBO(vbo4x3, monkeypatch, noSync):
     assert GL.glGetError() == GL.GL_NO_ERROR
 
 
+def test_VertexBufferInfo_validate(vbo4x3):
+    vbo, _ = vbo4x3
+    indices = gt.createVBO(
+        np.arange(3, dtype=np.uint32), target=GL.GL_ELEMENT_ARRAY_BUFFER,
+        dataType=GL.GL_UNSIGNED_INT)
+    assert vbo.validate()
+    assert indices.validate()
+
+    # descriptors which don't match the buffer are invalid
+    vbo.size += 4
+    assert not vbo.validate()
+    vbo.size -= 4
+
+    gt.deleteVBO(indices)
+    assert not indices.validate()
+
+
+def test_VertexBufferInfo_validate_keeps_bindings(vbo4x3):
+    # bindings of the buffer's target are restored, including a VAO's index
+    # buffer which is part of the VAO's state
+    vbo, _ = vbo4x3
+    other = gt.createVBO(np.zeros((2, 3), dtype=np.float32))
+    vaoIndices = gt.createVBO(
+        np.arange(3, dtype=np.uint32), target=GL.GL_ELEMENT_ARRAY_BUFFER,
+        dataType=GL.GL_UNSIGNED_INT)
+    indices = gt.createVBO(
+        np.arange(3, dtype=np.uint32), target=GL.GL_ELEMENT_ARRAY_BUFFER,
+        dataType=GL.GL_UNSIGNED_INT)
+    vao = gt.createVAO(
+        {GL.GL_VERTEX_ARRAY: other}, indexBuffer=vaoIndices, legacy=True)
+
+    gt._glBindVertexArray(vao.name)
+    gt.bindVBO(other)
+    try:
+        assert vbo.validate()
+        assert indices.validate()
+
+        assert _getInteger(GL.GL_ARRAY_BUFFER_BINDING) == other.name.value
+        assert _getInteger(GL.GL_ELEMENT_ARRAY_BUFFER_BINDING) == \
+            vaoIndices.name.value
+        assert _boundVAO() == vao.name
+        assert GL.glGetError() == GL.GL_NO_ERROR
+    finally:
+        gt.unbindVBO(other)
+        gt._glBindVertexArray(0)
+
+    gt.deleteVAO(vao)
+    for buffer in (other, vaoIndices, indices):
+        gt.deleteVBO(buffer)
+
+
 @pytest.mark.parametrize('start, length', [
     (-1, 2), (0, 0), (0, 13), (10, 3), (12, None)])
 def test_mapBuffer_invalid_range(vbo4x3, start, length):

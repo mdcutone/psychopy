@@ -3866,8 +3866,9 @@ class VertexBufferInfo:
         if self.name == 0 or GL.glIsBuffer(self.name) != GL.GL_TRUE:
             return False
 
+        # query for the buffer currently bound to the target, not the VAO
         if self.target == GL.GL_ARRAY_BUFFER:
-            bindTarget = GL.GL_VERTEX_ARRAY_BINDING
+            bindTarget = GL.GL_ARRAY_BUFFER_BINDING
         elif self.target == GL.GL_ELEMENT_ARRAY_BUFFER:
             bindTarget = GL.GL_ELEMENT_ARRAY_BUFFER_BINDING
         else:
