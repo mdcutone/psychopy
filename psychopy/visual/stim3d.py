@@ -36,6 +36,22 @@ _DEFAULT_MAT_AMBIENT = (GL.GLfloat * 4)(0.2, 0.2, 0.2, 1.0)
 _DEFAULT_MAT_EMISSION = (GL.GLfloat * 4)(0.0, 0.0, 0.0, 1.0)
 
 
+def _freeVAOs(vaos):
+    """Delete VAOs and the vertex and index buffers they use. Buffers shared
+    between VAOs are only deleted once. The context the VAOs were created in
+    must be current.
+    """
+    buffers = {}
+    for vao in vaos:
+        for buffer in list(vao.activeAttribs.values()) + [vao.indexBuffer]:
+            if buffer is not None:
+                buffers[id(buffer)] = buffer
+        gt.deleteVAO(vao)
+
+    for buffer in buffers.values():
+        gt.deleteVBO(buffer)
+
+
 class LightSource:
     """Class for representing a light source in a scene. This is a 
     lazy-imported class, therefore import using full path 
@@ -465,6 +481,9 @@ class SceneSkybox:
         self._ori = ori
         self._axis = np.ascontiguousarray(axis, dtype=np.float32)
 
+        # cubemap created from image files, freed by `free()`
+        self._ownedCubemap = None
+
         if tex:
             if isinstance(tex, (list, tuple,)):
                 if len(tex) == 6:
@@ -492,6 +511,7 @@ class SceneSkybox:
                             GL.GL_TEXTURE_WRAP_S: GL.GL_CLAMP_TO_EDGE,
                             GL.GL_TEXTURE_WRAP_T: GL.GL_CLAMP_TO_EDGE,
                             GL.GL_TEXTURE_WRAP_R: GL.GL_CLAMP_TO_EDGE})
+                    self._ownedCubemap = self._skyCubemap
                 else:
                    raise ValueError("Not enough textures specified, must be 6.")
             elif isinstance(tex, gt.TexCubeMap):
@@ -537,6 +557,33 @@ class SceneSkybox:
     def skyCubeMap(self, value):
         self._skyCubemap = value
 
+    def free(self):
+        """Free the video memory used by this skybox.
+
+        This deletes the skybox's vertex data and shader, and the cubemap if it
+        was created by the skybox from image files. Cubemaps assigned by the
+        user are not freed. See :meth:`BaseRigidBodyStim.free` for details.
+        After calling this, `draw()` does nothing. Calling this more than once
+        has no effect.
+
+        """
+        if self._vao is None:
+            return
+
+        self.win._setCurrent()
+
+        _freeVAOs([self._vao])
+        self._vao = None
+
+        GL.glDeleteProgram(self._shaderProg)
+        self._shaderProg = None
+
+        if self._ownedCubemap is not None:
+            if self._skyCubemap is self._ownedCubemap:
+                self._skyCubemap = None
+            gt.deleteTexture(self._ownedCubemap)
+            self._ownedCubemap = None
+
     def draw(self, win=None):
         """Draw the skybox.
 
@@ -551,13 +598,14 @@ class SceneSkybox:
             context with the window which this objects was initialized with.
 
         """
-        if self._skyCubemap is None:  # nop if no cubemap is assigned
+        # nop if no cubemap is assigned or after calling `free()`
+        if self._skyCubemap is None or self._vao is None:
             return
 
         if win is None:
             win = self.win
         else:
-            win._makeCurrent()
+            win._setCurrent()
 
         # enable 3D drawing if the caller hasn't already
         wasDraw3d = win.draw3d
@@ -651,18 +699,19 @@ class BlinnPhongMaterial:
         Window this material is associated with, required for shaders and some
         color space conversions.
     diffuseColor : array_like
-        Diffuse material color (r, g, b) with values between -1.0 and 1.0.
+        Diffuse material color (r, g, b) in `colorSpace`.
     specularColor : array_like
-        Specular material color (r, g, b) with values between -1.0 and 1.0.
+        Specular material color (r, g, b) in `colorSpace`.
     ambientColor : array_like
-        Ambient material color (r, g, b) with values between -1.0 and 1.0.
+        Ambient material color (r, g, b) in `colorSpace`.
     emissionColor : array_like
-        Emission material color (r, g, b) with values between -1.0 and 1.0.
+        Emission material color (r, g, b) in `colorSpace`.
     shininess : float
-        Material shininess, usually ranges from 0.0 to 128.0.
+        Material shininess, clamped to between 0.0 and 128.0.
     colorSpace : str
         Color space for `diffuseColor`, `specularColor`, `ambientColor`, and
-        `emissionColor`. This is no longer used.
+        `emissionColor`, both when setting and getting them. Default is `'rgb'`,
+        where values are between -1.0 and 1.0.
     opacity : float
         Opacity of the material. Ranges from 0.0 to 1.0 where 1.0 is fully
         opaque.
@@ -717,12 +766,14 @@ class BlinnPhongMaterial:
         self._ptrAmbient = np.ctypeslib.as_ctypes(self._ambientRGB)
         self._ptrEmission = np.ctypeslib.as_ctypes(self._emissionRGB)
 
+        # must be set before the colors so they're read in this color space
+        self.colorSpace = colorSpace
+
         self.diffuseColor = diffuseColor
         self.specularColor = specularColor
         self.ambientColor = ambientColor
         self.emissionColor = emissionColor
 
-        self.colorSpace = colorSpace
         self.opacity = opacity
         self.contrast = contrast
         self.face = face
@@ -1223,9 +1274,10 @@ class BaseRigidBodyStim(ColorMixin, WindowMixin):
         self.win = win
         self.autoLog = autoLog
         self.colorSpace = colorSpace
-        self.contrast = contrast
         self.opacity = opacity
         self.color = color
+        # contrast is stored with the color, so must be set after it
+        self.contrast = contrast
 
         self._thePose = RigidBodyPose(pos, ori)
         self.material = None
@@ -1367,21 +1419,8 @@ class BaseRigidBodyStim(ColorMixin, WindowMixin):
             return
 
         self._selectWindow(self.win)
-
-        vaos = (self._vao.values() if isinstance(self._vao, dict)
-                else [self._vao])
-
-        # buffers may be shared between VAOs, only delete them once
-        buffers = {}
-        for vao in vaos:
-            for buffer in list(vao.activeAttribs.values()) + [vao.indexBuffer]:
-                if buffer is not None:
-                    buffers[id(buffer)] = buffer
-            gt.deleteVAO(vao)
-
-        for buffer in buffers.values():
-            gt.deleteVBO(buffer)
-
+        _freeVAOs(self._vao.values() if isinstance(self._vao, dict)
+                  else [self._vao])
         self._vao = None
 
     def draw(self, win=None):
@@ -1816,7 +1855,6 @@ class BoxStim(BaseRigidBodyStim):
 
         self._vao = self._createVAO(vertices, texCoords, normals, faces)
 
-        self.setColor(color, colorSpace=self.colorSpace, log=False)
         self.material = useMaterial
 
         self.extents = (vertices.min(axis=0), vertices.max(axis=0))
@@ -1920,7 +1958,6 @@ class PlaneStim(BaseRigidBodyStim):
 
         self._vao = self._createVAO(vertices, texCoords, normals, faces)
 
-        self.setColor(color, colorSpace=self.colorSpace, log=False)
         self.material = useMaterial
 
         self.extents = (vertices.min(axis=0), vertices.max(axis=0))
@@ -1938,22 +1975,37 @@ class ObjMeshStim(BaseRigidBodyStim):
     window has light sources defined and lighting is enabled (by setting
     `useLights=True` before drawing the stimulus).
 
-    Vertex positions, texture coordinates, and normals are loaded and packed
-    into a single vertex buffer object (VBO). Vertex array objects (VAO) are
-    created for each material with an index buffer referencing vertices assigned
-    that material in the VBO. For maximum performance, keep the number of
-    materials per object as low as possible, as switching between VAOs has some
-    overhead.
+    The mesh is loaded using :func:`~psychopy.tools.gltools.loadObjFile`, see
+    it for details of what is supported. In short, faces may be triangles or
+    convex polygons, and texture coordinates and normals are optional (faces
+    without normals are flat shaded). Vertex positions, texture coordinates,
+    and normals are packed into a single vertex buffer object (VBO). Faces are
+    grouped by the material they use (`usemtl`), and a vertex array object
+    (VAO) is created for each group. For maximum performance, keep the number
+    of materials per object as low as possible, as switching between VAOs has
+    some overhead.
 
-    Material attributes are read from the material library file (*.MTL)
-    associated with the *.OBJ file. This file will be automatically searched for
-    and read during loading. Afterwards you can edit material properties by
-    accessing the data structure of the `materials` attribute.
+    Materials are read from the material library file (*.MTL) referenced by the
+    OBJ file's `mtllib` statement, using
+    :func:`~psychopy.tools.gltools.loadMtlFile`. Ambient, diffuse, specular and
+    emission colors (`Ka`, `Kd`, `Ks` and `Ke`), shininess (`Ns`), opacity
+    (`d` or `Tr`) and diffuse textures (`map_Kd`) are supported. Afterwards,
+    the materials can be accessed and edited through the `material` attribute,
+    which is a dictionary of material names and
+    :class:`BlinnPhongMaterial` objects. Groups of faces without a material
+    (e.g. faces without a `usemtl` statement, or whose material isn't in the
+    MTL file or `material` dictionary) are drawn using `color`. Alternatively,
+    a single material can be used for all faces by passing `useMaterial` or
+    setting `material`, or no material at all by setting `material` to `None`.
 
     Keep in mind that OBJ shapes are rigid bodies, the mesh itself cannot be
     deformed during runtime. However, meshes can be positioned and rotated as
     desired by manipulating the `RigidBodyPose` instance accessed through the
     `thePose` attribute.
+
+    Vertex data and textures are stored in video memory until the window is
+    closed. If you create many meshes while the window is open (e.g. one per
+    trial), call :meth:`free` when each is no longer needed.
 
     Warnings
     --------
@@ -1963,9 +2015,20 @@ class ObjMeshStim(BaseRigidBodyStim):
 
     Examples
     --------
-    Loading an *.OBJ file from a disk location::
+    Loading an *.OBJ file from a disk location, with materials from the MTL
+    file it references::
 
         myObjStim = ObjMeshStim(win, '/path/to/file/model.obj')
+
+    Changing a material loaded from the MTL file::
+
+        myObjStim.material['metal'].shininess = 100
+
+    Drawing the mesh with a single color instead of its materials::
+
+        myObjStim = ObjMeshStim(
+            win, '/path/to/file/model.obj', loadMtllib=False,
+            color=(1, -1, -1))
 
     """
     def __init__(self,
@@ -1987,18 +2050,16 @@ class ObjMeshStim(BaseRigidBodyStim):
         win : `~psychopy.visual.Window`
             Window this stimulus is associated with. Stimuli cannot be shared
             across windows unless they share the same context.
-        size : tuple or float
-            Dimensions of the mesh. If a single value is specified, the plane
-            will be a square. Provide a tuple of floats to specify the width and
-            length of the box (eg. `size=(0.2, 1.3)`).
+        objFile : str
+            Path to the *.OBJ file to load. The MTL file and textures it
+            references are found relative to the directory containing it.
         pos : array_like
             Position vector `[x, y, z]` for the origin of the rigid body.
         ori : array_like
             Orientation quaternion `[x, y, z, w]` where `x`, `y`, `z` are
             imaginary and `w` is real. If you prefer specifying rotations in
             axis-angle format, call `setOriAxisAngle` after initialization. By
-            default, the plane is oriented with normal facing the +Z axis of the
-            scene.
+            default, the mesh has the orientation it was saved with.
         useMaterial : BlinnPhongMaterial, optional
             Material to use for all sub-meshes. If given, materials are not
             loaded from the MTL file even if `loadMtllib` is `True`. The
@@ -2014,6 +2075,20 @@ class ObjMeshStim(BaseRigidBodyStim):
             will be loaded as per the material requirements. If the OBJ file
             doesn't reference an MTL file, or it can't be loaded (a warning is
             logged), `color` is used as if `loadMtllib` were `False`.
+        color : array_like, str or `~psychopy.colors.Color`
+            Diffuse and ambient color of faces drawn without a material.
+        colorSpace : str
+            Color space of `color`.
+        contrast : float
+            Contrast of `color`.
+        opacity : float
+            Opacity of faces drawn without a material, from 0.0 (transparent)
+            to 1.0 (opaque). Use the `opacity` of materials for faces drawn
+            with them.
+        name : str
+            Name of the stimulus, used for logging.
+        autoLog : bool
+            Enable automatic logging of changes to the stimulus.
 
         """
         super(ObjMeshStim, self).__init__(
