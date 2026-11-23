@@ -2086,26 +2086,39 @@ class ObjMeshStim(BaseRigidBodyStim):
 
         self._loadModelMatrix()
 
-        # iterate over materials, draw associated VAOs
-        if self.material is not None:
-            # if material is a dictionary
-            if isinstance(self.material, dict):
-                nMaterials = len(self.material)
-                for i, (materialName, materialDesc) in enumerate(
-                        self.material.items(), start=1):
-                    materialDesc.begin()
-                    gt.drawVAO(self._vao[materialName], GL.GL_TRIANGLES,
-                               unbind=i == nMaterials)
-                    # the next material overwrites the state anyway, so only
-                    # restore defaults after the last one
-                    materialDesc.end(clear=i == nMaterials)
-            else:
-                # material is a single item
-                self.material.begin()
-                nVAOs = len(self._vao)
-                for i, vao in enumerate(self._vao.values(), start=1):
-                    gt.drawVAO(vao, GL.GL_TRIANGLES, unbind=i == nVAOs)
-                self.material.end()
+        if isinstance(self.material, dict):
+            # look up the material for each group of faces, groups without one
+            # (e.g. faces without `usemtl`, or whose material isn't in the MTL
+            # file) are drawn using `color`, unused materials are ignored
+            withMaterial = []
+            withoutMaterial = []
+            for name, vao in self._vao.items():
+                material = self.material.get(name)
+                if material is None:
+                    withoutMaterial.append(vao)
+                else:
+                    withMaterial.append((material, vao))
+
+            nMaterials = len(withMaterial)
+            for i, (material, vao) in enumerate(withMaterial, start=1):
+                isLast = i == nMaterials
+                material.begin()
+                # VAOs are only unbound after the last one is drawn
+                gt.drawVAO(vao, GL.GL_TRIANGLES,
+                           unbind=isLast and not withoutMaterial)
+                # the next material overwrites the state anyway, so only
+                # restore defaults after the last one
+                material.end(clear=isLast)
+
+            if withoutMaterial:
+                self._drawWithoutMaterial(withoutMaterial, win)
+        elif self.material is not None:
+            # a single material used for all groups
+            self.material.begin()
+            nVAOs = len(self._vao)
+            for i, vao in enumerate(self._vao.values(), start=1):
+                gt.drawVAO(vao, GL.GL_TRIANGLES, unbind=i == nVAOs)
+            self.material.end()
         else:
             self._drawWithoutMaterial(self._vao.values(), win)
 
