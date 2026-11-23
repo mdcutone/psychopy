@@ -96,6 +96,204 @@ def test_bindTexture_default_target(win):
     gt.deleteTexture(texture)
 
 
+# ------------------------------------------------------------------------------
+# Legacy material functions
+#
+
+_GL_DEFAULT_MATERIAL = {
+    GL.GL_AMBIENT: [0.2, 0.2, 0.2, 1.0],
+    GL.GL_DIFFUSE: [0.8, 0.8, 0.8, 1.0],
+    GL.GL_SPECULAR: [0.0, 0.0, 0.0, 1.0],
+    GL.GL_EMISSION: [0.0, 0.0, 0.0, 1.0]}
+
+
+def _getMaterial(mode, face=GL.GL_FRONT):
+    value = (GL.GLfloat * 4)()
+    GL.glGetMaterialfv(face, mode, value)
+    return list(value) if mode != GL.GL_SHININESS else value[0]
+
+
+def _textureBinding(unit):
+    gt.activeTexture(unit)
+    binding = _getInteger(GL.GL_TEXTURE_BINDING_2D)
+    enabled = bool(GL.glIsEnabled(GL.GL_TEXTURE_2D))
+    gt.activeTexture(GL.GL_TEXTURE0)
+    return binding, enabled
+
+
+def _createTexture():
+    texData = np.zeros((4, 4, 4), dtype=np.uint8)
+    return gt.createTexImage2D(
+        4, 4, internalFormat=GL.GL_RGBA, pixelFormat=GL.GL_RGBA,
+        dataType=GL.GL_UNSIGNED_BYTE, data=texData.ctypes, unpackAlignment=1)
+
+
+def _assertDefaultMaterial():
+    for mode, expected in _GL_DEFAULT_MATERIAL.items():
+        assert _getMaterial(mode) == pytest.approx(expected), mode
+    assert _getMaterial(GL.GL_SHININESS) == pytest.approx(0.0)
+    assert not GL.glIsEnabled(GL.GL_COLOR_MATERIAL)
+
+
+@pytest.mark.parametrize('func, arg', [
+    (gt.useMaterial, None), (gt.clearMaterial, None)])
+def test_material_functions_deprecated(win, func, arg):
+    with pytest.warns(DeprecationWarning, match='BlinnPhongMaterial'):
+        func(arg)
+    GL.glDisable(GL.GL_COLOR_MATERIAL)
+
+
+def test_useMaterial_descriptor(win):
+    texture = _createTexture()
+    mat = gt.createMaterial(
+        [(GL.GL_AMBIENT, (0.1, 0.2, 0.3, 1.0)),
+         (GL.GL_DIFFUSE, (0.4, 0.5, 0.6, 1.0)),
+         (GL.GL_SHININESS, 32.0)],
+        textures=[(GL.GL_TEXTURE1, texture)])
+
+    with pytest.warns(DeprecationWarning):
+        gt.useMaterial(mat)
+    assert _getMaterial(GL.GL_AMBIENT) == pytest.approx([0.1, 0.2, 0.3, 1.0])
+    assert _getMaterial(GL.GL_DIFFUSE) == pytest.approx([0.4, 0.5, 0.6, 1.0])
+    assert _getMaterial(GL.GL_SHININESS) == pytest.approx(32.0)
+    # modes without a value are zero
+    assert _getMaterial(GL.GL_SPECULAR) == pytest.approx([0, 0, 0, 0])
+    assert not GL.glIsEnabled(GL.GL_COLOR_MATERIAL)
+
+    # textures are bound to their units, the first unit is left active
+    assert _textureBinding(GL.GL_TEXTURE1) == (texture.name.value, True)
+    assert _getInteger(GL.GL_ACTIVE_TEXTURE) == GL.GL_TEXTURE0
+
+    with pytest.warns(DeprecationWarning):
+        gt.clearMaterial(mat)
+    _assertDefaultMaterial()
+    assert _textureBinding(GL.GL_TEXTURE1) == (0, False)
+
+    gt.deleteTexture(texture)
+
+
+def test_useMaterial_without_textures(win):
+    texture = _createTexture()
+    mat = gt.createMaterial(textures=[(GL.GL_TEXTURE0, texture)])
+
+    with pytest.warns(DeprecationWarning):
+        gt.useMaterial(mat, useTextures=False)
+    assert _textureBinding(GL.GL_TEXTURE0) == (0, False)
+    with pytest.warns(DeprecationWarning):
+        gt.clearMaterial(mat)
+
+    gt.deleteTexture(texture)
+
+
+def test_useMaterial_object(win):
+    from psychopy.visual.stim3d import BlinnPhongMaterial
+
+    texture = _createTexture()
+    mat = BlinnPhongMaterial(
+        win, diffuseColor=(1, -1, -1), specularColor=(-1, 1, -1),
+        ambientColor=(-1, -1, 1), shininess=20, diffuseTexture=texture)
+
+    with pytest.warns(DeprecationWarning):
+        gt.useMaterial(mat)
+    assert _getMaterial(GL.GL_DIFFUSE) == pytest.approx([1, 0, 0, 1])
+    assert _getMaterial(GL.GL_SPECULAR) == pytest.approx([0, 1, 0, 1])
+    assert _getMaterial(GL.GL_AMBIENT) == pytest.approx([0, 0, 1, 1])
+    assert _getMaterial(GL.GL_SHININESS) == pytest.approx(20.0)
+    assert _textureBinding(GL.GL_TEXTURE0) == (texture.name.value, True)
+
+    with pytest.warns(DeprecationWarning):
+        gt.clearMaterial(mat)
+    _assertDefaultMaterial()
+    assert _textureBinding(GL.GL_TEXTURE0) == (0, False)
+
+    gt.deleteTexture(texture)
+
+
+def test_useMaterial_none(win):
+    # resets to defaults with color tracking enabled
+    mat = gt.createMaterial(
+        [(GL.GL_SPECULAR, (1.0, 0.0, 0.0, 1.0)),
+         (GL.GL_EMISSION, (0.0, 1.0, 0.0, 1.0)),
+         (GL.GL_SHININESS, 50.0)])
+    with pytest.warns(DeprecationWarning):
+        gt.useMaterial(mat)
+        gt.useMaterial(None)
+    assert GL.glIsEnabled(GL.GL_COLOR_MATERIAL)
+    assert _getMaterial(GL.GL_SPECULAR) == pytest.approx([0, 0, 0, 1])
+    assert _getMaterial(GL.GL_EMISSION) == pytest.approx([0, 0, 0, 1])
+    assert _getMaterial(GL.GL_SHININESS) == pytest.approx(0.0)
+
+    # ambient and diffuse track the current color
+    GL.glColor4f(0.25, 0.5, 0.75, 1.0)
+    assert _getMaterial(GL.GL_DIFFUSE) == pytest.approx([0.25, 0.5, 0.75, 1])
+    assert _getMaterial(GL.GL_AMBIENT) == pytest.approx([0.25, 0.5, 0.75, 1])
+
+    GL.glDisable(GL.GL_COLOR_MATERIAL)
+    GL.glColor4f(1.0, 1.0, 1.0, 1.0)
+
+
+@pytest.mark.parametrize('name, fields', [
+    ('mineralMaterials',
+     ['emerald', 'jade', 'obsidian', 'pearl', 'ruby', 'turquoise']),
+    ('metalMaterials', ['brass', 'bronze', 'chrome', 'copper', 'gold', 'silver']),
+    ('plasticMaterials', ['black', 'cyan', 'green', 'red', 'white', 'yellow']),
+    ('rubberMaterials', ['black', 'cyan', 'green', 'red', 'white', 'yellow']),
+])
+def test_material_presets(name, fields):
+    with pytest.warns(DeprecationWarning, match=name):
+        presets = getattr(gt, name)
+    assert list(presets._fields) == fields
+    assert all(isinstance(mat, gt.Material) for mat in presets)
+
+    # presets are only created once
+    with pytest.warns(DeprecationWarning):
+        assert getattr(gt, name) is presets
+
+
+def test_material_presets_import():
+    with pytest.warns(DeprecationWarning, match='metalMaterials'):
+        from psychopy.tools.gltools import metalMaterials
+    gold = metalMaterials.gold
+    assert list(gold.params[GL.GL_DIFFUSE]) == pytest.approx(
+        [0.75164, 0.60648, 0.22648, 1.0])
+    assert gold.params[GL.GL_SHININESS].value == pytest.approx(0.4 * 128.0)
+
+    # other missing attributes still raise
+    with pytest.raises(AttributeError):
+        gt.notAnAttribute
+
+
+def test_useMaterial_preset(win):
+    with pytest.warns(DeprecationWarning):
+        gold = gt.metalMaterials.gold
+        gt.useMaterial(gold)
+    assert _getMaterial(GL.GL_DIFFUSE, GL.GL_BACK) == pytest.approx(
+        [0.75164, 0.60648, 0.22648, 1.0])
+    with pytest.warns(DeprecationWarning):
+        gt.clearMaterial(gold)
+    _assertDefaultMaterial()
+
+
+@pytest.mark.parametrize('passTexture', [True, False])
+def test_unbindTexture(win, passTexture):
+    texture = _createTexture()
+    gt.bindTexture(texture, unit=GL.GL_TEXTURE0)
+    GL.glEnable(GL.GL_TEXTURE_2D)
+    assert _textureBinding(GL.GL_TEXTURE0) == (texture.name.value, True)
+
+    with pytest.warns(DeprecationWarning, match='bindTexture'):
+        gt.unbindTexture(texture if passTexture else None)
+    assert _textureBinding(GL.GL_TEXTURE0) == (0, False)
+    assert GL.glGetError() == GL.GL_NO_ERROR
+
+    gt.deleteTexture(texture)
+
+
+def test_all_names_exist():
+    # `from psychopy.tools.gltools import *` fails if any are missing
+    assert [name for name in gt.__all__ if not hasattr(gt, name)] == []
+
+
 def test_SimpleMaterial_deprecated():
     with pytest.warns(DeprecationWarning, match='BlinnPhongMaterial'):
         try:

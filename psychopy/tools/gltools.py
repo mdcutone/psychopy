@@ -110,7 +110,7 @@ __all__ = [
     'createCone',
     'transformMeshPosOri',
     'calculateVertexNormals',
-    'mergeVerticies',
+    'mergeVertices',
     'smoothCreases',
     'flipFaces',
     'interleaveAttributes',
@@ -123,6 +123,7 @@ __all__ = [
     'createTexImage2D',
     'createTexImage2dFromFile',
     'bindTexture',
+    'unbindTexture',
     'createCubeMap',
     'TexCubeMap',
     'getModelViewMatrix',
@@ -4571,8 +4572,44 @@ def bindTexture(texture, target=None, unit=None):
 
     if unit is not None:     # bind the texture to a specific unit
         activeTexture(unit)
-    
+
     GL.glBindTexture(target, texture)
+
+
+# texture targets which can be enabled for fixed-function texturing
+_FIXED_FUNCTION_TEXTURE_TARGETS = (
+    GL.GL_TEXTURE_1D,
+    GL.GL_TEXTURE_2D,
+    GL.GL_TEXTURE_3D,
+    GL.GL_TEXTURE_CUBE_MAP)
+
+
+def unbindTexture(texture=None):
+    """Unbind a texture from the active texture unit, and disable
+    fixed-function texturing for its target.
+
+    .. deprecated:: 2027.1.0
+        Use `bindTexture(None, target, unit)` instead.
+
+    Parameters
+    ----------
+    texture : TexImage2DInfo, TexImage2DMultisampleInfo, TexCubeMap or None
+        Texture to unbind, its `target` is unbound. If `None`, `GL_TEXTURE_2D`
+        is unbound.
+
+    """
+    warnings.warn(
+        '`psychopy.tools.gltools.unbindTexture` is deprecated, use '
+        '`bindTexture(None, target, unit)` instead.',
+        DeprecationWarning, stacklevel=2)
+
+    target = GL.GL_TEXTURE_2D if texture is None else texture.target
+    GL.glBindTexture(target, 0)
+    if target in _FIXED_FUNCTION_TEXTURE_TARGETS:
+        GL.glDisable(target)
+
+    if hasattr(texture, '_isBound'):
+        texture._isBound = False
 
 
 def setPolygonMode(face, mode):
@@ -4947,26 +4984,27 @@ def createMaterial(params=(), textures=(), face=GL.GL_FRONT_AND_BACK):
             (GL.GL_SPECULAR, (0.628281, 0.555802, 0.366065, 1.0)),
             (GL.GL_SHININESS, 0.4 * 128.0)])
 
-    Use the material when drawing::
+    Use the material when drawing (note that `useMaterial` and `clearMaterial`
+    are deprecated)::
 
         useMaterial(gold)
         drawVAO( ... )  # all meshes will be gold
-        useMaterial(None)  # turn off material when done
+        clearMaterial(gold)  # turn off material when done
 
     Create a red plastic material, but define reflectance and shine later::
 
         red_plastic = createMaterial()
 
         # you need to convert values to ctypes!
-        red_plastic.values[GL_AMBIENT] = (GLfloat * 4)(0.0, 0.0, 0.0, 1.0)
-        red_plastic.values[GL_DIFFUSE] = (GLfloat * 4)(0.5, 0.0, 0.0, 1.0)
-        red_plastic.values[GL_SPECULAR] = (GLfloat * 4)(0.7, 0.6, 0.6, 1.0)
-        red_plastic.values[GL_SHININESS] = 0.25 * 128.0
+        red_plastic.params[GL_AMBIENT] = (GLfloat * 4)(0.0, 0.0, 0.0, 1.0)
+        red_plastic.params[GL_DIFFUSE] = (GLfloat * 4)(0.5, 0.0, 0.0, 1.0)
+        red_plastic.params[GL_SPECULAR] = (GLfloat * 4)(0.7, 0.6, 0.6, 1.0)
+        red_plastic.params[GL_SHININESS] = GLfloat(0.25 * 128.0)
 
         # set and draw
         useMaterial(red_plastic)
-        drawVertexbuffers( ... )  # all meshes will be red plastic
-        useMaterial(None)
+        drawVAO( ... )  # all meshes will be red plastic
+        clearMaterial(red_plastic)
 
     """
     # setup material mode/value slots
@@ -4994,6 +5032,208 @@ def createMaterial(params=(), textures=(), face=GL.GL_FRONT_AND_BACK):
                 raise ValueError("Invalid texture unit enum.")
 
     return matDesc
+
+
+# default material according to the OpenGL spec, set by `useMaterial(None)` and
+# `clearMaterial`
+defaultMaterial = createMaterial(
+    [(GL.GL_AMBIENT, (0.2, 0.2, 0.2, 1.0)),
+     (GL.GL_DIFFUSE, (0.8, 0.8, 0.8, 1.0)),
+     (GL.GL_SPECULAR, (0.0, 0.0, 0.0, 1.0)),
+     (GL.GL_EMISSION, (0.0, 0.0, 0.0, 1.0)),
+     (GL.GL_SHININESS, 0.0)])
+
+
+# ---------------------
+# OpenGL/VRML Materials
+# ---------------------
+#
+# A collection of pre-defined materials for stimuli. Keep in mind that these
+# materials only approximate real-world equivalents. Values were obtained from
+# http://devernay.free.fr/cours/opengl/materials.html (08/24/18). There are four
+# material libraries to use (`mineralMaterials`, `metalMaterials`,
+# `plasticMaterials` and `rubberMaterials`), where individual material
+# descriptors are accessed via property names.
+#
+# Usage:
+#
+#   useMaterial(metalMaterials.gold)
+#   drawVAO(myObject)
+#   clearMaterial(metalMaterials.gold)
+#
+# These are deprecated along with `useMaterial`, accessing them logs a
+# deprecation warning. They're created the first time they're accessed.
+#
+
+
+def _createMaterialPresets():
+    """Create the deprecated material presets, see `__getattr__`."""
+    mineralMaterials = namedtuple(
+        'mineralMaterials',
+        ['emerald', 'jade', 'obsidian', 'pearl', 'ruby', 'turquoise'])(
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.0215, 0.1745, 0.0215, 1.0)),
+             (GL.GL_DIFFUSE, (0.07568, 0.61424, 0.07568, 1.0)),
+             (GL.GL_SPECULAR, (0.633, 0.727811, 0.633, 1.0)),
+             (GL.GL_SHININESS, 0.6 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.135, 0.2225, 0.1575, 1.0)),
+             (GL.GL_DIFFUSE, (0.54, 0.89, 0.63, 1.0)),
+             (GL.GL_SPECULAR, (0.316228, 0.316228, 0.316228, 1.0)),
+             (GL.GL_SHININESS, 0.1 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.05375, 0.05, 0.06625, 1.0)),
+             (GL.GL_DIFFUSE, (0.18275, 0.17, 0.22525, 1.0)),
+             (GL.GL_SPECULAR, (0.332741, 0.328634, 0.346435, 1.0)),
+             (GL.GL_SHININESS, 0.3 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.25, 0.20725, 0.20725, 1.0)),
+             (GL.GL_DIFFUSE, (1, 0.829, 0.829, 1.0)),
+             (GL.GL_SPECULAR, (0.296648, 0.296648, 0.296648, 1.0)),
+             (GL.GL_SHININESS, 0.088 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.1745, 0.01175, 0.01175, 1.0)),
+             (GL.GL_DIFFUSE, (0.61424, 0.04136, 0.04136, 1.0)),
+             (GL.GL_SPECULAR, (0.727811, 0.626959, 0.626959, 1.0)),
+             (GL.GL_SHININESS, 0.6 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.1, 0.18725, 0.1745, 1.0)),
+             (GL.GL_DIFFUSE, (0.396, 0.74151, 0.69102, 1.0)),
+             (GL.GL_SPECULAR, (0.297254, 0.30829, 0.306678, 1.0)),
+             (GL.GL_SHININESS, 0.1 * 128.0)])
+    )
+
+    metalMaterials = namedtuple(
+        'metalMaterials',
+        ['brass', 'bronze', 'chrome', 'copper', 'gold', 'silver'])(
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.329412, 0.223529, 0.027451, 1.0)),
+             (GL.GL_DIFFUSE, (0.780392, 0.568627, 0.113725, 1.0)),
+             (GL.GL_SPECULAR, (0.992157, 0.941176, 0.807843, 1.0)),
+             (GL.GL_SHININESS, 0.21794872 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.2125, 0.1275, 0.054, 1.0)),
+             (GL.GL_DIFFUSE, (0.714, 0.4284, 0.18144, 1.0)),
+             (GL.GL_SPECULAR, (0.393548, 0.271906, 0.166721, 1.0)),
+             (GL.GL_SHININESS, 0.2 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.25, 0.25, 0.25, 1.0)),
+             (GL.GL_DIFFUSE, (0.4, 0.4, 0.4, 1.0)),
+             (GL.GL_SPECULAR, (0.774597, 0.774597, 0.774597, 1.0)),
+             (GL.GL_SHININESS, 0.6 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.19125, 0.0735, 0.0225, 1.0)),
+             (GL.GL_DIFFUSE, (0.7038, 0.27048, 0.0828, 1.0)),
+             (GL.GL_SPECULAR, (0.256777, 0.137622, 0.086014, 1.0)),
+             (GL.GL_SHININESS, 0.1 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.24725, 0.1995, 0.0745, 1.0)),
+             (GL.GL_DIFFUSE, (0.75164, 0.60648, 0.22648, 1.0)),
+             (GL.GL_SPECULAR, (0.628281, 0.555802, 0.366065, 1.0)),
+             (GL.GL_SHININESS, 0.4 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.19225, 0.19225, 0.19225, 1.0)),
+             (GL.GL_DIFFUSE, (0.50754, 0.50754, 0.50754, 1.0)),
+             (GL.GL_SPECULAR, (0.508273, 0.508273, 0.508273, 1.0)),
+             (GL.GL_SHININESS, 0.4 * 128.0)])
+    )
+
+    plasticMaterials = namedtuple(
+        'plasticMaterials',
+        ['black', 'cyan', 'green', 'red', 'white', 'yellow'])(
+        createMaterial(
+            [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
+             (GL.GL_DIFFUSE, (0.01, 0.01, 0.01, 1.0)),
+             (GL.GL_SPECULAR, (0.5, 0.5, 0.5, 1.0)),
+             (GL.GL_SHININESS, 0.25 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0, 0.1, 0.06, 1.0)),
+             (GL.GL_DIFFUSE, (0.06, 0, 0.50980392, 1.0)),
+             (GL.GL_SPECULAR, (0.50196078, 0.50196078, 0.50196078, 1.0)),
+             (GL.GL_SHININESS, 0.25 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
+             (GL.GL_DIFFUSE, (0.1, 0.35, 0.1, 1.0)),
+             (GL.GL_SPECULAR, (0.45, 0.55, 0.45, 1.0)),
+             (GL.GL_SHININESS, 0.25 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
+             (GL.GL_DIFFUSE, (0.5, 0, 0, 1.0)),
+             (GL.GL_SPECULAR, (0.7, 0.6, 0.6, 1.0)),
+             (GL.GL_SHININESS, 0.25 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
+             (GL.GL_DIFFUSE, (0.55, 0.55, 0.55, 1.0)),
+             (GL.GL_SPECULAR, (0.7, 0.7, 0.7, 1.0)),
+             (GL.GL_SHININESS, 0.25 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0, 0, 0, 1.0)),
+             (GL.GL_DIFFUSE, (0.5, 0.5, 0, 1.0)),
+             (GL.GL_SPECULAR, (0.6, 0.6, 0.5, 1.0)),
+             (GL.GL_SHININESS, 0.25 * 128.0)])
+    )
+
+    rubberMaterials = namedtuple(
+        'rubberMaterials',
+        ['black', 'cyan', 'green', 'red', 'white', 'yellow'])(
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.02, 0.02, 0.02, 1.0)),
+             (GL.GL_DIFFUSE, (0.01, 0.01, 0.01, 1.0)),
+             (GL.GL_SPECULAR, (0.4, 0.4, 0.4, 1.0)),
+             (GL.GL_SHININESS, 0.078125 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0, 0.05, 0.05, 1.0)),
+             (GL.GL_DIFFUSE, (0.4, 0.5, 0.5, 1.0)),
+             (GL.GL_SPECULAR, (0.04, 0.7, 0.7, 1.0)),
+             (GL.GL_SHININESS, 0.078125 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0, 0.05, 0, 1.0)),
+             (GL.GL_DIFFUSE, (0.4, 0.5, 0.4, 1.0)),
+             (GL.GL_SPECULAR, (0.04, 0.7, 0.04, 1.0)),
+             (GL.GL_SHININESS, 0.078125 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.05, 0, 0, 1.0)),
+             (GL.GL_DIFFUSE, (0.5, 0.4, 0.4, 1.0)),
+             (GL.GL_SPECULAR, (0.7, 0.04, 0.04, 1.0)),
+             (GL.GL_SHININESS, 0.078125 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.05, 0.05, 0.05, 1.0)),
+             (GL.GL_DIFFUSE, (0.5, 0.5, 0.5, 1.0)),
+             (GL.GL_SPECULAR, (0.7, 0.7, 0.7, 1.0)),
+             (GL.GL_SHININESS, 0.078125 * 128.0)]),
+        createMaterial(
+            [(GL.GL_AMBIENT, (0.05, 0.05, 0, 1.0)),
+             (GL.GL_DIFFUSE, (0.5, 0.5, 0.4, 1.0)),
+             (GL.GL_SPECULAR, (0.7, 0.7, 0.04, 1.0)),
+             (GL.GL_SHININESS, 0.078125 * 128.0)])
+    )
+
+    return {
+        'mineralMaterials': mineralMaterials,
+        'metalMaterials': metalMaterials,
+        'plasticMaterials': plasticMaterials,
+        'rubberMaterials': rubberMaterials}
+
+
+_materialPresets = None
+
+
+def __getattr__(name):
+    """Get deprecated module attributes."""
+    global _materialPresets
+
+    if name in ('mineralMaterials', 'metalMaterials', 'plasticMaterials',
+                'rubberMaterials'):
+        warnings.warn(
+            '`psychopy.tools.gltools.{}` is deprecated, use '
+            '`psychopy.visual.stim3d.BlinnPhongMaterial` instead.'.format(
+                name), DeprecationWarning, stacklevel=2)
+        if _materialPresets is None:
+            _materialPresets = _createMaterialPresets()
+        return _materialPresets[name]
+
+    raise AttributeError(
+        "module {!r} has no attribute {!r}".format(__name__, name))
 
 
 class SimpleMaterial:
@@ -5216,20 +5456,37 @@ class SimpleMaterial:
         self._shininess = float(value)
 
 
+def _setDefaultMaterial():
+    """Set the material state to OpenGL defaults for both faces."""
+    for mode, param in defaultMaterial.params.items():
+        GL.glMaterialfv(GL.GL_FRONT_AND_BACK, mode, param)
+
+
+# color assigned to modes of material descriptors which are `None`
+_NULL_MATERIAL_COLOR = (GL.GLfloat * 4)(0.0, 0.0, 0.0, 0.0)
+
+
 def useMaterial(material, useTextures=True):
     """Use a material for proceeding vertex draws.
 
+    .. deprecated:: 2027.1.0
+        Use :class:`~psychopy.visual.stim3d.BlinnPhongMaterial` and its
+        `begin()` and `end()` methods instead.
+
     Parameters
     ----------
-    material : :obj:`Material` or None
-        Material descriptor to use. Default material properties are set if None
-        is specified. This is equivalent to disabling materials.
+    material : :obj:`Material`, material object or None
+        Material to use. This can be a descriptor returned by
+        :func:`createMaterial`, or a material object such as
+        :class:`~psychopy.visual.stim3d.BlinnPhongMaterial`. Default material
+        properties are set if `None` is specified, and color tracking
+        (`GL_COLOR_MATERIAL`) is enabled. This is equivalent to disabling
+        materials.
     useTextures : :obj:`bool`
-        Enable textures. Textures specified in a material descriptor's 'texture'
-        attribute will be bound and their respective texture units will be
-        enabled. Note, when disabling materials, the value of useTextures must
-        match the previous call. If there are no textures attached to the
-        material, useTexture will be silently ignored.
+        Enable textures. Textures of the material will be bound to their
+        texture units, and texturing enabled for those units. If there are no
+        textures attached to the material, `useTextures` will be silently
+        ignored.
 
     Returns
     -------
@@ -5237,8 +5494,8 @@ def useMaterial(material, useTextures=True):
 
     Notes
     -----
-    1.  If a material mode has a value of None, a color with all components 0.0
-        will be assigned.
+    1.  If a mode of a material descriptor has a value of None, a color with
+        all components 0.0 will be assigned (or 0.0 for `GL_SHININESS`).
     2.  Material colors and shininess values are accessible from shader programs
         after calling 'useMaterial'. Values can be accessed via built-in
         'gl_FrontMaterial' and 'gl_BackMaterial' structures (e.g.
@@ -5248,54 +5505,102 @@ def useMaterial(material, useTextures=True):
     --------
     Use a material when drawing::
 
-        useMaterial(metalMaterials.gold)
+        gold = createMaterial([
+            (GL.GL_AMBIENT, (0.24725, 0.19950, 0.07450, 1.0)),
+            (GL.GL_DIFFUSE, (0.75164, 0.60648, 0.22648, 1.0)),
+            (GL.GL_SPECULAR, (0.628281, 0.555802, 0.366065, 1.0)),
+            (GL.GL_SHININESS, 0.4 * 128.0)])
+
+        useMaterial(gold)
         drawVAO( ... )  # all meshes drawn will be gold
-        useMaterial(None)  # turn off material when done
+        clearMaterial(gold)  # turn off material when done
 
     """
-    if material is not None:
-        GL.glDisable(GL.GL_COLOR_MATERIAL)  # disable color tracking
+    warnings.warn(
+        '`psychopy.tools.gltools.useMaterial` is deprecated, use '
+        '`psychopy.visual.stim3d.BlinnPhongMaterial.begin()` instead.',
+        DeprecationWarning, stacklevel=2)
+
+    if material is None:
+        _setDefaultMaterial()
+        GL.glEnable(GL.GL_COLOR_MATERIAL)
+        return
+
+    GL.glDisable(GL.GL_COLOR_MATERIAL)  # disable color tracking
+
+    if isinstance(material, Material):  # descriptor from `createMaterial`
+        face = material.face
+        GL.glColorMaterial(face, GL.GL_AMBIENT_AND_DIFFUSE)
+
+        for mode, param in material.params.items():
+            if param is None:
+                param = GL.GLfloat(0.0) if mode == GL.GL_SHININESS \
+                    else _NULL_MATERIAL_COLOR
+            GL.glMaterialfv(face, mode, param)
+
+        if useTextures and material.textures:
+            for unit, texture in material.textures.items():
+                bindTexture(texture, unit=unit)
+                GL.glEnable(texture.target)
+            activeTexture(GL.GL_TEXTURE0)
+    else:  # material object, e.g. `BlinnPhongMaterial`
         face = material._face
         GL.glColorMaterial(face, GL.GL_AMBIENT_AND_DIFFUSE)
 
-        # convert data in light class to ctypes
-        diffuse = np.ctypeslib.as_ctypes(material._diffuseRGB)
-        specular = np.ctypeslib.as_ctypes(material._specularRGB)
-        ambient = np.ctypeslib.as_ctypes(material._ambientRGB)
-        emission = np.ctypeslib.as_ctypes(material._emissionRGB)
-
-        # pass values to OpenGL
-        GL.glMaterialfv(face, GL.GL_DIFFUSE, diffuse)
-        GL.glMaterialfv(face, GL.GL_SPECULAR, specular)
-        GL.glMaterialfv(face, GL.GL_AMBIENT, ambient)
-        GL.glMaterialfv(face, GL.GL_EMISSION, emission)
+        GL.glMaterialfv(
+            face, GL.GL_DIFFUSE, np.ctypeslib.as_ctypes(material._diffuseRGB))
+        GL.glMaterialfv(
+            face, GL.GL_SPECULAR, np.ctypeslib.as_ctypes(material._specularRGB))
+        GL.glMaterialfv(
+            face, GL.GL_AMBIENT, np.ctypeslib.as_ctypes(material._ambientRGB))
+        GL.glMaterialfv(
+            face, GL.GL_EMISSION, np.ctypeslib.as_ctypes(material._emissionRGB))
         GL.glMaterialf(face, GL.GL_SHININESS, material.shininess)
 
-        # setup textures
+        # the diffuse texture uses the first texture unit
         if useTextures and material.diffuseTexture is not None:
             material._useTextures = True
+            bindTexture(material.diffuseTexture, unit=GL.GL_TEXTURE0)
             GL.glEnable(GL.GL_TEXTURE_2D)
-            if material.diffuseTexture is not None:
-                bindTexture(material.diffuseTexture, 0)
         else:
             material._useTextures = False
-            GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+            bindTexture(None, GL.GL_TEXTURE_2D, unit=GL.GL_TEXTURE0)
             GL.glDisable(GL.GL_TEXTURE_2D)
-    else:
-        for mode, param in defaultMaterial.params.items():
-            GL.glEnable(GL.GL_COLOR_MATERIAL)
-            GL.glMaterialfv(GL.GL_FRONT_AND_BACK, mode, param)
 
 
 def clearMaterial(material):
-    """Stop using a material."""
-    for mode, param in defaultMaterial.params.items():
-        GL.glMaterialfv(GL.GL_FRONT_AND_BACK, mode, param)
+    """Stop using a material.
 
-    if material._useTextures:
-        if material.diffuseTexture is not None:
-            unbindTexture(material.diffuseTexture)
+    Material properties are set to OpenGL defaults, textures bound by
+    :func:`useMaterial` are unbound and texturing is disabled for their units,
+    and color tracking (`GL_COLOR_MATERIAL`) is disabled.
 
+    .. deprecated:: 2027.1.0
+        Use :class:`~psychopy.visual.stim3d.BlinnPhongMaterial` and its
+        `begin()` and `end()` methods instead.
+
+    Parameters
+    ----------
+    material : :obj:`Material`, material object or None
+        Material previously passed to :func:`useMaterial`.
+
+    """
+    warnings.warn(
+        '`psychopy.tools.gltools.clearMaterial` is deprecated, use '
+        '`psychopy.visual.stim3d.BlinnPhongMaterial.end()` instead.',
+        DeprecationWarning, stacklevel=2)
+
+    _setDefaultMaterial()
+
+    if isinstance(material, Material):
+        if material.textures:
+            for unit, texture in material.textures.items():
+                bindTexture(None, texture.target, unit=unit)
+                GL.glDisable(texture.target)
+            activeTexture(GL.GL_TEXTURE0)
+    elif material is not None and material._useTextures:
+        material._useTextures = False
+        bindTexture(None, GL.GL_TEXTURE_2D, unit=GL.GL_TEXTURE0)
         GL.glDisable(GL.GL_TEXTURE_2D)
 
     GL.glDisable(GL.GL_COLOR_MATERIAL)  # disable color tracking
