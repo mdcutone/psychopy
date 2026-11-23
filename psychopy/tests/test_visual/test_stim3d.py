@@ -363,6 +363,72 @@ class TestStim3D:
         r, g, b = self._centerPixel(frame)
         assert r > g and r > b
 
+    def test_obj_draw_no_usemtl(self, tmp_path):
+        # a plain geometry file, no materials and irregular whitespace
+        vertices, texCoords, normals, faces = gt.createBox(1.0)
+        lines = ['v  {}\t{}  {}'.format(*v) for v in vertices]
+        lines += ['vt {}  {}'.format(*t) for t in texCoords]
+        lines += ['vn\t{} {} {}'.format(*n) for n in normals]
+        lines += ['f ' + '  '.join('{0}/{0}/{0}'.format(i + 1) for i in tri)
+                  for tri in faces]
+        objFile = tmp_path / 'plain.obj'
+        objFile.write_text('\n'.join(lines) + '\n')
+
+        stim = ObjMeshStim(
+            self.win, str(objFile), pos=(0, 0, -3), loadMtllib=False,
+            color=(1, -1, -1))
+        assert list(stim._vao) == [None]
+
+        frame = self._render(stim)
+        self._assertDrawn(frame)
+        r, g, b = self._centerPixel(frame)
+        assert r > g and r > b
+
+    @staticmethod
+    def _writePlainObj(path, faceFormat, extraComponents=False):
+        """Write a unit cube without materials. `faceFormat` is the format of
+        face vertices (e.g. `'{0}/{0}/{0}'` or `'{0}'`), `extraComponents` adds
+        vertex colors and a third texture coordinate.
+        """
+        vertices, texCoords, normals, faces = gt.createBox(1.0)
+        vExtra = ' 1 0 0' if extraComponents else ''
+        vtExtra = ' 0' if extraComponents else ''
+        lines = ['v {} {} {}'.format(*v) + vExtra for v in vertices]
+        lines += ['vt {} {}'.format(*t) + vtExtra for t in texCoords]
+        lines += ['vn {} {} {}'.format(*n) for n in normals]
+        lines += ['f ' + ' '.join(faceFormat.format(i + 1) for i in tri)
+                  for tri in faces]
+        path.write_text('\n'.join(lines) + '\n')
+
+        return path
+
+    @pytest.mark.parametrize('faceFormat, extraComponents', [
+        ('{0}', False),
+        ('{0}//{0}', False),
+        ('{0}/{0}', False),
+        ('{0}/{0}/{0}', True),
+    ])
+    def test_obj_draw_face_formats(self, tmp_path, faceFormat, extraComponents):
+        # files without texture coordinates or normals, or with extra
+        # components, look the same as a fully specified one
+        def renderFaces(objFile):
+            stim = ObjMeshStim(
+                self.win, str(objFile), pos=(0, 0, -3), loadMtllib=False,
+                color=(1, -1, -1))
+            pixels = []
+            for angle in (0, -90, 180):  # +Z, +X and -Z faces
+                stim.setOriAxisAngle((0, 1, 0), angle)
+                pixels.append(self._centerPixel(self._render(stim)))
+            return np.asarray(pixels)
+
+        expected = renderFaces(
+            self._writePlainObj(tmp_path / 'ref.obj', '{0}/{0}/{0}'))
+        actual = renderFaces(
+            self._writePlainObj(
+                tmp_path / 'test.obj', faceFormat, extraComponents))
+
+        assert np.abs(actual - expected).max() <= 2, (actual, expected)
+
     @pytest.mark.parametrize('material', ['mtllib', 'single', None])
     def test_draw_unbinds_vao(self, tmp_path, material):
         # VAOs drawn one after another are only unbound after the last one,
