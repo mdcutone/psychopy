@@ -165,6 +165,16 @@ class TestStim3D:
         with pytest.raises(ValueError):
             mat.face = 'side'
 
+    @pytest.mark.parametrize('value, expected', [
+        (50, 50.0), (500, 128.0), (-1, 0.0)])
+    def test_material_shininess_clamped(self, value, expected):
+        # OpenGL only accepts shininess between 0 and 128
+        assert BlinnPhongMaterial(
+            self.win, shininess=value).shininess == expected
+        mat = BlinnPhongMaterial(self.win)
+        mat.shininess = value
+        assert mat.shininess == expected
+
     def test_material_end_restores_defaults(self):
         mat = BlinnPhongMaterial(
             self.win, specularColor=(1, 1, 1), emissionColor=(1, 1, 1),
@@ -325,6 +335,33 @@ class TestStim3D:
         assert stim.material['red'].diffuseRGB == pytest.approx([1, 0, 0])
         assert stim.material['blue'].diffuseRGB == pytest.approx([0, 0, 1])
         assert stim.material['blue'].shininess == 20.0
+
+    def test_obj_mtl_properties(self, tmp_path):
+        objFile = _writeObjFile(tmp_path)
+        (tmp_path / 'cube.mtl').write_text(
+            'newmtl red\n'
+            'Ns 500\n'  # exported by Blender, beyond what OpenGL supports
+            'Kd 1 0 0\n'
+            'Ke 0.5\n'
+            'd 0.5\n'
+            'map_Kd missing.png\n'
+            'newmtl blue\n'
+            'Kd 0 0 1\n'
+            'Tr 0.25\n')
+
+        stim = ObjMeshStim(self.win, str(objFile), pos=(0, 0, -3))
+        red, blue = stim.material['red'], stim.material['blue']
+        assert red.shininess == 128.0
+        assert red.emissionRGB == pytest.approx([0.5, 0.5, 0.5])
+        assert red.opacity == pytest.approx(0.5)
+        assert red.diffuseTexture is None  # missing texture is skipped
+        assert blue.opacity == pytest.approx(0.75)
+
+        # drawing doesn't leave any GL errors
+        while GL.glGetError() != GL.GL_NO_ERROR:
+            pass
+        self._render(stim)
+        assert GL.glGetError() == GL.GL_NO_ERROR
 
     def test_obj_draw_materials(self, tmp_path):
         stim = ObjMeshStim(
