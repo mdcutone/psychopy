@@ -484,6 +484,45 @@ def test_updateVBO(vbo4x3, monkeypatch, noSync):
     assert GL.glGetError() == GL.GL_NO_ERROR
 
 
+@pytest.mark.parametrize('cls', [gt.VertexArrayInfo, gt.VertexBufferInfo])
+def test_descriptor_equality(cls):
+    # descriptors are equal if they refer to the same object, names may be
+    # `GLuint` or `int`
+    a = cls(name=GL.GLuint(3))
+    b = cls(name=3)
+    c = cls(name=GL.GLuint(4))
+    assert a == b and not a != b
+    assert a != c and not a == c
+    assert hash(a) == hash(b)
+    assert len({a, b, c}) == 2
+
+    # comparing with other types doesn't raise
+    for other in (None, 3, 'vbo'):
+        assert a != other
+        assert not a == other
+
+
+def test_VertexArrayInfo_hash_ignores_legacy():
+    # equal descriptors must have equal hashes
+    a = gt.VertexArrayInfo(name=1, isLegacy=False)
+    b = gt.VertexArrayInfo(name=1, isLegacy=True)
+    assert a == b and hash(a) == hash(b)
+
+
+def test_VertexBufferInfo_hasBuffer(win):
+    vertices = gt.createVBO(np.zeros((2, 3), dtype=np.float32))
+    indices = _createIndexBuffer()
+    assert vertices.hasBuffer and indices.hasBuffer
+    assert not vertices.isIndex and indices.isIndex
+    assert hash(vertices) != hash(indices)
+
+    gt.deleteVBO(vertices)
+    gt.deleteVBO(indices)
+    assert not vertices.hasBuffer and not indices.hasBuffer
+    assert not vertices.isIndex and not indices.isIndex
+    assert not gt.VertexBufferInfo().hasBuffer
+
+
 def test_VertexBufferInfo_validate(vbo4x3):
     vbo, _ = vbo4x3
     indices = gt.createVBO(

@@ -3238,6 +3238,14 @@ def deleteTexture(texture):
 # Vertex Array Objects (VAO)
 #
 
+def _glName(name):
+    """Get the name (handle) of an OpenGL object as an `int`. Names may be
+    stored as `GLuint`, which can't be hashed and only compare equal to the
+    same `GLuint` object, or as an `int`.
+    """
+    return int(getattr(name, 'value', name))
+
+
 class VertexArrayInfo:
     """Vertex array object (VAO) descriptor.
 
@@ -3299,15 +3307,13 @@ class VertexArrayInfo:
             raise TypeError('Invalid type for `userData`.')
 
     def __hash__(self):
-        return hash((self.name, self.isLegacy))
+        return hash(_glName(self.name))
 
     def __eq__(self, other):
         """Equality test between VAO object names."""
-        return self.name == other.name
-
-    def __ne__(self, other):
-        """Inequality test between VAO object names."""
-        return self.name != other.name
+        if not isinstance(other, VertexArrayInfo):
+            return NotImplemented
+        return _glName(self.name) == _glName(other.name)
 
 
 def createVAO(attribBuffers, indexBuffer=None, attribDivisors=None, legacy=False):
@@ -3835,36 +3841,24 @@ class VertexBufferInfo:
             raise TypeError('Invalid type for `userData`.')
 
     def __hash__(self):
-        return hash((self.name,
-                     self.target,
-                     self.dataType,
-                     self.usage,
-                     self.size,
-                     self.shape))
+        return hash(_glName(self.name))
 
     def __eq__(self, other):
         """Equality test between VBO object names."""
-        return self.name == other.name
-
-    def __ne__(self, other):
-        """Inequality test between VBO object names."""
-        return self.name != other.name
+        if not isinstance(other, VertexBufferInfo):
+            return NotImplemented
+        return _glName(self.name) == _glName(other.name)
 
     @property
     def hasBuffer(self):
         """Check if the VBO assigned to `name` is a buffer."""
-        if self.name != 0 and GL.glIsBuffer(self.name):
-            return True
-
-        return False
+        name = _glName(self.name)
+        return name != 0 and bool(GL.glIsBuffer(name))
 
     @property
     def isIndex(self):
         """`True` if the buffer referred to by this object is an index array."""
-        if self.name != 0 and GL.glIsBuffer(self.name):
-            return self.target == GL.GL_ELEMENT_ARRAY_BUFFER
-
-        return False
+        return self.hasBuffer and self.target == GL.GL_ELEMENT_ARRAY_BUFFER
 
     def validate(self):
         """Check if the data contained in this descriptor matches what is
@@ -3878,7 +3872,7 @@ class VertexBufferInfo:
 
         """
         # fail automatically if these conditions are true
-        if self.name == 0 or GL.glIsBuffer(self.name) != GL.GL_TRUE:
+        if not self.hasBuffer:
             return False
 
         # query for the buffer currently bound to the target, not the VAO
