@@ -1340,6 +1340,50 @@ class BaseRigidBodyStim(ColorMixin, WindowMixin):
                              GL.GL_NORMAL_ARRAY: normalsVBO},
                             indexBuffer=indexBuffer, legacy=True)
 
+    def free(self):
+        """Free the video memory used by this stimulus.
+
+        Vertex data for 3D stimuli is stored in video memory, which is only
+        released when this method is called or the window is closed. Call this
+        when a stimulus is no longer needed if you create many of them while
+        the window is open (e.g. a new stimulus every trial), otherwise video
+        memory may eventually run out.
+
+        The window this stimulus was created with must still be open. After
+        calling this, `draw()` does nothing. Calling this more than once has
+        no effect. Textures of materials assigned to `material` are not freed,
+        unless they were loaded by the stimulus itself.
+
+        Examples
+        --------
+        Free a stimulus at the end of a trial::
+
+            stim = ObjMeshStim(win, 'model.obj')
+            ...  # draw the stimulus
+            stim.free()
+
+        """
+        if self._vao is None:
+            return
+
+        self._selectWindow(self.win)
+
+        vaos = (self._vao.values() if isinstance(self._vao, dict)
+                else [self._vao])
+
+        # buffers may be shared between VAOs, only delete them once
+        buffers = {}
+        for vao in vaos:
+            for buffer in list(vao.activeAttribs.values()) + [vao.indexBuffer]:
+                if buffer is not None:
+                    buffers[id(buffer)] = buffer
+            gt.deleteVAO(vao)
+
+        for buffer in buffers.values():
+            gt.deleteVBO(buffer)
+
+        self._vao = None
+
     def draw(self, win=None):
         """Draw the stimulus.
 
@@ -1983,6 +2027,9 @@ class ObjMeshStim(BaseRigidBodyStim):
             name=name,
             autoLog=autoLog)
 
+        # textures loaded from the MTL file, freed by `free()`
+        self._textures = []
+
         # load the OBJ file
         objModel = gt.loadObjFile(objFile)
 
@@ -2061,9 +2108,44 @@ class ObjMeshStim(BaseRigidBodyStim):
                 if key in props:
                     kwargs[key] = props[key]
 
+            # textures may be shared between materials
+            texture = props.get('diffuseTexture')
+            if texture is not None and not any(
+                    texture is t for t in self._textures):
+                self._textures.append(texture)
+
             materials[name] = BlinnPhongMaterial(self.win, **kwargs)
 
         return materials
+
+    def free(self):
+        """Free the video memory used by this stimulus, including any textures
+        loaded from the MTL file.
+
+        See :meth:`BaseRigidBodyStim.free` for details. Materials loaded from
+        the MTL file can still be accessed through `material` afterwards, but
+        their `diffuseTexture` is set to `None`.
+
+        """
+        super(ObjMeshStim, self).free()
+
+        if not self._textures:
+            return
+
+        self._selectWindow(self.win)
+
+        # remove references to the textures from loaded materials
+        materials = (self.material.values()
+                     if isinstance(self.material, dict) else [self.material])
+        for material in materials:
+            if material is not None and any(
+                    material.diffuseTexture is t for t in self._textures):
+                material.diffuseTexture = None
+
+        for texture in self._textures:
+            gt.deleteTexture(texture)
+
+        self._textures = []
 
     def draw(self, win=None):
         """Draw the mesh.
@@ -2079,6 +2161,10 @@ class ObjMeshStim(BaseRigidBodyStim):
             win = self.win
         else:
             self._selectWindow(win)
+
+        # nop if there is nothing to draw (e.g. after calling `free()`)
+        if self._vao is None:
+            return
 
         wasDraw3d = win.draw3d
         if not wasDraw3d:
