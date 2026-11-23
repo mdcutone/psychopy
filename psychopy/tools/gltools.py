@@ -5437,12 +5437,29 @@ def _objFloats(values, n):
     return floats
 
 
-def _objFaceVertex(token):
+def _objFaceVertex(token, counts):
     """Parse a face vertex token (`v`, `v/vt`, `v//vn` or `v/vt/vn`) into
     zero-based `(position, texCoord, normal)` indices. Missing indices are
-    `None`.
+    `None`. Negative indices are relative to the end of the attributes defined
+    so far, `counts` is the number of positions, texture coordinates and
+    normals defined before this face.
     """
-    indices = [int(i) - 1 if i else None for i in token.split('/')[:3]]
+    indices = []
+    for index, count in zip(token.split('/'), counts):
+        if not index:
+            indices.append(None)
+            continue
+
+        index = int(index)
+        if index > 0:
+            indices.append(index - 1)
+        elif index < 0 and count + index >= 0:
+            indices.append(count + index)
+        else:  # zero or before the first attribute
+            raise ValueError(
+                "Invalid index {} in OBJ face vertex '{}'.".format(
+                    index, token))
+
     indices += [None] * (3 - len(indices))
     if indices[0] is None:
         raise ValueError(
@@ -5484,10 +5501,17 @@ def loadObjFile(objFile):
     (e.g. vertex colors following positions, or a third texture coordinate) are
     ignored.
 
-    Faces can be either triangles or quads, but not both. Faces are grouped by
-    their materials. Index arrays are generated for each material present in the
-    file. Faces which are not assigned a material with a `usemtl` statement are
-    grouped under the key `None`.
+    Faces can have any number of vertices. Faces with more than three vertices
+    are split into triangles as a fan around their first vertex, so polygons
+    must be convex (as exported by most modelling software). Faces with fewer
+    than three vertices are ignored. Face indices may be negative, in which
+    case they refer to attributes counting back from the last one defined
+    before the face.
+
+    Faces are grouped by their materials. Triangle index arrays with shape
+    `(N, 3)` are generated for each material present in the file. Faces which
+    are not assigned a material with a `usemtl` statement are grouped under the
+    key `None`.
 
     Data from the returned `ObjMeshInfo` object can be used to create vertex
     buffer objects and arrays for rendering. See `Examples` below for details on
@@ -5512,7 +5536,8 @@ def loadObjFile(objFile):
     1. This importer should work fine for most sanely generated files. Export
        your model with Blender for best results, even if you used some other
        package to create it.
-    2. The mesh cannot contain both triangles and quads.
+    2. Concave polygons are not triangulated correctly, triangulate the mesh
+       when exporting if it contains them.
 
     Examples
     --------
@@ -5629,8 +5654,9 @@ def loadObjFile(objFile):
         elif statement == 'vn':
             normalDefs.append(_objFloats(values, 3))
         elif statement == 'f':
+            counts = (len(positionDefs), len(texCoordDefs), len(normalDefs))
             faceDefs.append(
-                (materialGroup, [_objFaceVertex(v) for v in values]))
+                (materialGroup, [_objFaceVertex(v, counts) for v in values]))
         elif statement == 'usemtl':
             # names are everything after the statement
             materialGroup = line.strip()[len(statement):].strip()
@@ -5650,28 +5676,45 @@ def loadObjFile(objFile):
     vertexNormal = []
     materialGroups = {}
     for faceIdx, (group, faceVertices) in enumerate(faceDefs):
-        # vertices without a normal are given the normal of the face (flat
-        # shading), these vertices can't be shared with other faces
-        faceNormal = None
-        if any(n is None for _, _, n in faceVertices):
-            faceNormal = _polygonNormal(
-                [positionDefs[p] for p, _, _ in faceVertices])
+        if len(faceVertices) < 3:  # not a polygon
+            continue
 
-        faceIndices = []
-        for p, t, n in faceVertices:
-            key = (p, t, n) if n is not None else (p, t, None, faceIdx)
-            idx = vertexIndices.get(key)
-            if idx is None:
-                idx = vertexIndices[key] = len(vertexPos)
-                vertexPos.append(positionDefs[p])
-                vertexTexCoord.append(
-                    texCoordDefs[t] if t is not None else (0., 0.))
-                vertexNormal.append(
-                    normalDefs[n] if n is not None else faceNormal)
-            faceIndices.append(idx)
+        try:
+            # vertices without a normal are given the normal of the face (flat
+            # shading), these vertices can't be shared with other faces
+            faceNormal = None
+            if any(n is None for _, _, n in faceVertices):
+                faceNormal = _polygonNormal(
+                    [positionDefs[p] for p, _, _ in faceVertices])
 
+            faceIndices = []
+            for p, t, n in faceVertices:
+                key = (p, t, n) if n is not None else (p, t, None, faceIdx)
+                idx = vertexIndices.get(key)
+                if idx is None:
+                    idx = len(vertexPos)
+                    vertexPos.append(positionDefs[p])
+                    vertexTexCoord.append(
+                        texCoordDefs[t] if t is not None else (0., 0.))
+                    vertexNormal.append(
+                        normalDefs[n] if n is not None else faceNormal)
+                    vertexIndices[key] = idx
+                faceIndices.append(idx)
+        except IndexError:
+            raise ValueError(
+                "Face {} in OBJ file references an attribute which isn't "
+                "defined.".format(faceIdx + 1))
+
+        # split polygons into triangles as a fan around the first vertex,
         # groups are only created once they have faces
-        materialGroups.setdefault(group, []).append(faceIndices)
+        triangles = materialGroups.setdefault(group, [])
+        for i in range(1, len(faceIndices) - 1):
+            triangles.append(
+                (faceIndices[0], faceIndices[i], faceIndices[i + 1]))
+
+    if not materialGroups:
+        raise RuntimeError(
+            "Failed to load OBJ file, file contains no polygons.")
 
     # convert indices for materials to numpy arrays
     for key, val in materialGroups.items():
