@@ -32,7 +32,11 @@ class BaseSoundSensorGroup(base.BaseResponseDevice):
     
     def findThreshold(self, speaker, channel=None, samplingWindow=0.5):
         """
-        Find the best threshold for this device with a given speaker.
+        Find the best threshold for this device with a given speaker, and set it.
+
+        The threshold is searched for twice: once in silence, to find the level of background
+        noise, and once while a test sound plays on the speaker, to find the level of that sound.
+        The threshold chosen is halfway between the two.
 
         Parameters
         ----------
@@ -41,7 +45,14 @@ class BaseSoundSensorGroup(base.BaseResponseDevice):
         channel : int or list[int]
             Channel to look for responses in, or a list of channels
         samplingWindow : float
-            How long (s) to wait for a response after playing the test noise
+            How long (s) to listen for a response at each threshold tried
+
+        Returns
+        -------
+        float, None or list
+            The threshold chosen (from 0 to 1), or None if the test sound couldn't be heard over
+            background noise (in which case the threshold is left as it was). If given several
+            channels, a list with one of these per channel.
         """
         # if not given any channels, use all
         if channel is None:
@@ -52,79 +63,89 @@ class BaseSoundSensorGroup(base.BaseResponseDevice):
             # iterate through channels
             for thisChannel in channel:
                 thresholds.append(
-                    self.findThreshold(speaker, channel=thisChannel)
+                    self.findThreshold(
+                        speaker, channel=thisChannel, samplingWindow=samplingWindow
+                    )
                 )
-            
+
             return thresholds
-        
+
         # sound to play
         snd = sound.Sound("voicekeyThresholdStim.wav", speaker=speaker, secs=5, loops=-1)
         # keyboard to check for escape/continue
         kb = keyboard.Keyboard(deviceName="defaultKeyboard")
-        
-        def _bisectThreshold(threshRange, recursionLimit=16):
+        # threshold to go back to if no good threshold is found
+        originalThreshold = self.getThreshold(channel)
+
+        def _bisectThreshold():
             """
-            Recursively narrow thresholds to approach an acceptable threshold
+            Narrow down the threshold at which the current sound level stops being detected.
             """
-            # work out current
-            current = sum(threshRange) / 2
-            # set threshold
-            self._setThreshold(current, channel=channel)
-            # reset current state and clear responses
-            self.state[channel] = None
-            self.responses = []
-            # start a countdown for beep duration
-            countdown = core.CountdownTimer(samplingWindow)
-            # wait for a response
-            gotResp = False
-            while countdown.getTime() > 0:
-                gotResp = gotResp or self.getState(channel=channel)
-            # get state
-            value = self.getState(channel=channel)
-            # log
-            logging.debug(
-                f"Trying threshold range: {threshRange}, detected sound: {value}"
-            )
-            # set either upper or lower bound according to whether we got sound
-            if value:
-                threshRange[1] = current
-            else:
-                threshRange[0] = current
-            # check for escape before entering recursion
-            if kb.getKeys(['escape']):
-                return current
-            # check for recursion limit before reentering recursion
-            if recursionLimit <= 0:
-                return current
-            # return if threshold is small enough
-            if abs(threshRange[1] - threshRange[0]) < 4:
-                return current
-            # recur with new range
-            return _bisectThreshold(threshRange, recursionLimit=recursionLimit-1)
-        
+            # a higher threshold needs a louder sound to trigger it, so the sound level is
+            # somewhere between the highest threshold detected and the lowest not detected
+            low, high = 0, 1
+            while high - low >= 0.01:
+                current = (low + high) / 2
+                # forget the current state, so that it's reported afresh at the new threshold
+                self.state[channel] = None
+                self.clearResponses()
+                self.setThreshold(current, channel=channel)
+                # listen for sound at any point in the sampling window
+                countdown = core.CountdownTimer(samplingWindow)
+                detected = False
+                while countdown.getTime() > 0:
+                    detected = detected or bool(self.getState(channel=channel))
+                logging.debug(
+                    f"Trying threshold range: {[low, high]}, threshold {current} detected "
+                    f"sound: {detected}"
+                )
+                # narrow the range
+                if detected:
+                    low = current
+                else:
+                    high = current
+                # stop early if escape is pressed
+                if kb.getKeys(['escape']):
+                    break
+
+            return (low + high) / 2
+
         # reset state
         self.dispatchMessages()
         self.clearResponses()
-        # make sure sound isn't playing
-        snd.stop()
-        # get threshold with no sound
-        offThreshold = _bisectThreshold([0, 1], recursionLimit=16)
-        # play sound
-        snd.play()
-        # get threshold with sound
-        onThreshold = _bisectThreshold([0, 1], recursionLimit=16)
-        # stop sound once done
-        snd.stop()
-        # pick a threshold between white and black (i.e. one that's safe)
-        threshold = (offThreshold + onThreshold) / 2
+        try:
+            # get level of background noise, with no sound playing
+            snd.stop()
+            offThreshold = _bisectThreshold()
+            # get level of the test sound
+            snd.play()
+            onThreshold = _bisectThreshold()
+        finally:
+            # stop sound once done
+            snd.stop()
+        logging.debug(
+            f"Channel {channel} detected background noise below threshold {offThreshold} and "
+            f"the test sound below threshold {onThreshold}"
+        )
+        # if the test sound is no louder than background noise, no threshold can tell them apart
+        if onThreshold <= offThreshold:
+            logging.warning(
+                f"Could not find a threshold for sound sensor channel {channel} which detects "
+                f"the test sound but not background noise; leaving threshold as "
+                f"{originalThreshold}."
+            )
+            threshold = None
+            self.setThreshold(originalThreshold, channel=channel)
+        else:
+            # pick a threshold between background noise and the test sound
+            threshold = (offThreshold + onThreshold) / 2
+            self.setThreshold(threshold, channel=channel)
         # clear all the events created by this process
-        self.state = [None] * self.channels
+        self.state[channel] = False
         self.dispatchMessages()
         self.clearResponses()
-        # set to found threshold
-        self._setThreshold(int(threshold), channel=channel)
 
-        return int(threshold)
+        return threshold
 
     def getThreshold(self, channel):
         return self.threshold[channel]
@@ -156,9 +177,9 @@ class BaseSoundSensorGroup(base.BaseResponseDevice):
 
         Parameters
         ----------
-        threshold : int
-            Threshold at which to register a SoundSensor response, with 0 being the lowest possible 
-            volume and 255 being the highest.
+        threshold : float
+            Threshold at which to register a SoundSensor response, from 0 to 1. A higher threshold
+            needs a louder sound to trigger it.
         channel : int
             Channel to set the threshold for (if applicable to device)
 
@@ -468,10 +489,10 @@ class SoundSensor:
         return self.device.findSpeakers(channel, allowedSpeakers=allowedSpeakers, beepDur=beepDur)
     
     def findThreshold(self, speaker, channel=None, samplingWindow=0.5):
-        self.device.findThreshold(speaker, channel=channel, samplingWindow=samplingWindow)
-    
+        return self.device.findThreshold(speaker, channel=channel, samplingWindow=samplingWindow)
+
     def getThreshold(self, channel):
-        self.device.getThreshold(channel=channel)
-    
+        return self.device.getThreshold(channel=channel)
+
     def setThreshold(self, threshold, channel=None):
-        self.device.setThreshold(threshold=threshold, channel=channel)
+        return self.device.setThreshold(threshold=threshold, channel=channel)
