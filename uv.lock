@@ -2100,7 +2100,6 @@ dependencies = [
     { name = "python-bidi" },
     { name = "python-vlc" },
     { name = "python-xlib", marker = "sys_platform == 'linux'" },
-    { name = "pywinhook", marker = "sys_platform == 'win32'" },
     { name = "pyyaml" },
     { name = "pyzmq" },
     { name = "questplus" },
@@ -2200,7 +2199,7 @@ requires-dist = [
     { name = "pygame", marker = "extra == 'legacy'" },
     { name = "pyglet", specifier = ">=2,<3" },
     { name = "pylsl", marker = "extra == 'suggested'", specifier = ">=1.16.1" },
-    { name = "pynput", marker = "sys_platform != 'linux'" },
+    { name = "pynput", marker = "sys_platform != 'linux'", specifier = ">=1.7.8" },
     { name = "pyo", marker = "extra == 'legacy'", specifier = ">=1.0.3" },
     { name = "pyobjc", marker = "sys_platform == 'darwin'", specifier = ">8.0" },
     { name = "pyobjc-core", marker = "sys_platform == 'darwin'", specifier = ">8.0" },
@@ -2217,7 +2216,6 @@ requires-dist = [
     { name = "python-bidi" },
     { name = "python-vlc", specifier = ">=3.0.21203" },
     { name = "python-xlib", marker = "sys_platform == 'linux'" },
-    { name = "pywinhook", marker = "sys_platform == 'win32'" },
     { name = "pyxid2", marker = "extra == 'suggested'", specifier = ">=1.0.5" },
     { name = "pyyaml" },
     { name = "pyzmq", specifier = ">=22.2.1" },
@@ -5650,18 +5648,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/fc/2b/1f3cded5822fd49c02f40544cbb5f58c7cfd6b1694869fd476cb6170ee97/pywin32-312-cp314-cp314-win32.whl", hash = "sha256:a77a90fbb6881238d2ca9c6fd797b25817f3768fe78d214a90137ff055a75f5b", size = 6468928, upload-time = "2026-06-04T07:49:43.188Z" },
     { url = "https://files.pythonhosted.org/packages/21/82/3bf86d2e2808902013132e1ce905a7da0da53790f3836c64bf44d55e24f3/pywin32-312-cp314-cp314-win_amd64.whl", hash = "sha256:a4dd3a848290ef724347b19f301045831d8e802fa4464f491b98b1e0a081432e", size = 7024157, upload-time = "2026-06-04T07:49:45.34Z" },
     { url = "https://files.pythonhosted.org/packages/a4/0e/73f6d6800b4f27655abd9e9f6aaeaefcddb2b946e4674efa2bab184a7f7b/pywin32-312-cp314-cp314-win_arm64.whl", hash = "sha256:9fce94568364e0155e6dfb781ac5d95903be8baf28670632beab1b523f300daa", size = 6839598, upload-time = "2026-06-04T07:49:47.613Z" },
-]
-
-[[package]]
-name = "pywinhook"
-version = "1.6.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pywin32", marker = "sys_platform != 'darwin'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/d1/6dcf4a17f425a5e3e2c011bac622dacae3128e96fd038b3e6f56c0e7a032/pyWinhook-1.6.2.zip", hash = "sha256:18fe2f63245d8a2f9d83f8d9c385e3695a6363badd50d492eb3e7f6f06a01c0c", size = 15791, upload-time = "2020-01-17T22:00:09.328Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/65/0f/03ebec3eb79a06b130b6ec165ba263e72c2e15aa406c2ed49fe4d07a37e5/pyWinhook-1.6.2-cp311-cp311-win_amd64.whl", hash = "sha256:c478bf3142ab63cc0fac83250228269113f25b06f2a9142e5772fbb9429d67b8", size = 29950, upload-time = "2023-04-16T17:54:12.673Z" },
 ]
 
 [[package]]

@@ -46,7 +46,6 @@ dependencies = [
     "imageio",
     "imageio-ffmpeg",
     # for iohub
-    "pywinhook; platform_system == \"Windows\"",
     "zope.event==5.0",  # py2app+gevent complains about zope.event 5.1
     "zope.interface==7.2",  # needed for gevent on macos
     "gevent",
@@ -73,7 +72,8 @@ dependencies = [
     # hardware
     "pyserial",
     "pyparallel; platform_system != \"Darwin\"",
-    "pynput; platform_system != \"Linux\"",
+    # also ioHub's Windows keyboard / mouse hooks; 1.7.8 is needed on Python 3.12+
+    "pynput>=1.7.8; platform_system != \"Linux\"",
     # movie backends
     "av",  # PyAV, also used to extract movie audio tracks
     "ffpyplayer; python_version < \"3.14\"",
