@@ -21,10 +21,12 @@ def _removeRawKeyboardRegistration():
     """Undo pyglet's raw keyboard input registration for this process.
 
     pyglet registers the process for raw keyboard input when it creates a
-    window on Windows. In the ioHub server process this stops the pyWinhook
-    low-level keyboard hook (which feeds ioHub's Keyboard device) from being
-    called, so key presses on the calibration screens are lost or arrive very
-    late. The calibration window reads keys through ioHub, not pyglet, so the
+    window on Windows. While a window of a process registered that way is in
+    the foreground, Windows does not call the low-level keyboard hooks that
+    process has installed, even ones running on another thread. In the ioHub
+    server process that is the hook feeding ioHub's Keyboard device (see
+    devices/win32hooks.py), so key presses on the calibration screens are
+    lost. The calibration window reads keys through ioHub, not pyglet, so the
     registration is not needed here.
     """
     if not Computer.platform.startswith('win32'):

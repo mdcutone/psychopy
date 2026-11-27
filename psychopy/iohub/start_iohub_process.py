@@ -99,6 +99,12 @@ def run(rootScriptPathDir, configFilePath):
 
         sys.excepthook = exception_hook
 
+        if Computer.platform == 'win32':
+            # The keyboard and mouse hooks run on their own threads and must
+            # take the GIL before they can timestamp an event. Shorten the
+            # wait while this thread is busy from the default 5 ms.
+            sys.setswitchinterval(0.0005)
+
         # flushing logging and stderr at exit ensures that any messages
         # buffered aren't lost if the process exits abnormally
         atexit.register(logging.flush)

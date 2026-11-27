@@ -353,7 +353,8 @@ class PygletBackend(BaseBackend):
             pass
 
         if sys.platform == 'win32':
-            # pyHook window hwnd maps to:
+            # the hwnd ioHub registers the window by, and that mouse events
+            # under the window report (WindowFromPoint), maps to:
             # pyglet 1.14 -> window._hwnd
             # pyglet 1.2a -> window._view_hwnd
             if pyglet.version > "1.2":

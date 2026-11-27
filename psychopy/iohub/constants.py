@@ -348,7 +348,7 @@ MouseConstants.initialize()
 
 if sys.platform == 'win32':
     class AsciiConstants(Constants):
-        # Mainly from the pyHook lookup Table, some from Pyglet
+        # Originally from the pyHook lookup table, some from Pyglet
         BACKSPACE = 0x08
         TAB = 0x09
         LINEFEED = 0x0A
@@ -466,7 +466,7 @@ if sys.platform == 'win32':
     AsciiConstants.initialize()
 
     class VirtualKeyCodes(Constants):
-        # Mainly from the pyHook lookup Table, some from Pyglet
+        # Originally from the pyHook lookup table, some from Pyglet
         VK_CANCEL = 0x03
         VK_BACKSPACE = 0x08
         VK_TAB = 0x09
@@ -940,19 +940,28 @@ class KeyboardConstants(Constants):
     def getName(cls, cid):
         return cls._names.get(cid, None)
 
+    # Windows: names for virtual key codes missing from _virtualKeyCodes, as
+    # the pyWinhook library named them. Used when ToUnicode gives no usable
+    # character, e.g. for ctrl + letter.
+    _win32FallbackKeyNames = {
+        0xBA: 'oem_1', 0xBB: 'oem_plus', 0xBC: 'oem_comma',
+        0xBD: 'oem_minus', 0xBE: 'oem_period', 0xBF: 'oem_2', 0xC0: 'oem_3',
+        0xDB: 'oem_4', 0xDC: 'oem_5', 0xDD: 'oem_6', 0xDE: 'oem_7',
+        0xDF: 'oem_8', 0xE2: 'oem_102'}
+
     @classmethod
     def _getKeyName(cls, keyEvent):
-        vcode_name = KeyboardConstants._virtualKeyCodes.getName(
-            keyEvent.KeyID)
+        """Windows only: name of the key from its virtual key code."""
+        vk = keyEvent.KeyID
+        vcode_name = KeyboardConstants._virtualKeyCodes.getName(vk)
         if vcode_name:
             if vcode_name.startswith('VK_NUMPAD'):
                 return 'num_%s' % (vcode_name[9:].lower())
             return vcode_name[3:].lower()
-        else:
-            phkey = keyEvent.Key.lower()
-            if phkey.startswith('numpad'):
-                phkey = 'num_%s' % (phkey.Key[6:])
-            return phkey
+        if 0x30 <= vk <= 0x39 or 0x41 <= vk <= 0x5A:
+            # digit and letter virtual key codes are their ASCII codes
+            return chr(vk).lower()
+        return cls._win32FallbackKeyNames.get(vk, 'vk_%#04x' % vk)
 
     @classmethod
     def _getKeyNameAndModsForEvent(cls, keyEvent):

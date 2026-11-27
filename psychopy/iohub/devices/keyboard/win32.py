@@ -3,10 +3,6 @@
 # Copyright (C) 2012-2020 iSolver Software Solutions (C) 2021 Open Science Tools Ltd.
 # Distributed under the terms of the GNU General Public License (GPL).
 
-try:
-    import pyHook
-except ImportError:
-    import pyWinhook as pyHook
 import win32api
 import ctypes
 from unicodedata import category as ucategory
@@ -27,36 +23,22 @@ except Exception:
     import json
     jdumps = json.dumps
 
+_numpad_vks = [win32_vk.VK_NUMPAD0 + i for i in range(10)]
+
 # Map key value when numlock is ON
 # to value when numlock is OFF.
-numpad_key_value_mappings = dict(Numpad0='insert',
-                                 Numpad1='end',
-                                 Numpad2='down',
-                                 Numpad3='pagedown',
-                                 Numpad4='left',
-                                 Numpad5=' ',
-                                 Numpad6='right',
-                                 Numpad7='home',
-                                 Numpad8='up',
-                                 Numpad9='pageup',
-                                 Decimal='delete'
-                                 )
+numpad_key_value_mappings = dict(zip(
+    _numpad_vks,
+    ['insert', 'end', 'down', 'pagedown', 'left', ' ', 'right', 'home', 'up',
+     'pageup']))
+numpad_key_value_mappings[win32_vk.VK_NUMPADDECIMAL] = 'delete'
 
 
 def updateToPsychopyKeymap():
     global numpad_key_value_mappings
-    numpad_key_value_mappings = dict(Numpad0='num_0',
-                                     Numpad1='num_1',
-                                     Numpad2='num_2',
-                                     Numpad3='num_3',
-                                     Numpad4='num_4',
-                                     Numpad5='num_5',
-                                     Numpad6='num_6',
-                                     Numpad7='num_7',
-                                     Numpad8='num_8',
-                                     Numpad9='num_9',
-                                     Decimal='num_decimal'
-                                     )
+    numpad_key_value_mappings = {
+        vk: 'num_%d' % i for i, vk in enumerate(_numpad_vks)}
+    numpad_key_value_mappings[win32_vk.VK_NUMPADDECIMAL] = 'num_decimal'
 
 class Keyboard(ioHubKeyboardDevice):
     _win32_modifier_mapping = {
@@ -95,7 +77,7 @@ class Keyboard(ioHubKeyboardDevice):
                 win32_vk.VK_SCROLL,
                 win32_vk.VK_NUM_LOCK,
                 win32_vk.VK_CAPITAL]:
-            state = pyHook.GetKeyState(stateKeyID)
+            state = win32api.GetKeyState(stateKeyID) & 0x01
             if state:
                 self._keyboard_state[stateKeyID] = state
                 modKeyName = Keyboard._win32_modifier_mapping.get(
@@ -189,8 +171,8 @@ class Keyboard(ioHubKeyboardDevice):
 
         # Get .key value
         #
-        if event.Key in numpad_key_value_mappings:
-            key = numpad_key_value_mappings[event.Key]
+        if event.KeyID in numpad_key_value_mappings:
+            key = numpad_key_value_mappings[event.KeyID]
         elif ucat.lower() != 'cc':
             prev_shift = self._keyboard_state[win32_vk.VK_SHIFT]
             prev_numlock = self._keyboard_state[win32_vk.VK_NUM_LOCK]
@@ -226,21 +208,21 @@ class Keyboard(ioHubKeyboardDevice):
             key = psychopy_key_mappings[key]
 
             # win32 specific handling of keypad / and - keys
-            if event.Key == 'Subtract':
+            if event.KeyID == win32_vk.VK_NUMPADSUBTRACT:
                 key = 'num_subtract'
-            elif event.Key == 'Divide':
+            elif event.KeyID == win32_vk.VK_NUMPADDIVIDE:
                 key = 'num_divide'
 
         return key, char
 
     def _evt2json(self, event):
         return jdumps(dict(Type=event.Type,
+                           Message=event.Message,
                            Time=event.Time,
                            KeyID=event.KeyID,
                            ScanCode=event.ScanCode,
-                           Ascii=event.Ascii,
                            flags=event.flags,
-                           Key=event.Key,
+                           Window=event.Window,
                            scroll_state=event.scroll_state,
                            num_state=event.num_state,
                            cap_state=event.cap_state))
@@ -254,8 +236,17 @@ class Keyboard(ioHubKeyboardDevice):
         self._log_events_file.write(self._evt2json(event_data) + '\n')
 
     def _nativeEventCallback(self, event):
+        # Called on the keyboard hook thread (see win32hooks) with a
+        # KeyboardHookEvent. Only timestamp and queue the event here; it is
+        # processed on the ioHub server thread by _getIOHubEventObject.
         if self.isReportingEvents():
             notifiedTime = getTime()
+            self._last_callback_time = notifiedTime
+            self._addNativeEventToBuffer((notifiedTime, event))
+
+    def _getIOHubEventObject(self, native_event_data):
+        try:
+            notifiedTime, event = native_event_data
 
             report_system_wide_events = self.getConfiguration().get(
                 'report_system_wide_events', True)
@@ -263,39 +254,22 @@ class Keyboard(ioHubKeyboardDevice):
                 pyglet_window_hnds = self._iohub_server._psychopy_windows.keys()
                 if len(
                         pyglet_window_hnds) > 0 and event.Window not in pyglet_window_hnds:
-                    return True
+                    return None
 
-            event.Type = EventConstants.KEYBOARD_RELEASE
-            if event.Message in [pyHook.HookConstants.WM_KEYDOWN,
-                                 pyHook.HookConstants.WM_SYSKEYDOWN]:
-                event.Type = EventConstants.KEYBOARD_PRESS
-
-            self._last_callback_time = notifiedTime
+            is_press = event.isPress
+            event.Type = (EventConstants.KEYBOARD_PRESS if is_press
+                          else EventConstants.KEYBOARD_RELEASE)
 
             event.RepeatCount = 0
             key_already_pressed = self._key_states.get(event.KeyID, None)
-            if key_already_pressed and event.Type == EventConstants.KEYBOARD_PRESS:
+            if key_already_pressed and is_press:
                 event.RepeatCount = key_already_pressed[1] + 1
                 if self._report_auto_repeats is False and event.RepeatCount > 0:
-                    return True
-
-            event.Modifiers = 0
-            event.scroll_state = pyHook.GetKeyState(win32_vk.VK_SCROLL)
-            event.num_state = pyHook.GetKeyState(win32_vk.VK_NUM_LOCK)
-            event.cap_state = pyHook.GetKeyState(win32_vk.VK_CAPITAL)
+                    return None
 
             if self.getConfiguration().get('log_events_for_testing', False):
                 self._addEventToTestLog(event)
 
-            self._addNativeEventToBuffer((notifiedTime, event))
-        # pyHook require the callback to return True to inform the windows
-        # low level hook functionality to pass the event on.
-        return True
-
-    def _getIOHubEventObject(self, native_event_data):
-        try:
-            notifiedTime, event = native_event_data
-            is_press = event.Type == EventConstants.KEYBOARD_PRESS
             keyID = event.KeyID
             device_time = event.Time / 1000.0  # convert to sec
             time = notifiedTime

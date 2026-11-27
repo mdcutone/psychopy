@@ -779,24 +779,19 @@ class ioServer():
         hookManager = self._hookManager
         if dev_cls_name in ('Mouse', 'Keyboard'):
             if Computer.platform == 'win32':
-                try:
-                    import pyHook
-                except ImportError:
-                    import pyWinhook as pyHook
+                from .devices.win32hooks import HookManager
                 if hookManager is None:
-                    iohub.log('Creating pyHook HookManager....')
-                    hookManager = self._hookManager = pyHook.HookManager()
-                    hookManager.keyboard_hook = False
+                    iohub.log('Creating win32 input HookManager....')
+                    hookManager = self._hookManager = HookManager()
                 if dev_cls_name == 'Mouse':
-                    if hookManager.mouse_hook is False:
+                    if not hookManager.mouseHooked:
                         dmouse = deviceDict['Mouse']
-                        hookManager.MouseAll = dmouse._nativeEventCallback
-                        hookManager.HookMouse()
+                        hookManager.hookMouse(dmouse._nativeEventCallback)
                 elif dev_cls_name == 'Keyboard':
-                    if hookManager.keyboard_hook is False:
+                    if not hookManager.keyboardHooked:
                         dkeyboard = deviceDict['Keyboard']
-                        hookManager.KeyAll = dkeyboard._nativeEventCallback
-                        hookManager.HookKeyboard()
+                        hookManager.hookKeyboard(
+                            dkeyboard._nativeEventCallback)
 
             elif Computer.platform.startswith('linux'):
                 from .devices import pyXHook
@@ -1075,10 +1070,9 @@ class ioServer():
                     self._hookManager.cancel()
 
             elif Computer.platform == 'win32':
+                if self._hookManager:
+                    self._hookManager.stop()
                 self._hookManager = None
-                # if self._hookManager:
-                #    self._hookManager.UnhookMouse()
-                #    self._hookManager.UnhookKeyboard()
         except Exception:
             print2err('Error in ioSever.shutdown() stopping hook manager:')
             printExceptionDetailsToStdErr()

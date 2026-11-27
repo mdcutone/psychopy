@@ -175,6 +175,11 @@ class Mouse(MouseDevice):
         #print2err("_nativeSetMousePos {0}".format((int(px), int(py))))
 
     def _nativeEventCallback(self, event):
+        # Called on the mouse hook thread (see win32hooks) with a
+        # MouseHookEvent. Position, display and button state are updated here
+        # rather than in _getIOHubEventObject so that getPosition() is current
+        # as soon as the event arrives, as on Linux (pyXHook). The return value
+        # is ignored.
         if self.isReportingEvents():
             logged_time = currentSec()
             report_system_wide_events = self.getConfiguration().get('report_system_wide_events', True)
@@ -236,8 +241,6 @@ class Mouse(MouseDevice):
 
             self._last_callback_time = logged_time
 
-        # pyHook require the callback to return True to inform the windows
-        # low level hook functionality to pass the event on.
         return True
 
     def _getIOHubEventObject(self, native_event_data):
